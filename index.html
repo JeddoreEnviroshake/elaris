@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1f6f43" />
+    <title>Elaris</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0f1512;
+        color: #e8f0ea;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        /* Block page scroll / pull-to-refresh / overscroll on the game surface. */
+        overscroll-behavior: none;
+        touch-action: none;
+      }
+      #app {
+        position: fixed;
+        inset: 0;
+        /* Respect notches / rounded corners / home indicators. */
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+      #game {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
