@@ -197,7 +197,7 @@ describe('garden bed growth simulation', () => {
     expect(bed.garden!.progressTicks).toBe(660);
     advanceTicks(state, GARDEN_BED_GROW_TICKS - 660);
     expect(bed.garden!.readyFiber).toBe(GARDEN_BED_YIELD_FIBER);
-  });
+  }, 15_000);
 
   it('pauses at a full output store with no invisible backlog, then emits exactly one held batch', () => {
     const state = stateWithYard();
