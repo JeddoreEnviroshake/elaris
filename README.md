@@ -8,8 +8,8 @@ tablets, and computers. Single-player in Phase 1.
 environments → place efficiency infrastructure → tame or order working
 creatures → gather faster.
 
-> **Status: Milestone 1 vertical slice in progress.** The platform foundation
-> is complete. The first playable progression loop now supports a distinct
+> **Status: Milestone 1 vertical slice complete.** The platform foundation
+> and first playable progression loop are complete, including a distinct
 > grassland clearing and wood-rich forest, renewable trees/stone/plants,
 > gathering; inventory; Wooden/Stone tools; early
 > building; persistent Tuftle taming/assignment; and save/reload. See
@@ -196,7 +196,7 @@ scattered magic numbers.
   movement/camera, installable offline PWA shell + safe updates, IndexedDB saves
   with lease/backup/export/import/migration, and GitHub CI/CD. A broader
   real-device lifecycle pass remains part of hardening.
-- **Milestone 1 — vertical slice** *(in progress)*: persistent resources,
+- **Milestone 1 — vertical slice** *(complete)*: persistent resources,
   gathering, inventory, Wooden/Stone tools, durability, early building, exact
   area gates, and the first Tuftle tame/follow/work/rest loop are playable.
   A data-driven nine-quest onboarding chain now guides the full first-session

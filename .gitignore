@@ -77,5 +77,8 @@ node_modules/
 # dotenv environment variables file
 .env
 
+# Local assistant configuration
+.claude/settings.local.json
+
 # dataconnect generated files
 .dataconnect
