@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { gatherStarterTree } from './gather';
 
 /**
  * End-to-end smoke test against the production build: the app boots, Phaser
@@ -30,15 +31,9 @@ test('opens the diagnostics panel with a build identifier', async ({ page }) => 
 
 test('gathers wood, crafts a pick, and restores it after reload', async ({ page }) => {
   await page.goto('/');
-  const gather = page.getByRole('button', { name: 'Gather' });
-  await expect(gather).toBeVisible();
-
-  // Two six-hit starter trees provide eight wood. The fixed-step cooldown is
-  // 500ms for hands, so each command is intentionally spaced beyond it.
-  for (let hit = 0; hit < 12; hit += 1) {
-    await gather.click();
-      await page.waitForTimeout(700);
-  }
+  // Two six-hit starter trees provide eight wood.
+  await gatherStarterTree(page);
+  await gatherStarterTree(page);
   await page.getByRole('button', { name: 'Menu' }).click();
   await expect(page.getByText('wood', { exact: true })).toBeVisible();
   await expect(page.getByText('×8')).toBeVisible();

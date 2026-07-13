@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { gatherStarterTree } from './gather';
 
 /**
  * Inventory panel and hotbar presentation flows against the production build,
@@ -6,17 +7,6 @@ import { expect, test, type Page } from '@playwright/test';
  * mutual exclusion, hotbar equip via tap and 1–5 keys, and hotbar suppression
  * while a build ghost is out. Slot-model math is covered by unit tests.
  */
-
-/** Deplete the nearest starter tree (6 bare-hand hits) for exactly 4 wood. */
-async function gatherStarterTree(page: Page): Promise<void> {
-  const gather = page.getByRole('button', { name: 'Gather' });
-  await expect(gather).toBeVisible();
-  // Leave headroom beyond the 500ms fixed-step cooldown for loaded CI hosts.
-  for (let hit = 0; hit < 6; hit += 1) {
-    await gather.click();
-    await page.waitForTimeout(700);
-  }
-}
 
 test('bag panel shows the slot grid and stays exclusive with craft and build', async ({ page }) => {
   await page.goto('/');

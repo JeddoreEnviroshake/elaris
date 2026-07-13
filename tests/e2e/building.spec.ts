@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { gatherStarterTree } from './gather';
 
 /**
  * Build-mode presentation flows against the production build, on desktop and
@@ -6,18 +7,6 @@ import { expect, test, type Page } from '@playwright/test';
  * touch-safe Place button, spend feedback, overlap rejection, cancel, and the
  * keyboard toggles. Placement rule math is covered by unit tests.
  */
-
-/** Deplete the closest starter tree (6 bare-hand hits) for exactly 4 wood. */
-async function gatherStarterTree(page: Page): Promise<void> {
-  const gather = page.getByRole('button', { name: 'Gather' });
-  await expect(gather).toBeVisible();
-  // The fixed-step hands cooldown is 500ms; space commands beyond it.
-  for (let hit = 0; hit < 6; hit += 1) {
-    await gather.click();
-    await page.waitForTimeout(700);
-  }
-  await expect(page.locator('#app')).toContainText(/Wood 4/);
-}
 
 async function openBuildTab(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Menu' }).click();
