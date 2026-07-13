@@ -22,6 +22,39 @@ test('boots, renders the world canvas, and becomes offline-ready', async ({ page
 test('opens the diagnostics panel with a build identifier', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'App status and diagnostics' }).click();
-  await expect(page.getByRole('heading', { name: /Diagnostics/ })).toBeVisible();
-  await expect(page.getByText('Build', { exact: true })).toBeVisible();
+  const heading = page.getByRole('heading', { name: /Diagnostics/ });
+  await expect(heading).toBeVisible();
+  // Scope to the panel: "Build" also names the HUD's build-mode button.
+  await expect(heading.locator('..').getByText('Build', { exact: true })).toBeVisible();
+});
+
+test('gathers wood, crafts a pick, and restores it after reload', async ({ page }) => {
+  await page.goto('/');
+  const gather = page.getByRole('button', { name: 'Gather' });
+  await expect(gather).toBeVisible();
+
+  // Two six-hit starter trees provide eight wood. The fixed-step cooldown is
+  // 500ms for hands, so each command is intentionally spaced beyond it.
+  for (let hit = 0; hit < 12; hit += 1) {
+    await gather.click();
+      await page.waitForTimeout(700);
+  }
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await expect(page.getByText('wood', { exact: true })).toBeVisible();
+  await expect(page.getByText('×8')).toBeVisible();
+  await page.getByRole('tab', { name: 'Craft', exact: true }).click();
+  await page.getByRole('button', { name: 'Craft & equip' }).click();
+  await page.getByRole('tab', { name: 'Bag', exact: true }).click();
+  await expect(page.getByText('×3', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wooden Pick 48/48, equipped' })).toBeVisible();
+  await expect(page.getByText('Saved')).toBeVisible();
+
+  // The critical save is fired asynchronously; give the IndexedDB write a beat
+  // to commit so an instant reload cannot abort it (slower mobile emulation
+  // loses this race). Durable flush-before-navigation belongs to the save layer.
+  await page.waitForTimeout(700);
+  await page.reload();
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await expect(page.getByText('×3', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wooden Pick 48/48, equipped' })).toBeVisible();
 });

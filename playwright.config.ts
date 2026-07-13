@@ -24,7 +24,9 @@ export default defineConfig({
   webServer: {
     // dist must already be built (CI builds before this step; locally run
     // `npm run build` first). Preview enables the service worker + offline path.
-    command: `npm run preview -- --port ${PORT} --strictPort`,
+    // Invoke Vite through Node so this also works on Windows machines where
+    // PowerShell script execution policy blocks npm.ps1 child processes.
+    command: `node ./node_modules/vite/bin/vite.js preview --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

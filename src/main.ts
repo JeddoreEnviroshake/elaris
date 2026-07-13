@@ -42,7 +42,7 @@ const game = new Phaser.Game({
 });
 game.scene.add('world', WorldScene, true, {
   state,
-  onMoved: () => controller.markDirty(),
+  onStateChanged,
 });
 
 // --- app chrome wiring ---
@@ -59,13 +59,22 @@ chrome.setDiagnosticsProvider(() => {
 chrome.setSaveActions({
   onExport: () => controller.exportToFile(),
   onImport: async () => {
-    if (await controller.importFromFile()) game.scene.getScene('world')?.scene.restart({ state, onMoved: () => controller.markDirty() });
+    if (await controller.importFromFile()) restartWorld();
   },
   onReset: async () => {
     await controller.reset();
-    game.scene.getScene('world')?.scene.restart({ state, onMoved: () => controller.markDirty() });
+    restartWorld();
   },
 });
+
+function onStateChanged(kind: 'ordinary' | 'critical'): void {
+  if (kind === 'critical') void controller.saveCritical();
+  else controller.markDirty();
+}
+
+function restartWorld(): void {
+  game.scene.getScene('world')?.scene.restart({ state, onStateChanged });
+}
 
 // --- service worker: precache + safe, non-blocking update prompt ---
 initPwa({

@@ -8,10 +8,12 @@ tablets, and computers. Single-player in Phase 1.
 environments → place efficiency infrastructure → tame or order working
 creatures → gather faster.
 
-> **Status: Milestone 0 (platform foundation).** The local foundation is
-> complete — responsive movement, an installable offline PWA shell, and a
-> local-first IndexedDB save system. Gathering, crafting, building, and
-> creatures arrive in Milestone 1+. See [Roadmap](#roadmap).
+> **Status: Milestone 1 vertical slice in progress.** The platform foundation
+> is complete. The first playable progression loop now supports a distinct
+> grassland clearing and wood-rich forest, renewable trees/stone/plants,
+> gathering; inventory; Wooden/Stone tools; early
+> building; persistent Tuftle taming/assignment; and save/reload. See
+> [Roadmap](#roadmap).
 
 ---
 
@@ -46,16 +48,39 @@ and are never locked by a one-time device check.
 | --- | --- |
 | Move | `W A S D` or arrow keys |
 | Slow walk | hold `Shift` |
+| Gather / pick up / context action | `E`, `Space`, or primary click |
+| Craft menu | `C` |
+| Build menu | `B` |
+| Inventory panel | `I` |
+| Equip hotbar tool | `1`–`5` |
+| Place structure (in build mode) | `E`, `Space`, or click the ground |
+| Cancel / close menus | `Esc` |
 
-Planned for later milestones: `E` interact, `Space`/primary-click gather/attack,
-`1`–`5` hotbar, `B` build, `C` craft, `I` inventory, `Esc` cancel/menu.
+While placing, the ghost follows the mouse and tints green/red for
+valid/invalid spots. The bottom-center hotbar mirrors your first five tool
+slots (durability bars included) and hides while a placement ghost is out.
 
 ### Touch
 
 - **Left joystick** — move. Partial deflection is a slow walk.
+- **Gather** — harvest the nearest highlighted resource in range, or pick up a
+  nearby dropped bundle.
+- **Craft** — open the handcraft panel: first recipe plus per-tool
+  **Repair** / **Equip**.
+- **Build** — open the structure palette. Tap the ground to position the ghost,
+  then tap **Place** to confirm (placement is always an explicit tap, so a
+  stray touch never commits a structure).
+- **Menu** — open the tabbed gameplay menu; its Bag tab shows resource stacks and per-tool
+  durability. Tap a tool cell to equip it.
+- **Hotbar** — the bottom-center strip mirrors your first five tool slots;
+  tap a slot to equip that tool.
+- **Creatures** — offer three fiber to the nearby wild Tuftle, then open the
+  roster rail button to choose **Follow**, **Work**, or **Rest**. Work selects
+  the nearest eligible Woodlot Planter or Field Cache and deposits its
+  deterministic plant-material harvest into the Field Cache.
 
-Planned: right-side primary/secondary action buttons, hotbar, and build/craft/
-menu buttons, with configurable size/opacity and left-handed layout.
+Planned: secondary action, configurable control size/opacity, and a
+left-handed layout.
 
 ### Orientation
 
@@ -167,14 +192,28 @@ scattered magic numbers.
 
 ## Roadmap
 
-- **Milestone 0 — platform foundation** *(local half complete)*: toolchain,
-  responsive movement/camera, installable offline PWA shell + safe updates,
-  IndexedDB saves with lease/backup/export/import/migration. Remaining: GitHub
-  CI/CD deploy + real-device smoke test.
-- **Milestone 1 — vertical slice:** grassland/forest region; trees/plants/
-  boulders; bare hands + Wooden/Stone tools with durability & repair; inventory,
-  crafting, building, area gates (4/8/16); Field Cache, Workbench, Woodlot
-  Planter; first wild species + taming; quests.
+- **Milestone 0 — platform foundation** *(complete)*: toolchain, responsive
+  movement/camera, installable offline PWA shell + safe updates, IndexedDB saves
+  with lease/backup/export/import/migration, and GitHub CI/CD. A broader
+  real-device lifecycle pass remains part of hardening.
+- **Milestone 1 — vertical slice** *(in progress)*: persistent resources,
+  gathering, inventory, Wooden/Stone tools, durability, early building, exact
+  area gates, and the first Tuftle tame/follow/work/rest loop are playable.
+  A data-driven nine-quest onboarding chain now guides the full first-session
+  loop through Tuftle work. The starter region now has deterministic grassland
+  and forest zones plus persisted resource-regrowth timers. Wild Tuftles now
+  enter deterministic, turn-based encounters with attack, snare, berry, and
+  flee actions that resume exactly after reload. The Garden Bed — discovered
+  permanently at the 8-tile Shelter milestone and placed on grassland soil
+  inside a currently qualifying 8-tile work yard — now grows fiber on a
+  deterministic timer: harvest it with the context action, a full bed pauses
+  (never discards) growth, and breaking the enclosure suspends it in place
+  until the yard is repaired. The 16-tile Woodlot Planter now provides the
+  next environment utility step: on forest soil it grows harvestable wood,
+  pauses at capacity, and suspends safely if its work yard is broken.
+  Mara the Smith, Orin the Stockkeeper, and Tavi the Trader now inhabit the
+  starter region as protected, stationary service NPCs. Their conversations
+  preview the Blacksmith, Farm, and Market systems planned for Milestone 2.
 - **Milestone 2 — efficiency economy:** iron chain + Furnace, Blacksmith/Market
   coin services, Firebase cloud save sync, area gates 32/64, workers/logistics,
   more biomes and species.
@@ -183,12 +222,12 @@ scattered magic numbers.
 
 ---
 
-## Known gaps (Milestone 0)
+## Known gaps
 
-- Gameplay beyond movement (gathering, tools, crafting, building, creatures) is
-  not implemented yet — this is the platform foundation.
-- GitHub repository and the CI/CD deploy pipeline are not set up yet; the app runs
-  locally and builds a deployable `dist`.
+- Deterministic encounters, snares, and all four wild species are playable;
+  housing, expanded species-specific work, and later Farm production remain
+  future work. Garden Bed and Woodlot Planter utilities are playable; Compost
+  Bin, Sharpening Wheel, and later-tier placeables remain future work.
 - The update-prompt flow is wired but not yet exercised end-to-end against real
   successive deploys.
 - Audio is intentionally out of scope in Phase 1 (a mute/settings stub is planned).

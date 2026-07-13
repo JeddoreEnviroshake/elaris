@@ -1,7 +1,7 @@
 import { APP_VERSION, CONTENT_VERSION, WORLD_GEN_VERSION } from '../config/versions';
 import type { Clock } from '../simulation/clock';
 import { systemClock } from '../simulation/clock';
-import type { GameState } from '../simulation/state';
+import { createInitialState, type GameState } from '../simulation/state';
 import { IndexedDbSaveRepository, type RepositoryOptions } from './IndexedDbSaveRepository';
 import { downloadSave, pickSaveFile } from './saveFile';
 import { SAVE_VERSION, type PortableSave } from './types';
@@ -115,7 +115,11 @@ export class SaveController {
   async reset(): Promise<void> {
     if (this.status !== 'writer') return;
     this.clearDirtyTimer();
-    await this.enqueue(() => this.repo.reset());
+    await this.enqueue(async () => {
+      await this.repo.reset();
+      applyLoadedState(this.state, createInitialState(this.state.seed));
+      await this.repo.save(this.toPortable(), 'critical');
+    });
   }
 
   dispose(): void {
@@ -183,10 +187,5 @@ export class SaveController {
 }
 
 function applyLoadedState(target: GameState, loaded: GameState): void {
-  target.seed = loaded.seed;
-  target.rngState = loaded.rngState;
-  target.tick = loaded.tick;
-  target.player.x = loaded.player.x;
-  target.player.y = loaded.player.y;
-  target.player.facing = loaded.player.facing;
+  Object.assign(target, structuredClone(loaded));
 }

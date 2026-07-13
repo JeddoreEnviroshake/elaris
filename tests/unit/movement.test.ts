@@ -24,6 +24,28 @@ describe('stepMovement', () => {
     expect(dist).toBeCloseTo(PLAYER_SPEED_PX_PER_S, 6);
   });
 
+  it('moves at 1.7x speed while a followed Glade Stag is mounted', () => {
+    const state = createInitialState(SEED);
+    state.ownedCreatures.push({
+      id: 'creature-stag', speciesId: 'glade-stag', name: 'Fern', role: 'follow',
+      assignment: null, worksiteId: null, nextWorkTick: 0,
+    });
+    const startX = state.player.x;
+    stepMovement(state, { x: 1, y: 0, slow: false }, 1000);
+    expect(state.player.x - startX).toBeCloseTo(PLAYER_SPEED_PX_PER_S * 1.7, 6);
+  });
+
+  it('does not apply a resting Glade Stag travel bonus', () => {
+    const state = createInitialState(SEED);
+    state.ownedCreatures.push({
+      id: 'creature-stag', speciesId: 'glade-stag', name: 'Fern', role: 'rest',
+      assignment: null, worksiteId: null, nextWorkTick: 0,
+    });
+    const startX = state.player.x;
+    stepMovement(state, { x: 1, y: 0, slow: false }, 1000);
+    expect(state.player.x - startX).toBeCloseTo(PLAYER_SPEED_PX_PER_S, 6);
+  });
+
   it('applies slow-walk factor for partial joystick magnitude', () => {
     const state = createInitialState(SEED);
     const sx = state.player.x;

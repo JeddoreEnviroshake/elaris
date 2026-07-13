@@ -647,7 +647,7 @@ public/
 - Real-time multiplayer state, remote config, analytics, or telemetry upload. (Firebase Auth for anonymous/Google sign-in and Firestore-backed save sync are in scope from Milestone 2; reconciliation is limited to last-writer-wins with preserved backups.)
 - Native Android/iOS/desktop wrappers, store submission, platform billing, or push notifications.
 - Rotating/daily shops, real-money or premium purchases, player-to-player trading, breeding, genetics, or animal death. (A single coin currency earned by selling resources is in scope.)
-- Friendly-NPC attacks, humanoid combat, PvP, or treating people/animals as harvest resources. (`hostileNpc` and PvP are reserved for a future phase.)
+- Friendly-NPC attacks, humanoid combat, PvP, or treating people/animals as harvest resources. Friendly service NPCs may appear, but `hostileNpc` and PvP are reserved for a future phase.
 - Deep autonomous factory chains beyond the bounded Phase 1 worker/logistics examples.
 - Production audio (keep a working mute/settings stub), day/night, weather, seasons, roofs/multiple floors, and decorative-only content.
 - Third-party or franchise-derived names, creature designs, sprites, sounds, or visual imitation.
@@ -756,7 +756,7 @@ The earlier open questions are now resolved. These are binding unless explicitly
 5. **Blueprint discovery** — First-time area milestones permanently discover blueprints; current area still gates placement/operation.
 6. **Economy** — A single coin currency, earned only by selling resources to the Farm, Blacksmith, and Market. No real-money or premium currency.
 7. **Livestock** — Reuse tamed species as workers; no separate livestock roster.
-8. **"People"** — Reserved for future humanoid combat and PvP; never treated as resources; none appear in Phase 1.
+8. **"People"** — Mara the Smith, Orin the Stockkeeper, and Tavi the Trader appear as stationary, protected service NPCs near the Starter Camp. They are friendly interactables, never harvest or combat targets. Humanoid combat and PvP remain reserved for a future phase.
 9. **Broken tools** — Repairable with upgrades retained.
 10. **Orientation** — Portrait fully supported and designed-for; landscape playable with translucent overlay controls.
 11. **Offline work** — Capped passive work advances while closed, default eight-hour cap, with configured inputs and storage.

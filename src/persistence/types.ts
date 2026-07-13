@@ -1,10 +1,11 @@
 import type { GameState } from '../simulation/state';
+import { SAVE_SCHEMA_VERSION } from '../config/versions';
 
 /**
  * Bump when the on-disk shape of a PortableSave changes. Every increment needs
  * a migration step (see migrations.ts) and a fixture test.
  */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = SAVE_SCHEMA_VERSION;
 
 /** Versioning metadata travels with the portable save (survives export/import). */
 export interface SaveMeta {

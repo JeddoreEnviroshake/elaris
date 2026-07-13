@@ -5,6 +5,8 @@ import { ManualClock } from '../../src/simulation/clock';
 import { IndexedDbSaveRepository } from '../../src/persistence/IndexedDbSaveRepository';
 import { StaleWriterError } from '../../src/persistence/SaveRepository';
 import type { PortableSave } from '../../src/persistence/types';
+import { SAVE_VERSION } from '../../src/persistence/types';
+import { createInitialState } from '../../src/simulation/state';
 
 let profileCounter = 0;
 function uniqueProfile(): string {
@@ -13,9 +15,11 @@ function uniqueProfile(): string {
 }
 
 function makeSave(seed: number, x: number): PortableSave {
+  const state = createInitialState(seed);
+  state.player.x = x;
   return {
-    meta: { saveVersion: 1, worldGenVersion: 1, contentVersion: 1, appVersion: 'test', savedAt: 1 },
-    state: { seed, rngState: seed, tick: 0, player: { x, y: 0, facing: 'down' } },
+    meta: { saveVersion: SAVE_VERSION, worldGenVersion: 2, contentVersion: 2, appVersion: 'test', savedAt: 1 },
+    state,
   };
 }
 
