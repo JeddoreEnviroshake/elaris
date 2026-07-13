@@ -11,6 +11,9 @@ export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // Each browser runs a live Phaser simulation. Serial CI execution prevents
+  // runner CPU contention from starving fixed-step input/cooldown timing.
+  workers: process.env.CI ? 1 : undefined,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
