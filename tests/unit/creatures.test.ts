@@ -3,9 +3,12 @@ import { CREATURE_DEFINITIONS, creatureDefinition, isSpeciesId } from '../../src
 import { generateWildCreatures } from '../../src/simulation/worldGeneration';
 
 describe('creature species registry', () => {
-  it('registers each original species once with a useful role', () => {
+  it('registers each species once with a useful role', () => {
     const ids = CREATURE_DEFINITIONS.map((definition) => definition.speciesId);
-    expect(ids).toEqual(['tuftle', 'craghopper', 'glade-stag', 'snarlfox']);
+    expect(ids).toEqual([
+      'tuftle', 'craghopper', 'glade-stag', 'snarlfox',
+      'masonmole', 'bulwark-boar', 'quillfinch', 'mistmoth', 'slingtail',
+    ]);
     expect(new Set(ids).size).toBe(ids.length);
     for (const definition of CREATURE_DEFINITIONS) {
       expect(isSpeciesId(definition.speciesId)).toBe(true);
@@ -19,9 +22,12 @@ describe('creature species registry', () => {
     const first = generateWildCreatures(123);
     const second = generateWildCreatures(123);
     expect(second).toEqual(first);
-    expect(first.map((creature) => creature.speciesId)).toEqual([
+    // The four authored spawns open the roster in a fixed order; the scattered
+    // population that fills the area out follows them.
+    expect(first.slice(0, 4).map((creature) => creature.speciesId)).toEqual([
       'tuftle', 'craghopper', 'glade-stag', 'snarlfox',
     ]);
+    expect(first.length).toBeGreaterThan(4);
     expect(new Set(first.map((creature) => creature.id)).size).toBe(first.length);
   });
 

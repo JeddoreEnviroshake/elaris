@@ -1,9 +1,11 @@
-import { buildInfo, buildLabel } from '../platform/buildInfo';
+import { buildLabel } from '../platform/buildInfo';
 
 /**
- * Non-gameplay app chrome: a small status pill (build id + offline readiness),
- * a non-blocking "Update ready" banner, and an About/Diagnostics panel. Status
- * uses icon + text, never color alone. Buttons meet the 48px touch target.
+ * Non-gameplay app chrome: a small build-id pill that opens the
+ * About/Diagnostics panel, a non-blocking "Update ready" banner, and an offline
+ * "while you were away" summary toast. Online/offline readiness now lives in the
+ * Admin menu; the diagnostics panel still reports it. Buttons meet the 48px
+ * touch target.
  */
 export interface DiagnosticsSnapshot {
   [label: string]: string;
@@ -17,9 +19,6 @@ export interface SaveActions {
 
 export class AppChrome {
   private readonly root: HTMLDivElement;
-  private readonly pill: HTMLButtonElement;
-  private readonly offlineDot: HTMLSpanElement;
-  private readonly offlineText: HTMLSpanElement;
   private readonly banner: HTMLDivElement;
   private readonly toast: HTMLDivElement;
   private offlineReady = false;
@@ -32,43 +31,13 @@ export class AppChrome {
     this.root = el('div', {
       position: 'absolute',
       inset: '0',
+      zIndex: '40',
       pointerEvents: 'none',
       font: '13px system-ui, sans-serif',
       color: '#e8f0ea',
     });
 
-    // --- status pill (top-left, opens About) ---
-    this.pill = el('button', {
-      position: 'absolute',
-      top: 'calc(env(safe-area-inset-top) + 8px)',
-      left: 'calc(env(safe-area-inset-left) + 8px)',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-      minHeight: '32px',
-      padding: '4px 10px',
-      borderRadius: '16px',
-      border: '1px solid rgba(255,255,255,0.18)',
-      background: 'rgba(0,0,0,0.35)',
-      color: 'inherit',
-      font: 'inherit',
-      cursor: 'pointer',
-      pointerEvents: 'auto',
-    }) as HTMLButtonElement;
-    this.offlineDot = el('span', {
-      width: '8px',
-      height: '8px',
-      borderRadius: '50%',
-      background: '#c9a227',
-      flex: '0 0 auto',
-    });
-    this.offlineText = el('span', {});
-    this.offlineText.textContent = 'Online only';
-    const buildSpan = el('span', { opacity: '0.7' });
-    buildSpan.textContent = buildInfo.commit;
-    this.pill.append(this.offlineDot, this.offlineText, sep(), buildSpan);
-    this.pill.addEventListener('click', () => this.openAbout());
-    this.pill.setAttribute('aria-label', 'App status and diagnostics');
+    // The build id + diagnostics live in the Admin menu, which calls openAbout().
 
     // --- update banner (bottom-center, hidden by default) ---
     this.banner = el('div', {
@@ -87,10 +56,10 @@ export class AppChrome {
       pointerEvents: 'auto',
     });
 
-    // Transient "Saved" toast near the pill.
+    // Transient "while you were away" summary toast, top-left.
     this.toast = el('div', {
       position: 'absolute',
-      top: 'calc(env(safe-area-inset-top) + 48px)',
+      top: 'calc(env(safe-area-inset-top) + 8px)',
       left: 'calc(env(safe-area-inset-left) + 8px)',
       padding: '4px 10px',
       borderRadius: '8px',
@@ -99,7 +68,7 @@ export class AppChrome {
       transition: 'opacity 0.2s',
     });
 
-    this.root.append(this.pill, this.banner, this.toast);
+    this.root.append(this.banner, this.toast);
     parent.appendChild(this.root);
   }
 
@@ -124,10 +93,13 @@ export class AppChrome {
     }, 1100);
   }
 
+  /** Offline-precache readiness, surfaced by the Admin menu and diagnostics. */
+  get isOfflineReady(): boolean {
+    return this.offlineReady;
+  }
+
   markOfflineReady(): void {
     this.offlineReady = true;
-    this.offlineDot.style.background = '#4cc07f';
-    this.offlineText.textContent = 'Ready offline';
   }
 
   showUpdateReady(applyUpdate: () => Promise<void>): void {
@@ -148,13 +120,15 @@ export class AppChrome {
     this.banner.style.display = 'flex';
   }
 
-  private openAbout(): void {
-    const diag: DiagnosticsSnapshot = {
+  /** Open the About/Diagnostics panel (build id, live metrics, save actions). */
+  openAbout(): void {
+    const readDiagnostics = (): DiagnosticsSnapshot => ({
       Build: buildLabel(),
       Offline: this.offlineReady ? 'Ready offline' : 'Online only',
       Save: this.saveStatus === 'writer' ? 'Active (this window)' : `${this.saveStatus}${this.saveDetail ? ` — ${this.saveDetail}` : ''}`,
       ...this.getDiagnostics(),
-    };
+    });
+    const diag = readDiagnostics();
 
     const overlay = el('div', {
       position: 'absolute',
@@ -180,6 +154,8 @@ export class AppChrome {
     h.textContent = 'Elaris — Diagnostics';
     panel.appendChild(h);
 
+    const diagnosticValues = new Map<string, HTMLSpanElement>();
+
     for (const [k, v] of Object.entries(diag)) {
       const row = el('div', {
         display: 'flex',
@@ -192,9 +168,16 @@ export class AppChrome {
       key.textContent = k;
       const val = el('span', { textAlign: 'right', fontVariantNumeric: 'tabular-nums' });
       val.textContent = v;
+      diagnosticValues.set(k, val);
       row.append(key, val);
       panel.appendChild(row);
     }
+
+    let refreshTimer: number | undefined;
+    const dismiss = (): void => {
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+      overlay.remove();
+    };
 
     if (this.saveActions) {
       const actions = this.saveActions;
@@ -206,7 +189,7 @@ export class AppChrome {
       const reset = button('Reset save', () => {
         if (window.confirm('Reset save? This permanently clears local progress for this game.')) {
           void actions.onReset();
-          overlay.remove();
+          dismiss();
         }
       });
       reset.style.background = '#6b2f2f';
@@ -214,14 +197,18 @@ export class AppChrome {
       panel.appendChild(row);
     }
 
-    const close = button('Close', () => overlay.remove());
+    const close = button('Close', dismiss);
     close.style.marginTop = '12px';
     panel.appendChild(close);
     overlay.appendChild(panel);
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
+      if (e.target === overlay) dismiss();
     });
     this.root.appendChild(overlay);
+    refreshTimer = window.setInterval(() => {
+      const next = readDiagnostics();
+      for (const [key, value] of diagnosticValues) value.textContent = next[key] ?? '—';
+    }, 500);
     close.focus();
   }
 }
@@ -235,12 +222,6 @@ function el<K extends keyof HTMLElementTagNameMap>(
   const node = document.createElement(tag);
   Object.assign(node.style, style);
   return node;
-}
-
-function sep(): HTMLSpanElement {
-  const s = el('span', { opacity: '0.35' });
-  s.textContent = '·';
-  return s;
 }
 
 function button(text: string, onClick: () => void | Promise<void>): HTMLButtonElement {

@@ -17,11 +17,21 @@ export const WORLD_PX = TILE_SIZE * WORLD_TILES;
 /** Player movement, in source pixels per second (pre-zoom). */
 export const PLAYER_SPEED_PX_PER_S = 96;
 
-/** Partial joystick magnitude / Shift produces a slow walk at this fraction. */
+/**
+ * Carrying at least twice the bag's capacity pins movement to this crawl,
+ * ignoring attributes, follower bonuses and sprint.
+ */
+export const OVERBURDENED_SPEED_PX_PER_S = 10;
+
+/** Shift makes the current one-tile move take longer by this factor. */
 export const SLOW_WALK_FACTOR = 0.45;
 
-/** Below this joystick magnitude, movement is treated as an intentional slow walk. */
-export const SLOW_WALK_MAGNITUDE_THRESHOLD = 0.6;
+/**
+ * Sprint defaults. The multiplier is stored in tenths so the published balance
+ * document stays whole-numbered; 15 is 1.5x walking speed.
+ */
+export const SPRINT_SPEED_TENTHS = 15;
+export const SPRINT_STAMINA_PER_SECOND = 2;
 
 /** Fixed simulation timestep. Rendering interpolates between steps. */
 export const FIXED_STEP_MS = 1000 / 60;

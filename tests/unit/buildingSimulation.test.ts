@@ -1,70 +1,112 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalizeGameState } from '../../src/simulation/determinism';
-import { measureEnvironment } from '../../src/simulation/environmentProgress';
-import { buildableById, placeBuilding, removeBuilding } from '../../src/simulation/gameplayCommands';
-import { createInitialState, type BuildingState } from '../../src/simulation/state';
-
-function wallsAround(left: number, top: number, width: number, height: number): BuildingState[] {
-  const walls: BuildingState[] = [];
-  let id = 1;
-  for (let x = left; x < left + width + 2; x += 1) {
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: x, tileY: top });
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: x, tileY: top + height + 1 });
-  }
-  for (let y = top + 1; y < top + height + 1; y += 1) {
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: left, tileY: y });
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: left + width + 1, tileY: y });
-  }
-  return walls;
-}
+import { environments, recordHighestAreaTier } from '../../src/simulation/environmentProgress';
+import { buildableById, demolitionRefund, placeBuilding, removeBuilding } from '../../src/simulation/gameplayCommands';
+import { createInitialState } from '../../src/simulation/state';
+import { enclosedEnvironment } from './helpers/buildings';
 
 describe('authoritative building simulation', () => {
-  it('measures a four-way enclosed area and its largest filled core', () => {
-    const walls = wallsAround(10, 10, 4, 4);
-    expect(measureEnvironment(walls, 11, 11)).toEqual({
-      kind: 'indoor', area: 16, largestFilledCore: 4, enclosed: true,
+  it('requires rebuilds for material changes and refunds half per input without rounding up', () => {
+    const state = createInitialState(91);
+    state.resourceNodes = [];
+    state.unlockedItemIds.push('stone-floor', 'metal-floor');
+    state.inventory.stone = 10;
+    state.inventory['iron-ingot'] = 10;
+    const tileX = Math.floor(state.player.x / 16);
+    const tileY = Math.floor(state.player.y / 16);
+    const stone = placeBuilding(state, state.buildings, buildableById('stone-floor'), tileX, tileY);
+    expect(stone.ok).toBe(true);
+    expect(placeBuilding(state, state.buildings, buildableById('metal-floor'), tileX, tileY).ok).toBe(false);
+    expect(removeBuilding(state, stone.building!.id).ok).toBe(true);
+    expect(state.inventory.stone).toBe(9);
+    expect(placeBuilding(state, state.buildings, buildableById('metal-floor'), tileX, tileY).ok).toBe(true);
+    expect(demolitionRefund(buildableById('stone-wall'))).toEqual([['stone', 1]]);
+    expect(demolitionRefund(buildableById('metal-door'))).toEqual([['iron-ingot', 2]]);
+  });
+  it('measures player surfaces enclosed by canonical boundary edges', () => {
+    const buildings = enclosedEnvironment(10, 10, 4, 4, 'indoor');
+    expect(environments(buildings)[0]).toMatchObject({
+      kind: 'indoor', area: 16, largestFilledCore: 4, enclosed: true, valid: true, tier: 16,
     });
-    walls.pop();
-    expect(measureEnvironment(walls, 11, 11)).toMatchObject({ area: 0, largestFilledCore: 0, enclosed: false });
+    const northEdge = buildings.find((building) => building.boundaryEdge === 'north')!;
+    expect(environments(buildings.filter((building) => building.id !== northEdge.id))[0]).toMatchObject({
+      area: 16, largestFilledCore: 0, enclosed: false, valid: false, tier: 0,
+    });
   });
 
-  it('atomically validates cost, enclosure gate, overlap, and removal range', () => {
+  it('atomically validates cost, environment gate, edge overlap, and removal range', () => {
     const state = createInitialState(7);
     state.resourceNodes = [];
-    state.buildings = wallsAround(75, 75, 3, 3);
-    state.player.x = 77 * 16;
-    state.player.y = 77 * 16;
+    state.buildings = enclosedEnvironment(40, 40, 3, 3, 'indoor');
+    state.player.x = 41 * 16;
+    state.player.y = 41 * 16;
+    state.highestAreaTierEver = 8;
+    state.unlockedItemIds.push('workbench', 'wood-wall');
     state.inventory.wood = 7;
     const before = canonicalizeGameState(state);
 
-    const tooExpensive = placeBuilding(state, [], buildableById('workbench'), 76, 76);
-    expect(tooExpensive).toMatchObject({ ok: false });
+    expect(placeBuilding(state, state.buildings, buildableById('workbench'), 40, 40)).toMatchObject({ ok: false });
     expect(canonicalizeGameState(state)).toBe(before);
 
     state.inventory.wood = 9;
-    const placed = placeBuilding(state, [], buildableById('workbench'), 76, 76);
+    const placed = placeBuilding(state, state.buildings, buildableById('workbench'), 40, 40);
     expect(placed.ok).toBe(true);
     expect(state.inventory.wood).toBe(1);
-    expect(state.buildings).toContainEqual(placed.building);
     expect(state.highestAreaTierEver).toBe(8);
-    expect(placeBuilding(state, [], buildableById('palisade-wall'), 76, 76)).toMatchObject({ ok: false, message: 'Blocked' });
+    expect(placeBuilding(
+      state, state.buildings, buildableById('wood-wall'), 40, 40, { boundaryEdge: 'north' },
+    )).toMatchObject({ ok: false, message: 'Edge occupied by Wood Wall' });
 
     state.player.x = 0; state.player.y = 0;
     expect(removeBuilding(state, placed.building!.id)).toMatchObject({ ok: false, message: 'Too far away' });
-    state.player.x = 77 * 16; state.player.y = 77 * 16;
+    state.player.x = 41 * 16; state.player.y = 41 * 16;
     expect(removeBuilding(state, placed.building!.id)).toMatchObject({ ok: true });
-    expect(state.highestAreaTierEver).toBe(8);
   });
 
-  it('allocates identical persisted buildings for identical command streams', () => {
+  it('places a Workbench in an enclosed 8-tile room without an Environment Marker', () => {
+    const state = createInitialState(8);
+    state.resourceNodes = [];
+    state.buildings = enclosedEnvironment(40, 40, 4, 2, 'indoor')
+      .filter((building) => building.definitionId !== 'environment-marker');
+    state.player.x = 42 * 16;
+    state.player.y = 42 * 16;
+    state.inventory.wood = 8;
+    state.unlockedItemIds.push('workbench');
+
+    // Finishing the enclosure discovers the Shelter tier; no extra marker step.
+    expect(environments(state.buildings)[0]).toMatchObject({ area: 8, valid: true, tier: 8, markerCount: 0 });
+    recordHighestAreaTier(state);
+    expect(placeBuilding(state, state.buildings, buildableById('workbench'), 40, 40).ok).toBe(true);
+  });
+
+  it('treats a legacy Environment Marker as removable metadata, not occupied floor space', () => {
+    const state = createInitialState(9);
+    state.resourceNodes = [];
+    state.buildings = enclosedEnvironment(40, 40, 4, 2, 'indoor');
+    state.player.x = 42 * 16;
+    state.player.y = 42 * 16;
+    state.highestAreaTierEver = 8;
+    state.inventory.wood = 8;
+    state.unlockedItemIds.push('workbench');
+    const marker = state.buildings.find((building) => building.definitionId === 'environment-marker')!;
+
+    // The 2x1 footprint deliberately covers the marker's cell.
+    expect(placeBuilding(state, state.buildings, buildableById('workbench'), 42, 41).ok).toBe(true);
+    expect(removeBuilding(state, marker.id).ok).toBe(true);
+    expect(environments(state.buildings)[0]).toMatchObject({ area: 8, valid: true, tier: 8, markerCount: 0 });
+  });
+
+  it('allocates identical persisted boundary edges for identical command streams', () => {
     const run = () => {
       const state = createInitialState(99);
       state.resourceNodes = [];
       state.inventory.wood = 1;
-      const def = buildableById('palisade-wall');
+      state.unlockedItemIds.push('wood-wall');
+      state.player.facing = 'right';
       const x = Math.floor(state.player.x / 16) + 1;
       const y = Math.floor(state.player.y / 16);
-      expect(placeBuilding(state, [], def, x, y).ok).toBe(true);
+      expect(placeBuilding(state, state.buildings, buildableById('wood-wall'), x, y).ok).toBe(true);
+      expect(state.buildings[0]!.boundaryEdge).toBe('west');
       return canonicalizeGameState(state);
     };
     expect(run()).toBe(run());

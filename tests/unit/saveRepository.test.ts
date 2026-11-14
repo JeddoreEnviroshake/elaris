@@ -7,6 +7,7 @@ import { StaleWriterError } from '../../src/persistence/SaveRepository';
 import type { PortableSave } from '../../src/persistence/types';
 import { SAVE_VERSION } from '../../src/persistence/types';
 import { createInitialState } from '../../src/simulation/state';
+import { SaveController } from '../../src/persistence/saveController';
 
 let profileCounter = 0;
 function uniqueProfile(): string {
@@ -29,12 +30,41 @@ beforeEach(() => {
 });
 
 describe('IndexedDbSaveRepository', () => {
+  it('keeps the previous processing timestamp when the wall clock moves backward', async () => {
+    const profileId = uniqueProfile();
+    const seedRepo = new IndexedDbSaveRepository({ profileId, clock });
+    await seedRepo.open(); await seedRepo.acquireWriter();
+    const future = makeSave(4, 12);
+    future.meta.savedAt = 20_000;
+    await seedRepo.save(future, 'critical');
+    await seedRepo.releaseWriter(); seedRepo.close();
+
+    clock.set(10_000);
+    const controller = new SaveController(createInitialState(4), { clock, repository: { profileId, clock } });
+    await controller.start();
+    const persisted = await controller.repo.load();
+    expect(persisted!.save.meta.savedAt).toBe(20_000);
+    const performance = controller.getPerformanceSnapshot();
+    expect(performance.durations.count).toBe(1);
+    expect(performance.last).toMatchObject({ kind: 'critical' });
+    expect(performance.last!.totalMs).toBeGreaterThanOrEqual(performance.last!.snapshotMs);
+    controller.dispose();
+  });
+
   it('round-trips a save and reloads it in a fresh repository (survives reload)', async () => {
     const profileId = uniqueProfile();
     const a = new IndexedDbSaveRepository({ profileId, clock });
     await a.open();
     await a.acquireWriter();
-    await a.save(makeSave(7, 123), 'critical');
+    const save = makeSave(7, 123);
+    save.state.activeEncounter = {
+      wildCreatureId: save.state.wildCreatures[0]!.id,
+      creatureHp: 12, creatureMaxHp: 36, round: 4, message: 'Your turn.',
+      playerPos: 50, creaturePos: 63,
+      companionCreatureId: null, selectedCompanionAbilityId: null,
+      companionAbilityReadyRounds: {}, enemyIntent: 'strike',
+    };
+    await a.save(save, 'critical');
     a.close();
 
     const b = new IndexedDbSaveRepository({ profileId, clock });
@@ -42,6 +72,7 @@ describe('IndexedDbSaveRepository', () => {
     const loaded = await b.load();
     expect(loaded?.source).toBe('current');
     expect(loaded?.save.state.player.x).toBe(123);
+    expect(loaded?.save.state.activeEncounter).toMatchObject({ playerPos: 50, creaturePos: 63, round: 4 });
     b.close();
   });
 

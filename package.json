@@ -19,12 +19,15 @@
     "deploy": "npm run build && firebase deploy --only hosting"
   },
   "dependencies": {
+    "firebase": "12.16.0",
     "idb": "8.0.3",
-    "phaser": "3.90.0"
+    "phaser": "3.90.0",
+    "three": "0.185.1"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "@types/node": "26.1.1",
+    "@types/three": "0.185.1",
     "@vitest/browser": "4.1.10",
     "fake-indexeddb": "6.2.5",
     "jsdom": "29.1.1",

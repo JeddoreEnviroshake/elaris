@@ -7,10 +7,12 @@ import {
 } from '../config/balance';
 import { PLACEABLES, type PlaceableDefinition } from '../config/areaGates';
 import { TILE_SIZE } from '../config/platform';
-import { evaluatePlaceableGate, measureEnvironment, type PlaceableGateResult } from './environmentProgress';
-import { buildableById, tryAddResource, type CommandResult } from './gameplayCommands';
+import type { PlaceableGateResult } from './environmentProgress';
+import { tryAddResource, type CommandResult } from './gameplayCommands';
 import { createGardenBedState } from './state';
 import type { BuildingState, GameState } from './state';
+import { effectiveBuildingDimensions } from './buildingGeometry';
+import { recordOpeningGardenHarvest } from './onboardingProgress';
 
 /**
  * Garden Bed simulation: deterministic, renewable fiber growth inside a
@@ -36,12 +38,9 @@ export function gardenBedPlaceable(): PlaceableDefinition {
   return placeable;
 }
 
-/** Current-environment validity, always derived from saved wall geometry. */
-export function gardenBedEnvironmentGate(state: GameState, bed: BuildingState): PlaceableGateResult {
-  return evaluatePlaceableGate(
-    gardenBedPlaceable(),
-    measureEnvironment(state.buildings, bed.tileX, bed.tileY, 'workYard'),
-  );
+/** Environment inference is informational; unlocked facilities operate wherever placed. */
+export function gardenBedEnvironmentGate(_state: GameState, _bed: BuildingState): PlaceableGateResult {
+  return { ok: true };
 }
 
 /**
@@ -73,10 +72,14 @@ export function advanceGardenBeds(state: GameState): boolean {
 }
 
 /** Nearest Garden Bed by footprint center, for the context action. */
-export function nearestGardenBed(state: GameState, range = INTERACTION_RANGE_PX): BuildingState | null {
+export function nearestGardenBed(
+  state: GameState,
+  range = INTERACTION_RANGE_PX,
+  candidates: Iterable<BuildingState> = state.buildings,
+): BuildingState | null {
   let nearest: BuildingState | null = null;
   let nearestDistance = range;
-  for (const bed of state.buildings) {
+  for (const bed of candidates) {
     if (bed.definitionId !== 'garden-bed') continue;
     const distance = distanceToBed(state, bed);
     if (distance <= nearestDistance) {
@@ -98,6 +101,8 @@ export function harvestGardenBed(state: GameState, buildingId: string, range = I
   if (amount <= 0) return { ok: false, message: 'Nothing to harvest yet', targetId: bed.id };
   if (!tryAddResource(state, 'fiber', amount)) return { ok: false, message: 'Inventory full', targetId: bed.id };
   bed.garden!.readyFiber = 0;
+  state.questProgress.gardenFiberHarvested += amount;
+  recordOpeningGardenHarvest(state, bed.id, amount);
   return { ok: true, message: `+${amount} fiber from Garden Bed`, targetId: bed.id };
 }
 
@@ -119,8 +124,8 @@ export function describeGardenBed(state: GameState, bed: BuildingState): GardenB
 }
 
 function distanceToBed(state: GameState, bed: BuildingState): number {
-  const definition = buildableById(bed.definitionId);
-  const centerX = (bed.tileX + definition.tilesWide / 2) * TILE_SIZE;
-  const centerY = (bed.tileY + definition.tilesHigh / 2) * TILE_SIZE;
+  const dimensions = effectiveBuildingDimensions(bed);
+  const centerX = (bed.tileX + dimensions.tilesWide / 2) * TILE_SIZE;
+  const centerY = (bed.tileY + dimensions.tilesHigh / 2) * TILE_SIZE;
   return Math.hypot(centerX - state.player.x, centerY - state.player.y);
 }

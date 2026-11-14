@@ -7,10 +7,10 @@ import {
 } from '../config/balance';
 import { PLACEABLES, type PlaceableDefinition } from '../config/areaGates';
 import { TILE_SIZE } from '../config/platform';
-import { starterBiomeAt } from './biomes';
-import { evaluatePlaceableGate, measureEnvironment, type PlaceableGateResult } from './environmentProgress';
-import { buildableById, tryAddResource, type CommandResult } from './gameplayCommands';
+import type { PlaceableGateResult } from './environmentProgress';
+import { tryAddResource, type CommandResult } from './gameplayCommands';
 import { createWoodlotPlanterState, type BuildingState, type GameState } from './state';
+import { effectiveBuildingDimensions } from './buildingGeometry';
 
 export type WoodlotPhase = 'growing' | 'ready' | 'blocked' | 'suspended';
 
@@ -25,20 +25,8 @@ export function woodlotPlaceable(): PlaceableDefinition {
   return placeable;
 }
 
-export function woodlotEnvironmentGate(state: GameState, planter: BuildingState): PlaceableGateResult {
-  const gate = evaluatePlaceableGate(
-    woodlotPlaceable(),
-    measureEnvironment(state.buildings, planter.tileX, planter.tileY, 'workYard'),
-  );
-  if (!gate.ok) return gate;
-  for (let dy = 0; dy < 2; dy += 1) for (let dx = 0; dx < 2; dx += 1) {
-    const x = (planter.tileX + dx) * TILE_SIZE + TILE_SIZE / 2;
-    const y = (planter.tileY + dy) * TILE_SIZE + TILE_SIZE / 2;
-    if (starterBiomeAt(state.seed, x, y) !== 'forest') {
-      return { ok: false, reason: 'Requires open forest soil' };
-    }
-  }
-  return gate;
+export function woodlotEnvironmentGate(_state: GameState, _planter: BuildingState): PlaceableGateResult {
+  return { ok: true };
 }
 
 export function advanceWoodlotPlanters(state: GameState): boolean {
@@ -62,10 +50,14 @@ export function advanceWoodlotPlanters(state: GameState): boolean {
   return changed;
 }
 
-export function nearestWoodlotPlanter(state: GameState, range = INTERACTION_RANGE_PX): BuildingState | null {
+export function nearestWoodlotPlanter(
+  state: GameState,
+  range = INTERACTION_RANGE_PX,
+  candidates: Iterable<BuildingState> = state.buildings,
+): BuildingState | null {
   let nearest: BuildingState | null = null;
   let nearestDistance = range;
-  for (const planter of state.buildings) {
+  for (const planter of candidates) {
     if (planter.definitionId !== 'woodlot-planter') continue;
     const distance = distanceToPlanter(state, planter);
     if (distance <= nearestDistance) {
@@ -86,6 +78,7 @@ export function harvestWoodlotPlanter(state: GameState, buildingId: string, rang
   if (amount <= 0) return { ok: false, message: 'Nothing to harvest yet', targetId: planter.id };
   if (!tryAddResource(state, 'wood', amount)) return { ok: false, message: 'Inventory full', targetId: planter.id };
   planter.woodlot!.readyWood = 0;
+  state.questProgress.woodlotWoodHarvested += amount;
   return { ok: true, message: `+${amount} wood from Woodlot Planter`, targetId: planter.id };
 }
 
@@ -102,8 +95,8 @@ export function describeWoodlotPlanter(state: GameState, planter: BuildingState)
 }
 
 function distanceToPlanter(state: GameState, planter: BuildingState): number {
-  const definition = buildableById(planter.definitionId);
-  const centerX = (planter.tileX + definition.tilesWide / 2) * TILE_SIZE;
-  const centerY = (planter.tileY + definition.tilesHigh / 2) * TILE_SIZE;
+  const dimensions = effectiveBuildingDimensions(planter);
+  const centerX = (planter.tileX + dimensions.tilesWide / 2) * TILE_SIZE;
+  const centerY = (planter.tileY + dimensions.tilesHigh / 2) * TILE_SIZE;
   return Math.hypot(centerX - state.player.x, centerY - state.player.y);
 }

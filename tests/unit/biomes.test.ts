@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WORLD_PX } from '../../src/config/platform';
-import { starterBiomeAt } from '../../src/simulation/biomes';
+import { mountainElevationBand, starterBiomeAt } from '../../src/simulation/biomes';
 import { createInitialState } from '../../src/simulation/state';
 
 describe('starter grassland and forest region', () => {
@@ -17,5 +17,16 @@ describe('starter grassland and forest region', () => {
     const grasslandTrees = state.resourceNodes.filter((node) =>
       node.kind === 'tree' && starterBiomeAt(state.seed, node.x, node.y) === 'grassland').length;
     expect(forestTrees).toBeGreaterThan(grasslandTrees * 2);
+  });
+});
+
+describe('mountain terrain elevation', () => {
+  it('is deterministic and produces all three visual bands', () => {
+    expect(mountainElevationBand(987, 12, 31)).toBe(mountainElevationBand(987, 12, 31));
+    const bands = new Set<number>();
+    for (let y = 0; y < 64; y += 1) {
+      for (let x = 0; x < 64; x += 1) bands.add(mountainElevationBand(987, x, y));
+    }
+    expect([...bands].sort()).toEqual([0, 1, 2]);
   });
 });

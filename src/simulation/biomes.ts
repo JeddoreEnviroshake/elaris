@@ -1,6 +1,7 @@
 import { WORLD_PX } from '../config/platform';
 
 export type StarterBiome = 'grassland' | 'forest';
+export type MountainElevationBand = 0 | 1 | 2;
 
 /**
  * Stable, inexpensive starter-region biome map. The central clearing remains
@@ -24,4 +25,20 @@ export function coordinateHash(seed: number, x: number, y: number): number {
   value = Math.imul(value, 0x846ca68b) >>> 0;
   value ^= value >>> 16;
   return value / 0x1_0000_0000;
+}
+
+/**
+ * Broad, seed-stable visual elevation for mountain terrain. Bands are purely
+ * decorative: ledges and scree never change collision or simulation state.
+ */
+export function mountainElevationBand(seed: number, tileX: number, tileY: number): MountainElevationBand {
+  const regionX = Math.floor(tileX / 7);
+  const regionY = Math.floor(tileY / 7);
+  const coarse = coordinateHash(seed ^ 0x4849_4c4c, regionX, regionY) - 0.5;
+  const rolling = Math.sin((tileX + (seed & 15)) * 0.105) * 0.17
+    + Math.cos((tileY - (seed & 7)) * 0.087) * 0.15;
+  const elevation = 0.5 + coarse * 0.42 + rolling;
+  if (elevation > 0.63) return 2;
+  if (elevation > 0.39) return 1;
+  return 0;
 }

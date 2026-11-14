@@ -5,14 +5,21 @@
  * carries an icon (e2e selectors match accessible names exactly).
  */
 
-/** Right-edge rail geometry shared by the gameplay menu toggles. */
+/**
+ * Right-edge rail geometry shared by the gameplay menu toggles. The rail starts
+ * above the thumb cluster, which is two buttons tall — the action button with
+ * Sprint stacked on top of it — so the lowest rail toggle clears both. Every
+ * toggle owns a slot here (Admin included) so none can land on top of another
+ * when the rail moves; the step is one button height plus its gap.
+ */
 export const RAIL_RIGHT = 'calc(env(safe-area-inset-right) + 18px)';
 export const RAIL_BOTTOMS = {
-  craft: 'calc(env(safe-area-inset-bottom) + 104px)',
-  build: 'calc(env(safe-area-inset-bottom) + 168px)',
-  menu: 'calc(env(safe-area-inset-bottom) + 232px)',
-  creatures: 'calc(env(safe-area-inset-bottom) + 296px)',
-  stats: 'calc(env(safe-area-inset-bottom) + 360px)',
+  craft: 'calc(env(safe-area-inset-bottom) + 170px)',
+  build: 'calc(env(safe-area-inset-bottom) + 234px)',
+  menu: 'calc(env(safe-area-inset-bottom) + 298px)',
+  admin: 'calc(env(safe-area-inset-bottom) + 362px)',
+  creatures: 'calc(env(safe-area-inset-bottom) + 426px)',
+  stats: 'calc(env(safe-area-inset-bottom) + 490px)',
 } as const;
 
 export function div(style: Partial<CSSStyleDeclaration>): HTMLDivElement {
@@ -23,6 +30,7 @@ export function div(style: Partial<CSSStyleDeclaration>): HTMLDivElement {
 
 export function uiButton(label: string, onClick: () => void): HTMLButtonElement {
   const element = document.createElement('button');
+  element.classList.add('elaris-button');
   element.textContent = label;
   Object.assign(element.style, {
     minWidth: '44px',
@@ -72,8 +80,9 @@ export function paletteSection(label: string): HTMLDivElement {
  * A right-rail toggle: an icon stacked over a short label. The aria-label is
  * exactly the plain label so accessible names (and tests) ignore the icon.
  */
-export function railButton(icon: string, label: string, onClick: () => void): HTMLButtonElement {
+export function railButton(icon: UiIconName, label: string, onClick: () => void): HTMLButtonElement {
   const element = uiButton('', onClick);
+  element.dataset.railButton = '';
   element.setAttribute('aria-label', label);
   Object.assign(element.style, {
     position: 'absolute',
@@ -88,10 +97,8 @@ export function railButton(icon: string, label: string, onClick: () => void): HT
     gap: '2px',
     background: 'rgba(30,48,37,0.94)',
   } satisfies Partial<CSSStyleDeclaration>);
-  const glyph = document.createElement('span');
-  glyph.textContent = icon;
-  glyph.setAttribute('aria-hidden', 'true');
-  Object.assign(glyph.style, { fontSize: '19px', lineHeight: '1' } satisfies Partial<CSSStyleDeclaration>);
+  const glyph = createUiIcon(icon, 21);
+  Object.assign(glyph.style, { lineHeight: '1', color: '#f5ecd6' } satisfies Partial<CSSStyleDeclaration>);
   const text = document.createElement('span');
   text.textContent = label;
   Object.assign(text.style, { fontSize: '11px', fontWeight: '600' } satisfies Partial<CSSStyleDeclaration>);
@@ -117,3 +124,4 @@ function pressFeedback(element: HTMLButtonElement): void {
   element.addEventListener('pointerleave', release);
   element.addEventListener('pointercancel', release);
 }
+import { createUiIcon, type UiIconName } from './icons';

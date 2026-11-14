@@ -55,7 +55,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+        globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2,glb,txt}'],
+        // Phaser, Three.js, and the renderer-neutral interior presentation ship
+        // in the offline game bundle, above Workbox's conservative 2 MiB default.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         // Keep the previous build serving old clients until the user consents.
         clientsClaim: false,

@@ -80,5 +80,11 @@ node_modules/
 # Local assistant configuration
 .claude/settings.local.json
 
+# Local previews, scratch work, and Python caches
+/tmp/
+/output/
+__pycache__/
+*.py[cod]
+
 # dataconnect generated files
 .dataconnect

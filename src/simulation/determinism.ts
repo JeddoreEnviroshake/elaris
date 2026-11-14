@@ -1,4 +1,5 @@
-import type { GameState } from './state';
+import type { GameState, ResourceId } from './state';
+import { resourceStacksForAmount } from './inventoryStacks';
 
 type CanonicalValue = null | boolean | number | string | CanonicalValue[] | CanonicalObject;
 
@@ -14,7 +15,10 @@ interface CanonicalObject {
  * arrays retain their gameplay-significant order.
  */
 export function canonicalizeGameState(state: GameState): string {
-  return JSON.stringify(toCanonicalValue(state, '$', new Set<object>()));
+  const inventoryStacks = Object.fromEntries((Object.keys(state.inventory) as ResourceId[]).map((resource) => [
+    resource, resourceStacksForAmount(state, resource, state.inventory[resource]),
+  ]));
+  return JSON.stringify(toCanonicalValue({ ...state, inventoryStacks }, '$', new Set<object>()));
 }
 
 /** Return the lowercase SHA-256 digest of the canonical state's UTF-8 JSON. */

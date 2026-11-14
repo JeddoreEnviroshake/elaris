@@ -27,26 +27,13 @@ import { buildableLockedReason } from '../../src/scenes/buildPlacement';
 import { assertValidPortableSave, migrateToCurrent, SaveValidationError } from '../../src/persistence/migrations';
 import { SAVE_VERSION } from '../../src/persistence/types';
 import { createInitialState, type BuildingState, type GameState } from '../../src/simulation/state';
+import { enclosedEnvironment } from './helpers/buildings';
 
 const SEED = 7;
 const GARDEN_PLACEABLE = PLACEABLES.find((placeable) => placeable.id === 'garden-bed')!;
 
 /** Center of a tile in source pixels. */
 const tilePx = (tile: number) => tile * TILE_SIZE + TILE_SIZE / 2;
-
-function wallsAround(left: number, top: number, width: number, height: number): BuildingState[] {
-  const walls: BuildingState[] = [];
-  let id = 1;
-  for (let x = left; x < left + width + 2; x += 1) {
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: x, tileY: top });
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: x, tileY: top + height + 1 });
-  }
-  for (let y = top + 1; y < top + height + 1; y += 1) {
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: left, tileY: y });
-    walls.push({ id: `wall-${id++}`, definitionId: 'palisade-wall', tileX: left + width + 1, tileY: y });
-  }
-  return walls;
-}
 
 /**
  * A discovered, affordable state with an enclosed 4×2 (area 8, 2×2 core) work
@@ -55,12 +42,13 @@ function wallsAround(left: number, top: number, width: number, height: number): 
 function stateWithYard(): GameState {
   const state = createInitialState(SEED);
   state.resourceNodes = [];
-  state.buildings = wallsAround(83, 79, 4, 2); // interior tiles x 84..87, y 80..81
+  state.buildings = enclosedEnvironment(84, 80, 4, 2, 'workYard');
   state.player.x = tilePx(86);
   state.player.y = tilePx(81);
   state.highestAreaTierEver = 8;
   state.inventory.wood = 20;
   state.inventory.fiber = 10;
+  state.unlockedItemIds.push('garden-bed');
   return state;
 }
 
@@ -86,23 +74,20 @@ function portableSaveOf(state: GameState): unknown {
 }
 
 describe('garden bed unlock and placement', () => {
-  it('stays locked below area tier 8 and unlocks exactly at it', () => {
+  it('is locked only by permanent point ownership, not area tier', () => {
     const state = stateWithYard();
-    for (const tier of [0, 4] as const) {
-      state.highestAreaTierEver = tier;
-      expect(placeableLockedReason(state, GARDEN_PLACEABLE)).toMatch(/8-tile Shelter/);
-      expect(buildableLockedReason(state, 'garden-bed')).toMatch(/8-tile Shelter/);
-      const check = validatePlacement(state, state.buildings, buildableById('garden-bed'), 84, 80);
-      expect(check).toMatchObject({ ok: false });
-      expect(check.message).toMatch(/Locked/);
-    }
-    state.highestAreaTierEver = 8;
+    state.unlockedItemIds = [];
+    state.highestAreaTierEver = 16;
+    expect(placeableLockedReason(state, GARDEN_PLACEABLE)).toMatch(/Blueprint not yet discovered/);
+    expect(buildableLockedReason(state, 'garden-bed')).toMatch(/Blueprint not yet discovered/);
+    state.unlockedItemIds.push('garden-bed');
+    state.highestAreaTierEver = 0;
     expect(placeableLockedReason(state, GARDEN_PLACEABLE)).toBeNull();
     expect(buildableLockedReason(state, 'garden-bed')).toBeNull();
     expect(validatePlacement(state, state.buildings, buildableById('garden-bed'), 84, 80).ok).toBe(true);
   });
 
-  it('requires grassland soil and a currently qualifying enclosed work yard, atomically', () => {
+  it('places on open or enclosed footprints regardless of terrain', () => {
     const state = stateWithYard();
     expect(starterBiomeAt(SEED, tilePx(84), tilePx(80))).toBe('grassland');
     const def = buildableById('garden-bed');
@@ -110,20 +95,15 @@ describe('garden bed unlock and placement', () => {
     // Unenclosed grassland: discovery is permanent, but current geometry gates placement.
     const openState = stateWithYard();
     openState.buildings = [];
-    expect(validatePlacement(openState, openState.buildings, def, 84, 80).message).toMatch(/Needs 8-tile area/);
+    expect(validatePlacement(openState, openState.buildings, def, 84, 80).ok).toBe(true);
 
     // Enclosed forest soil is rejected with the exact terrain reason.
     const forest = stateWithYard();
-    forest.buildings = wallsAround(14, 14, 4, 2); // interior tiles x 15..18, y 15..16
+    forest.buildings = enclosedEnvironment(15, 48, 4, 2, 'workYard');
     forest.player.x = tilePx(18);
-    forest.player.y = tilePx(16);
-    expect(starterBiomeAt(SEED, tilePx(15), tilePx(15))).toBe('forest');
-    expect(validatePlacement(forest, forest.buildings, def, 15, 15).message).toBe('Requires open grassland soil');
-
-    // A failed placement never consumes resources or mutates state.
-    const before = canonicalizeGameState(forest);
-    expect(placeBuilding(forest, forest.buildings, def, 15, 15).ok).toBe(false);
-    expect(canonicalizeGameState(forest)).toBe(before);
+    forest.player.y = tilePx(49);
+    expect(starterBiomeAt(SEED, tilePx(15), tilePx(48))).toBe('forest');
+    expect(validatePlacement(forest, forest.buildings, def, 15, 48).ok).toBe(true);
 
     // The qualifying grassland yard accepts it and pays exactly once.
     const placed = placeGardenBed(state);
@@ -173,7 +153,7 @@ describe('garden bed growth simulation', () => {
     expect(canonicalizeGameState(save.state)).toBe(canonicalizeGameState(state));
   });
 
-  it('suspends when the enclosure breaks and resumes without retroactive growth', () => {
+  it('keeps growing when informational enclosure geometry changes', () => {
     const state = stateWithYard();
     const bed = placeGardenBed(state);
     advanceTicks(state, 600);
@@ -181,21 +161,14 @@ describe('garden bed growth simulation', () => {
 
     // Remove an edge (not corner) wall so the four-way flood actually escapes.
     const wall = state.buildings.find(
-      (building) => building.definitionId === 'palisade-wall' && building.tileX === 85 && building.tileY === 79,
+      (building) => building.definitionId === 'wood-fence' && building.tileX === 85 && building.tileY === 80 && building.boundaryEdge === 'north',
     )!;
     state.buildings = state.buildings.filter((building) => building.id !== wall.id);
-    expect(describeGardenBed(state, bed)).toMatchObject({ phase: 'suspended' });
-    expect(describeGardenBed(state, bed).message).toMatch(/suspended/);
-
-    // A long invalid interval neither grows nor grants anything on recovery.
-    advanceTicks(state, 6_000);
-    expect(bed.garden!.progressTicks).toBe(600);
-    expect(bed.garden!.readyFiber).toBe(0);
-
+    expect(describeGardenBed(state, bed)).toMatchObject({ phase: 'growing' });
+    advanceTicks(state, 600);
+    expect(bed.garden!.progressTicks).toBe(1_200);
     state.buildings.push(wall);
-    advanceTicks(state, 60);
-    expect(bed.garden!.progressTicks).toBe(660);
-    advanceTicks(state, GARDEN_BED_GROW_TICKS - 660);
+    advanceTicks(state, GARDEN_BED_GROW_TICKS - 1_200);
     expect(bed.garden!.readyFiber).toBe(GARDEN_BED_YIELD_FIBER);
   }, 15_000);
 
@@ -253,7 +226,7 @@ describe('garden bed persistence validation', () => {
     expect(() => assertValidPortableSave(negative)).toThrow(SaveValidationError);
 
     const misplaced = portableSaveOf(state) as { state: { buildings: Array<Record<string, unknown>> } };
-    const wall = misplaced.state.buildings.find((building) => building['definitionId'] === 'palisade-wall')!;
+    const wall = misplaced.state.buildings.find((building) => building['definitionId'] === 'wood-fence')!;
     wall['garden'] = { progressTicks: 0, readyFiber: 0, nextGrowthTick: 0 };
     expect(() => assertValidPortableSave(misplaced)).toThrow(SaveValidationError);
   });
@@ -262,7 +235,8 @@ describe('garden bed persistence validation', () => {
 describe('garden bed palette copy', () => {
   it('lists a Garden Bed with cost, description, and area-8 gate data', () => {
     expect(buildableById('garden-bed')).toMatchObject({ tilesWide: 2, tilesHigh: 1 });
-    expect(GARDEN_PLACEABLE).toMatchObject({ minEnvironmentArea: 8, environmentKind: 'workYard', requiredTerrain: 'grassland', discoverAtAreaTier: 8 });
+    expect(GARDEN_PLACEABLE).toMatchObject({ minEnvironmentArea: 8, environmentKind: 'workYard', requiredTerrain: 'grassland' });
+    expect(GARDEN_PLACEABLE.requirement).toEqual({ allOf: [{ kind: 'highestAreaTierEver', atLeast: 8 }] });
     const priced = checkPlacement(createInitialState(SEED), [], buildableById('garden-bed'), 84, 80);
     expect(priced.ok).toBe(false); // gated long before cost on a fresh save
   });

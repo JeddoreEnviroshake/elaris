@@ -5,7 +5,7 @@ import { buildInfo } from '../platform/buildInfo';
  * seed→world mapping changes and CONTENT_VERSION when content definitions
  * change in a way that affects saved references.
  */
-export const WORLD_GEN_VERSION = 6;
-export const CONTENT_VERSION = 16;
-export const SAVE_SCHEMA_VERSION = 17;
+export const WORLD_GEN_VERSION = 13;
+export const CONTENT_VERSION = 67;
+export const SAVE_SCHEMA_VERSION = 89;
 export const APP_VERSION = buildInfo.commit;
