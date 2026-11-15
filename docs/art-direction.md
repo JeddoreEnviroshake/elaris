@@ -38,6 +38,19 @@ add variety without moving saved doors or building footprints.
 - Interiors use cutaway walls, worn wood and stone, woven rugs and open exits.
   Battle scenery extends behind the combatants while keeping the fighting lane
   clear and both actors in frame.
+- Combat uses teal arcane threads with ivory cores, gold rune circles and
+  crisp weapon crescents. Critical hits fracture into amber shards; misses
+  dissolve beyond the target. Enemy Mistmoth spells use lavender, Snarlfox
+  spells use ember, and Slingtail/Quillfinch replies use physical projectiles.
+  Companion effects follow their ability: woven shields, rising healing leaves,
+  canopy breezes or earthen shockwaves. Snares become three rotating rings and
+  quiet leaf motes when a bond succeeds. Keep silhouettes and health text clear.
+- Charge, release, impact and reply share a 1.15-second visual timeline.
+  Projectile endpoints sample the same motion as the fighters; health and
+  floating captions follow impact. Effects use two reusable instanced batches
+  per stage with a hard limit of 24 cues, 192 glyphs and 512 shards, without
+  new textures, dynamic lights or postprocessing passes. Reduced motion replaces
+  travel and bursts with stationary low-opacity symbols and stable captions.
 - The interface uses dark forest ink, parchment text, warm leather actions,
   fine brass borders and serif headings. Preserve readable labels, keyboard
   focus, contrast preferences and the existing accessible controls.

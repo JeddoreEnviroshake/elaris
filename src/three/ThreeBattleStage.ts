@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ModelLibrary } from './modelLibrary';
 import { QuaterniusArt, releaseArt } from './quaterniusArt';
 import { meadowMaterial } from './townEntrance';
+import {CombatEffects,BATTLE_TIMING,companionEffectBeat} from './combatEffects';
 import { creatureDefinition } from '../content/creatures';
 import {
   createCreatureRig,
@@ -13,6 +14,7 @@ import {
 } from './characterRigs';
 import {
   battleTrackToWorld,
+  battleActorPositions,
   type BattlePresentationSnapshot,
   type BattleRoundPresentation,
 } from './battleState';
@@ -27,10 +29,11 @@ interface HealthPlate {
 interface ActiveRound {
   readonly event: BattleRoundPresentation;
   readonly startedAt: number;
-  readonly projectile: THREE.Group | null;
 }
 
-const ROUND_DURATION_MS = 1_150;
+interface BattleCaption {readonly sprite:THREE.Sprite;readonly at:number;readonly duration:number;readonly x:number;readonly y:number;readonly z:number}
+
+const ROUND_DURATION_MS = BATTLE_TIMING.duration;
 const TERMINAL_LINGER_MS = 2_250;
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
@@ -47,7 +50,11 @@ export class ThreeBattleStage {
   readonly focus = new THREE.Vector3();
   private readonly arenaRoot = new THREE.Group();
   private readonly fighterRoot = new THREE.Group();
-  private readonly effectRoot = new THREE.Group();
+  private readonly effects = new CombatEffects();
+  private readonly captionRoot = new THREE.Group();
+  private readonly captions:BattleCaption[]=[];
+  private readonly intentGlyph=new THREE.Mesh(new THREE.RingGeometry(.62,.68,48,1,.2,Math.PI*1.6).rotateX(-Math.PI/2),
+    new THREE.MeshBasicMaterial({color:0xf18f70,transparent:true,opacity:.38,depthWrite:false,side:THREE.DoubleSide}));
   private playerRig: PlayerRig | null = null;
   private creatureRig: CreatureRig | null = null;
   private companionRig: CreatureRig | null = null;
@@ -62,21 +69,21 @@ export class ThreeBattleStage {
   constructor(private readonly models?: ModelLibrary) {
     this.root.name = 'three-battle-stage';
     this.root.visible = false;
-    this.root.add(this.arenaRoot, this.fighterRoot, this.effectRoot);
+    this.root.add(this.arenaRoot, this.fighterRoot, this.effects.root,this.captionRoot,this.intentGlyph);
   }
 
   get roundAnimating(): boolean {
     return this.activeRound !== null;
   }
+  get effectInstances():number{return this.effects.instanceCount;}
 
   playRound(event: BattleRoundPresentation): void {
     this.ensureEncounter(event.before);
     this.snapshot = event.resolved;
-    this.clearGroup(this.effectRoot);
-    const projectile = this.createProjectile(event);
-    if (projectile) this.effectRoot.add(projectile);
     const startedAt = performance.now();
-    this.activeRound = { event, startedAt, projectile };
+    this.activeRound = { event, startedAt };
+    this.effects.playBattle(event,startedAt);
+    this.prepareCaptions(event,startedAt);
     if (event.result.ended) this.lingerUntil = startedAt + TERMINAL_LINGER_MS;
   }
 
@@ -97,57 +104,37 @@ export class ThreeBattleStage {
     let playerX = battleTrackToWorld(resolved.playerPos);
     let creatureX = battleTrackToWorld(resolved.creaturePos);
 
-    if (event && !reducedMotion) {
-      const playerMove = event.result.companionAbility?.playerMove ?? event.result.playerMove;
-      if (playerMove) {
-        playerX = THREE.MathUtils.lerp(
-          battleTrackToWorld(playerMove.from),
-          battleTrackToWorld(playerMove.to),
-          smooth(progress / 0.34),
-        );
-      }
-      const enemyMove = event.result.companionAbility?.enemyMove ?? event.result.creatureMove;
-      if (enemyMove) {
-        creatureX = THREE.MathUtils.lerp(
-          battleTrackToWorld(enemyMove.from),
-          battleTrackToWorld(enemyMove.to),
-          smooth((progress - 0.42) / 0.3),
-        );
-      }
-      if (event.action === 'melee' && progress < 0.42) {
-        playerX += Math.min(1.3, Math.max(0.4, creatureX - playerX - 0.4)) * pulse(progress / 0.4);
-      }
-      if (event.result.creatureStrike && progress > 0.63) {
-        creatureX -= Math.min(1.1, Math.max(0.35, creatureX - playerX - 0.35)) * pulse((progress - 0.63) / 0.32);
-      }
-    }
+    if(event)({playerX,creatureX}=battleActorPositions(event,progress,reducedMotion));
 
     this.playerRig.root.position.set(playerX, 0, 0.35);
     this.focus.set((playerX+creatureX)/2, 0, 0.35);
     this.creatureRig.root.position.set(creatureX, 0, -0.2);
+    this.intentGlyph.position.set(creatureX,.035,-.2);
+    this.intentGlyph.visible=before.enemyIntent.includes('strike')&&(!event||progress<.68);
     this.playerRig.root.rotation.y = Math.PI / 2;
     this.creatureRig.root.rotation.y = Math.PI / 2;
     let playerMotion:PlayerMotion='ready',creatureMotion:CreatureMotion='alert';
     let playerProgress:number|undefined,creatureProgress:number|undefined;
-    const playerHit=!!event?.result.creatureStrike&&event.result.creatureStrike.outcome!=='dodge';
+    const playerHit=!!event?.result.creatureStrike&&event.result.creatureStrike.outcome!=='dodge'&&event.result.creatureStrike.damage>0;
     const creatureHit=!!event?.result.playerStrike&&!['miss','dodge'].includes(event.result.playerStrike.outcome)
       ||(event?.result.companionAbility?.damage??0)>0;
+    const creatureImpact=event&&!event.result.playerStrike&&(event.result.companionAbility?.damage??0)>0?companionEffectBeat(event):BATTLE_TIMING.impact;
     if(event){
       if(progress<.43){
         playerMotion=event.action==='melee'?'melee':event.action==='magic'?'cast':event.action==='ranged'?'ranged':event.action==='snare'?'throw':event.result.playerMove?'walk':'ready';
         playerProgress=clamp01(progress/.43);
       }
-      if(progress>.20&&progress<.51){
-        if(creatureHit){creatureMotion='hit';creatureProgress=(progress-.20)/.31;}
-        else if(event.result.playerStrike?.outcome==='dodge'){creatureMotion='dodge';creatureProgress=(progress-.20)/.31;}
+      if(progress>creatureImpact&&progress<creatureImpact+.26){
+        if(creatureHit){creatureMotion='hit';creatureProgress=(progress-creatureImpact)/.26;}
+        else if(event.result.playerStrike?.outcome==='dodge'){creatureMotion='dodge';creatureProgress=(progress-BATTLE_TIMING.impact)/.26;}
       }
-      if(event.result.creatureMove&&progress>.42&&progress<.70)creatureMotion='walk';
+      if(event.result.creatureMove&&progress>.42&&progress<.70&&creatureMotion==='alert')creatureMotion='walk';
       if(event.result.creatureStrike&&progress>.58&&progress<.95){creatureMotion='attack';creatureProgress=(progress-.58)/.37;}
-      if(event.result.creatureStrike&&progress>.74&&progress<.99){playerMotion=playerHit?'hit':'dodge';playerProgress=(progress-.74)/.25;}
+      if(event.result.creatureStrike&&progress>BATTLE_TIMING.reply&&progress<1){playerMotion=playerHit?'hit':event.result.creatureStrike.outcome==='dodge'?'dodge':'ready';playerProgress=(progress-BATTLE_TIMING.reply)/.20;}
       if(event.result.ended&&(event.result.defeated||event.result.tamed)&&progress>.52){
         creatureMotion=event.result.tamed?'capture':'defeat';creatureProgress=clamp01((progress-.52)/.45);
       }
-      if(event.result.playerDefeated&&progress>.76){playerMotion='defeat';playerProgress=clamp01((progress-.76)/.24);}
+      if(event.result.playerDefeated&&progress>BATTLE_TIMING.reply){playerMotion='defeat';playerProgress=clamp01((progress-BATTLE_TIMING.reply)/.20);}
     }
     const castingWithStaff = event?.action === 'magic' && event.before.magicStaffEquipped && progress < 0.55;
     this.playerRig.setGatherTool(castingWithStaff || (!event && this.snapshot.magicStaffEquipped)
@@ -157,11 +144,13 @@ export class ThreeBattleStage {
     this.creatureRig.animate(timeMs,creatureMotion,reducedMotion,creatureProgress===undefined?undefined:{progress:creatureProgress});
 
     this.animateReactions(event, progress, reducedMotion);
-    this.updateProjectile(round, progress, playerX, creatureX, reducedMotion);
+    this.effects.update(timeMs,reducedMotion);
+    this.updateCaptions(timeMs,reducedMotion);
     this.updateCompanion(timeMs, event, progress, reducedMotion, playerX);
 
-    const hpProgress = event ? smooth((progress - 0.2) / 0.25) : 1;
-    const playerHp = Math.round(THREE.MathUtils.lerp(before.playerHp, resolved.playerHp, hpProgress));
+    const hpProgress = event ? smooth((progress - creatureImpact) / 0.14) : 1;
+    const playerHpProgress=event?smooth((progress-(resolved.playerHp<before.playerHp?BATTLE_TIMING.reply:.39))/.14):1;
+    const playerHp = Math.round(THREE.MathUtils.lerp(before.playerHp, resolved.playerHp, playerHpProgress));
     const creatureHp = Math.round(THREE.MathUtils.lerp(before.creatureHp, resolved.creatureHp, hpProgress));
     this.updateHealthPlate(this.playerPlate!, 'Ranger', playerHp, resolved.playerMaxHp, '#78d49b');
     this.updateHealthPlate(
@@ -177,10 +166,8 @@ export class ThreeBattleStage {
     if (round && progress >= 1) {
       if (!round.event.result.ended) {
         this.activeRound = null;
-        this.clearGroup(this.effectRoot);
       } else if (timeMs >= this.lingerUntil) {
         this.activeRound = null;
-        this.clearGroup(this.effectRoot);
       }
     }
     return true;
@@ -188,6 +175,7 @@ export class ThreeBattleStage {
 
   dispose(): void {
     this.art?.retire();
+    this.effects.dispose();this.root.remove(this.effects.root);
     this.clearGroup(this.root);
   }
 
@@ -201,7 +189,7 @@ export class ThreeBattleStage {
     this.clearGroup(this.arenaRoot);
     this.art = this.models ? new QuaterniusArt(this.models, this.arenaRoot) : null;
     this.clearGroup(this.fighterRoot);
-    this.clearGroup(this.effectRoot);
+    this.effects.clear();this.clearGroup(this.captionRoot);this.captions.length=0;
     this.buildArena(snapshot.speciesId);
 
     this.playerRig = createPlayerRig();
@@ -270,11 +258,11 @@ export class ThreeBattleStage {
     if (!event || reducedMotion || !this.playerRig || !this.creatureRig) return;
     // The articulated clips own recoil and terminal poses. Only the dodge step
     // offsets the whole fighter; no full-body shrinking or hit vibration.
-    if(event.result.playerStrike?.outcome==='dodge'&&progress>.20&&progress<.51){
-      this.creatureRig.root.position.z-=pulse((progress-.20)/.31)*.32;
+    if(event.result.playerStrike?.outcome==='dodge'&&progress>BATTLE_TIMING.impact&&progress<.59){
+      this.creatureRig.root.position.z-=pulse((progress-BATTLE_TIMING.impact)/.26)*.32;
     }
-    if(event.result.creatureStrike?.outcome==='dodge'&&progress>.74&&progress<.99){
-      this.playerRig.root.position.z+=pulse((progress-.74)/.25)*.30;
+    if(event.result.creatureStrike?.outcome==='dodge'&&progress>BATTLE_TIMING.reply&&progress<1){
+      this.playerRig.root.position.z+=pulse((progress-BATTLE_TIMING.reply)/.20)*.30;
     }
   }
 
@@ -288,58 +276,44 @@ export class ThreeBattleStage {
     if (!this.companionRig) return;
     this.companionRig.root.position.set(playerX - 1.05, 0, 1.15);
     this.companionRig.root.rotation.y = -Math.PI / 2;
-    const acting = Boolean(event?.result.companionAbility) && progress > 0.25 && progress < 0.62;
-    this.companionRig.animate(timeMs,acting?'assist':'idle',reducedMotion,acting?{progress:(progress-.25)/.37}:undefined);
-    if (acting && !reducedMotion) this.companionRig.root.position.y += pulse((progress - 0.25) / 0.37) * 0.34;
+    const beat=event?companionEffectBeat(event):.39,start=Math.max(0,beat-.10),duration=.42;
+    const acting = Boolean(event?.result.companionAbility) && progress > start && progress < start+duration;
+    this.companionRig.animate(timeMs,acting?'assist':'idle',reducedMotion,acting?{progress:(progress-start)/duration}:undefined);
+    if (acting && !reducedMotion) this.companionRig.root.position.y += pulse((progress-start)/duration) * 0.34;
   }
 
-  private createProjectile(event: BattleRoundPresentation): THREE.Group | null {
-    if (!['ranged', 'magic', 'snare'].includes(event.action)) return null;
-    const root = new THREE.Group();
-    root.name = `battle-${event.action}-projectile`;
-    if (event.action === 'ranged') {
-      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.72, 6), new THREE.MeshStandardMaterial({ color: 0xd8c79d, roughness: 0.7 }));
-      shaft.rotation.z = Math.PI / 2;
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.19, 5), new THREE.MeshStandardMaterial({ color: 0xaeb5b2, roughness: 0.55 }));
-      tip.rotation.z = -Math.PI / 2;
-      tip.position.x = 0.42;
-      root.add(shaft, tip);
-    } else if (event.action === 'magic') {
-      root.add(new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.2, 1),
-        new THREE.MeshStandardMaterial({ color: 0xd19aff, emissive: 0x7435a4, emissiveIntensity: 2.2, roughness: 0.25 }),
-      ));
-      root.add(new THREE.PointLight(0xc57cff, 4, 4, 2));
-    } else {
-      const snare = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.055, 6, 14),
-        new THREE.MeshStandardMaterial({ color: 0xd1b07a, roughness: 0.82 }),
-      );
-      snare.rotation.x = Math.PI / 2;
-      root.add(snare);
+  private prepareCaptions(event:BattleRoundPresentation,startedAt:number):void {
+    this.clearGroup(this.captionRoot);this.captions.length=0;
+    const p=battleActorPositions(event,BATTLE_TIMING.reply).playerX,c=battleActorPositions(event,BATTLE_TIMING.impact).creatureX;
+    const strike=event.result.playerStrike,counter=event.result.creatureStrike;
+    if(strike)this.addCaption(strike.outcome==='miss'?'MISS':strike.outcome==='dodge'?'EVADE':`${strike.outcome==='crit'?'CRITICAL  ':''}${strike.damage}`,
+      strike.outcome==='crit'?'#ffce79':event.action==='magic'?'#9ff7e7':'#fff0d4',c,this.creatureHeight(event.before.speciesId)+.4,-.2,startedAt+BATTLE_TIMING.impact*ROUND_DURATION_MS);
+    if(counter)this.addCaption(counter.outcome==='dodge'?'EVADE':counter.damage===0?'BLOCKED':String(counter.damage),counter.damage===0?'#c0e9a4':'#ffb79d',p,2.65,.35,startedAt+BATTLE_TIMING.reply*ROUND_DURATION_MS);
+    const assist=event.result.companionAbility;
+    if(assist)this.addCaption(assist.displayName,'#c0e9a4',p-1.05,1.8,1.15,startedAt+companionEffectBeat(event)*ROUND_DURATION_MS);
+    if(event.result.tamed)this.addCaption('BONDED','#ddf4ac',c,this.creatureHeight(event.before.speciesId)+.8,-.2,startedAt+650,1300);
+  }
+
+  private addCaption(text:string,color:string,x:number,y:number,z:number,at:number,duration=720):void {
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;
+    const context=canvas.getContext('2d');if(!context)return;
+    context.textAlign='center';context.textBaseline='middle';context.font='900 36px Trebuchet MS, sans-serif';
+    context.lineJoin='round';context.strokeStyle='#13271e';context.lineWidth=9;context.strokeText(text,256,48);
+    context.fillStyle=color;context.fillText(text,256,48);
+    const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
+    const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:false,depthWrite:false}));
+    sprite.scale.set(3.2,.6,1);sprite.renderOrder=35;sprite.visible=false;this.captionRoot.add(sprite);
+    this.captions.push({sprite,at,duration,x,y,z});
+  }
+
+  private updateCaptions(timeMs:number,reducedMotion:boolean):void {
+    for(let i=this.captions.length-1;i>=0;i--){
+      const caption=this.captions[i]!,t=(timeMs-caption.at)/caption.duration;
+      if(t>=1){this.captionRoot.remove(caption.sprite);releaseArt(caption.sprite);this.captions.splice(i,1);continue;}
+      caption.sprite.visible=t>=0;
+      caption.sprite.position.set(caption.x,caption.y+(reducedMotion?0:smooth(t)*.5),caption.z);
+      (caption.sprite.material as THREE.SpriteMaterial).opacity=t<0?0:Math.min(1,t*8,(1-t)*5);
     }
-    root.traverse((child) => { if (child instanceof THREE.Mesh) child.castShadow = true; });
-    return root;
-  }
-
-  private updateProjectile(
-    round: ActiveRound | null,
-    progress: number,
-    playerX: number,
-    creatureX: number,
-    reducedMotion: boolean,
-  ): void {
-    const projectile = round?.projectile;
-    if (!projectile) return;
-    const flight = reducedMotion ? 1 : smooth((progress - 0.17) / 0.16);
-    projectile.visible = progress <= 0.38;
-    projectile.position.set(
-      THREE.MathUtils.lerp(playerX + 0.35, creatureX - 0.3, flight),
-      1.05 + Math.sin(flight * Math.PI) * (round!.event.action === 'snare' ? 1.1 : 0.35),
-      0.05,
-    );
-    if (round!.event.action === 'snare') projectile.rotation.z = flight * Math.PI * 3;
-    if (round!.event.action === 'magic') projectile.scale.setScalar(0.8 + Math.sin(flight * Math.PI * 3) * 0.18);
   }
 
   private createHealthPlate(): HealthPlate {

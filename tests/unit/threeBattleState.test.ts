@@ -64,4 +64,11 @@ describe('3D battle presentation state', () => {
     expect(battleTrackToWorld(-20)).toBe(-4);
     expect(battleTrackToWorld(140)).toBe(4);
   });
+  it('retains the enemy position after both a companion push and the enemy reply',()=>{
+    const state=encounterState(),before=captureBattleSnapshot(state)!;state.activeEncounter=null;
+    const resolved=resolvedBattleSnapshot(before,state,{ok:true,message:'reply',ended:true,playerDefeated:true,
+      companionAbility:{abilityId:'tuftle-push',displayName:'Bumper Push',message:'push',enemyMove:{from:68,to:76}},
+      creatureMove:{from:76,to:66}});
+    expect(resolved.creaturePos).toBe(66);
+  });
 });

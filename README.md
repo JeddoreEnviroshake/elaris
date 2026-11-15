@@ -90,6 +90,14 @@ articulated combatants, movement, melee/ranged/magic attacks, companion support,
 damage reactions, captures, and terminal poses. The accessible battle controls
 remain the authoritative input surface.
 
+Combat effects layer teal spell threads, gold runes, weapon crescents,
+critical-hit shards, healing leaves, woven shields and bonding rings. Companion
+abilities and enemy species have distinct visual styles. Fighter movement,
+projectiles, health changes and impact captions share a local timeline; two
+bounded instanced batches draw the effects without additional texture downloads
+or effect lights. Reduced motion uses quiet, stationary symbols. Overworld
+strikes and arrow impacts reuse the same effect system.
+
 Farm Counters, Small Pens, and Barns have dedicated 3D structures. Click the
 Farm Counter to order a previously tamed species, assign the creature from the
 roster, then click its Pen or Barn to collect finite passive output.

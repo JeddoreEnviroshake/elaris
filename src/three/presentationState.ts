@@ -42,7 +42,7 @@ export interface ThreePresentationState {
   readonly target: InteractionTargetPresentation | null;
   readonly gathering: boolean;
   readonly gatherProgress?: number;
-  readonly playerAction?:{readonly kind:'melee'|'ranged'|'magic';readonly progress:number;readonly x:number;readonly y:number}|null;
+  readonly playerAction?:{readonly id:number;readonly arrowTracked:boolean;readonly kind:'melee'|'ranged'|'magic';readonly progress:number;readonly x:number;readonly y:number}|null;
   readonly gatherAssistance?: GatherAssistancePresentation | null;
   readonly prefersReducedMotion: boolean;
   readonly interior: {

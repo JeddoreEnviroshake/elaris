@@ -470,7 +470,7 @@ export class WorldScene extends Phaser.Scene {
   private activeEffectCount = 0;
   private ambientLeafSequence = 0;
   private gatheringUntil = 0;
-  private playerActionVisual:{kind:StrikeStyle;startedAt:number;x:number;y:number}|null=null;
+  private playerActionVisual:{kind:StrikeStyle;startedAt:number;x:number;y:number;arrowTracked:boolean}|null=null;
   /**
    * Walls are never an ambient target and never highlight on approach, but a
    * damaged one carries a health bar until it is repaired or destroyed.
@@ -509,7 +509,7 @@ export class WorldScene extends Phaser.Scene {
       gathering: this.time.now < this.gatheringUntil,
       gatherProgress: Math.max(0,Math.min(1,1-(this.gatheringUntil-this.time.now)/280)),
       playerAction:this.playerActionVisual&&this.time.now-this.playerActionVisual.startedAt<600
-        ?{kind:this.playerActionVisual.kind,progress:Math.max(0,(this.time.now-this.playerActionVisual.startedAt)/600),x:this.playerActionVisual.x,y:this.playerActionVisual.y}:null,
+        ?{id:this.playerActionVisual.startedAt,arrowTracked:this.playerActionVisual.arrowTracked,kind:this.playerActionVisual.kind,progress:Math.max(0,(this.time.now-this.playerActionVisual.startedAt)/600),x:this.playerActionVisual.x,y:this.playerActionVisual.y}:null,
       gatherAssistance: this.gatherAssistance && this.time.now - this.gatherAssistance.startedAt < 900
         ? { ...this.gatherAssistance, progress: Math.max(0, (this.time.now - this.gatherAssistance.startedAt) / 900) } : null,
       prefersReducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -2141,7 +2141,7 @@ export class WorldScene extends Phaser.Scene {
     const y = raider?.y ?? sprite?.y ?? this.state.player.y;
     const damage = Math.max(0, previous - hp);
     if (damage <= 0) return;
-    this.playerActionVisual={kind:style,startedAt:this.time.now,x,y};
+    this.playerActionVisual={kind:style,startedAt:this.time.now,x,y,arrowTracked:style==='ranged'};
     this.combatOverlay.reportHit(raiderId, x, y, hp, maxHp, damage, style, 'hit');
     if (sprite) this.combatOverlay.playHitStop(sprite);
   }
@@ -2940,7 +2940,7 @@ export class WorldScene extends Phaser.Scene {
     this.hud.showFeedback(result.message, result.ok);
     if (!result.ok) return;
     const struck=result.creatureId?this.state.wildCreatures.find(creature=>creature.id===result.creatureId)??this.creatureSprites.get(result.creatureId):null;
-    if(struck)this.playerActionVisual={kind:style,startedAt:this.time.now,x:struck.x,y:struck.y};
+    if(struck)this.playerActionVisual={kind:style,startedAt:this.time.now,x:struck.x,y:struck.y,arrowTracked:false};
 
     // The lock follows what was actually struck, exactly as the raider and
     // resource paths do, so a creature engaged from the action button still

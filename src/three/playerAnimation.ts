@@ -153,9 +153,13 @@ export class WardenAnimator {
       rightArm.rotation.z=-.15-hit*.5;this.rightElbow.rotation.x=-.75*wind-.15;
       leftArm.rotation.x=-.25-hit*.25;leftLeg.rotation.x=-hit*.20;rightLeg.rotation.x=hit*.16;
     } else if(motion==='cast'){
-      rightArm.rotation.x=-.45-hold*.95;this.rightElbow.rotation.x=-.55*hold;
-      leftArm.rotation.x=-hold*.85;leftArm.rotation.z=hold*.35;this.leftElbow.rotation.x=-hold*.75;
-      torso.rotation.x=-hold*.06;head.rotation.x=-hold*.09;
+      const charge=envelope(p,0,.24,.43),release=envelope(p,.30,.46,.85);
+      rightArm.rotation.x=-.35-charge*.85-release*1.25;this.rightElbow.rotation.x=-charge*.85-release*.12;
+      rightArm.rotation.y=-charge*.22+release*.12;
+      leftArm.rotation.x=-charge*.85-release*1.1;leftArm.rotation.z=charge*.38+release*.12;
+      this.leftElbow.rotation.x=-charge*.85-release*.18;
+      torso.rotation.x=-charge*.08+release*.09;torso.rotation.y=-charge*.12+release*.13;
+      head.rotation.x=-charge*.10+release*.025;
     } else if(motion==='ranged'){
       leftArm.rotation.x=-hold*1.35;leftArm.rotation.y=-hold*.30;
       rightArm.rotation.x=-hold*.95;rightArm.rotation.y=hold*.55;this.rightElbow.rotation.x=-hold*1.4;

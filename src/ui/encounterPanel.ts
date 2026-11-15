@@ -24,12 +24,13 @@ import {
 import type { CompanionAbilityId, GameState, SpeciesId } from '../simulation/state';
 import { magicStaffPowerBonus } from '../simulation/characterProgression';
 import { div, uiButton } from './controls';
+import {BATTLE_TIMING} from '../presentation/combatTiming';
 
 const STYLE_ICONS: Readonly<Record<CombatStyle, string>> = { melee: '⚔️', ranged: '🏹', magic: '✨' };
 /** Impact/counter/outro pacing in ms — "quick with punch", under a second per round. */
-const IMPACT_MS = 240;
-const COUNTER_MS = 480;
-const UNLOCK_MS = 1100;
+const IMPACT_MS = BATTLE_TIMING.duration*BATTLE_TIMING.impact;
+const COUNTER_MS = BATTLE_TIMING.duration*BATTLE_TIMING.reply;
+const UNLOCK_MS = BATTLE_TIMING.duration;
 const OUTRO_MS = 1600;
 
 interface BarParts { fill: HTMLDivElement; text: HTMLDivElement }
@@ -370,7 +371,7 @@ export class EncounterPanel {
         if (!result.creatureStrike) this.float(this.creatureFighter, result.creatureMove!.to < result.creatureMove!.from ? 'ADVANCE' : 'RETREAT', '#fff3bd');
       });
     }
-    if (result.creatureStrike && !result.ended) this.later(COUNTER_MS + (result.creatureMove ? 300 : 0), () => {
+    if (result.creatureStrike && !result.ended) this.later(COUNTER_MS-140, () => {
       this.animate(this.creatureFighter, 'eb-lunge-left');
       this.later(140, () => this.showStrike(this.playerFighter, result.creatureStrike!, false));
     });
@@ -417,10 +418,11 @@ export class EncounterPanel {
     const projectile = div({
       position: 'absolute', bottom: '18%', left: '24%', zIndex: '2', pointerEvents: 'none',
       font: '20px system-ui, sans-serif',
-      color: style === 'magic' ? '#c792ea' : '#e0d7c0',
-      textShadow: style === 'magic' ? '0 0 8px #a06bd4' : 'none',
+      color: style === 'magic' ? '#9df6df' : '#ffcf80',
+      textShadow: style === 'magic' ? '0 0 9px #5fdec5, 0 0 18px #4dbfa7' : '0 0 5px #ffc46b',
     });
     projectile.textContent = style === 'magic' ? '✦' : '➳';
+    projectile.classList.add('eb-projectile');
     projectile.style.animation = `eb-shot ${IMPACT_MS}ms linear forwards`;
     this.stage.appendChild(projectile);
     this.later(IMPACT_MS + 60, () => projectile.remove());
@@ -433,11 +435,13 @@ export class EncounterPanel {
       textShadow: '0 2px 3px rgba(0,0,0,0.65)', animation: 'eb-float 0.8s ease-out forwards', zIndex: '3',
     });
     label.textContent = text;
+    label.classList.add('eb-float');
     fighter.appendChild(label);
     this.later(850, () => label.remove());
   }
 
   private animate(element: HTMLElement, name: string): void {
+    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches||document.documentElement.dataset.presentation==='3d')return;
     element.style.animation = 'none';
     void element.offsetWidth; // restart the animation from frame zero
     element.style.animation = `${name} 0.36s ease-out`;
@@ -496,6 +500,10 @@ function ensureBattleStyles(): void {
 @keyframes eb-pulse { 0% { box-shadow: 0 0 0 0 rgba(160,107,212,0.8); } 100% { box-shadow: 0 0 0 9px rgba(160,107,212,0); } }
 @keyframes eb-pop { 0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
 .elaris-battle canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+@media (prefers-reduced-motion: reduce) {
+  .elaris-battle .eb-projectile { display: none !important; }
+  .elaris-battle .eb-float { animation: none !important; }
+}
 html[data-presentation="3d"] .elaris-battle {
   background-color: transparent !important;
   background-image: none !important;

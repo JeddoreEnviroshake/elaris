@@ -78,6 +78,7 @@ import {
   type DangerSafeRect,
 } from '../scenes/dangerPresentation';
 import { ThreeBattleStage } from './ThreeBattleStage';
+import {CombatEffects,COMBAT_PALETTE} from './combatEffects';
 import { ThreeInteriorStage, type InteriorStageFrame } from './ThreeInteriorStage';
 import {
   composeHeroEnvironment,
@@ -164,6 +165,7 @@ export interface ThreeRendererSnapshot {
   readonly placementTileY: number | null;
   readonly targetKind: InteractionTargetPresentation['kind'] | null;
   readonly effectParticles: number;
+  readonly combatEffectInstances:number;
   /** Raid wave currently rigged, and arrows still in the air over it. */
   readonly raiderRigs: number;
   readonly followerRigs: number;
@@ -174,6 +176,7 @@ export interface ThreeRendererSnapshot {
   readonly arrowsInFlight: number;
   readonly battleActive: boolean;
   readonly battleRoundAnimating: boolean;
+  readonly battleEffectInstances:number;
   readonly interiorActive: boolean;
   readonly interiorId: string | null;
 }
@@ -300,6 +303,8 @@ export class Elaris3DRenderer {
   /** World-space floor wash for every tile currently reached by a purifier. */
   private readonly protectionRoot = new THREE.Group();
   private readonly battleStage = new ThreeBattleStage(this.models);
+  private readonly combatEffects = new CombatEffects();
+  private lastCombatActionId=Number.NEGATIVE_INFINITY;
   private readonly interiorStage = new ThreeInteriorStage(this.models);
   private readonly focusRing: THREE.Mesh;
   private readonly playerRing: THREE.Mesh;
@@ -424,7 +429,7 @@ export class Elaris3DRenderer {
 
     this.scene.add(
       this.worldRoot, this.entityRoot, this.raiderRoot, this.workerRoot, this.stormRoot, this.arrowRoot,
-      this.feedbackRoot, this.protectionRoot, this.playerRoot, this.battleStage.root,
+      this.feedbackRoot, this.protectionRoot, this.playerRoot, this.battleStage.root,this.combatEffects.root,
       this.interiorStage.root,
       this.contactShadows.mesh,
     );
@@ -507,6 +512,7 @@ export class Elaris3DRenderer {
       placementTileY: presentation?.placement?.tileY ?? null,
       targetKind: presentation?.target?.kind ?? null,
       effectParticles: this.particles.length,
+      combatEffectInstances:this.combatEffects.instanceCount,
       raiderRigs: this.raiderVisuals.size,
       followerRigs: this.followerRigs.size,
       batchPreviewParts: presentation?.batchPlacements?.length ?? 0,
@@ -515,6 +521,7 @@ export class Elaris3DRenderer {
       arrowsInFlight: this.arrows.length,
       battleActive: this.battleCameraActive,
       battleRoundAnimating: this.battleStage.roundAnimating,
+      battleEffectInstances:this.battleStage.effectInstances,
       interiorActive: presentation?.interior !== null && presentation?.interior !== undefined,
       interiorId: presentation?.interior?.definition.id ?? null,
     };
@@ -543,6 +550,7 @@ export class Elaris3DRenderer {
     this.disposeObject(this.playerRoot);
     this.disposeObject(this.focusRing);
     this.battleStage.dispose();
+    this.combatEffects.dispose();
     this.interiorStage.dispose();
     this.disposeObject(this.contactShadows.mesh);
     this.finish.dispose();
@@ -710,6 +718,7 @@ export class Elaris3DRenderer {
     this.clearGroup(this.workerRoot);
     this.clearGroup(this.stormRoot);
     this.clearGroup(this.arrowRoot);
+    this.combatEffects.clear();this.lastCombatActionId=Number.NEGATIVE_INFINITY;
     this.stormVisuals.clear();
     this.raiderVisuals.clear();
     this.workerRigs.clear();
@@ -2549,21 +2558,24 @@ export class Elaris3DRenderer {
 
   /** A short spark where the arrow lands; brighter and wider when it kills. */
   private spawnArrowImpact(at: THREE.Vector3, killed: boolean): void {
-    const count = killed ? 8 : 4;
-    for (let index = 0; index < count; index += 1) {
-      const mesh = new THREE.Mesh(
-        new THREE.TetrahedronGeometry(killed ? 0.085 : 0.06),
-        new THREE.MeshBasicMaterial({ color: killed ? 0xd8604a : 0xe6d5a8, transparent: true, opacity: 1 }),
-      );
-      mesh.position.copy(at);
-      this.feedbackRoot.add(mesh);
-      this.particles.push({
-        mesh,
-        velocity: new THREE.Vector3(((index * 41) % 9 - 4) * 0.22, 0.9 + (index % 3) * 0.3, ((index * 29) % 7 - 3) * 0.22),
-        age: 0,
-        lifetime: 0.34 + (index % 3) * 0.07,
-      });
+    this.combatEffects.emit({kind:'impact',at:performance.now(),duration:360,from:at,to:at,color:COMBAT_PALETTE.gold,critical:killed});
+  }
+
+  private updateCombatEffects(presentation:ThreePresentationState|null,time:number,reduced:boolean):void {
+    const action=presentation?.playerAction;
+    if(action&&action.id!==this.lastCombatActionId){
+      this.lastCombatActionId=action.id;
+      if(!action.arrowTracked){
+        const from={x:this.playerRoot.position.x,y:1.05+this.actorRoot.position.y,z:this.playerRoot.position.z};
+        const to={x:action.x/TILE_SIZE,y:1,z:action.y/TILE_SIZE};
+        const start=time-action.progress*600;
+        const color=action.kind==='magic'?COMBAT_PALETTE.arcane:COMBAT_PALETTE.ivory;
+        if(action.kind==='magic')this.combatEffects.emit({kind:'charge',at:start,duration:170,from,to:from,color});
+        this.combatEffects.emit({kind:action.kind==='magic'?'bolt':action.kind==='ranged'?'arrow':'slash',at:start+100,duration:180,from,to,color});
+        this.combatEffects.emit({kind:'impact',at:start+280,duration:340,from:to,to,color});
+      }
     }
+    this.combatEffects.update(time,reduced);
   }
 
   private updateParticles(deltaSeconds: number): void {
@@ -2684,6 +2696,7 @@ export class Elaris3DRenderer {
     this.workerRoot.visible = !battleActive;
     this.stormRoot.visible = !battleActive;
     this.arrowRoot.visible = !battleActive;
+    this.combatEffects.root.visible=!battleActive;
     this.feedbackRoot.visible = !battleActive;
     this.protectionRoot.visible = !battleActive;
     this.playerRoot.visible = !battleActive;
@@ -2720,7 +2733,11 @@ export class Elaris3DRenderer {
     if(!gathering)this.lastGatherKind=null;
     this.playerRig.setGatherTool(action?.kind==='ranged'?'bow':action?.kind==='magic'?holdingStaff?'staff':'hands'
       :holdingStaff?'staff':gatherToolForNode(action?.kind==='melee'?'tree':this.lastGatherKind));
-    if(Number.isFinite(this.previousPlayerHp)&&this.state.player.hp<this.previousPlayerHp&&!battleActive)this.playerHurtAt=time;
+    if(Number.isFinite(this.previousPlayerHp)&&this.state.player.hp<this.previousPlayerHp&&!battleActive){
+      this.playerHurtAt=time;
+      const at={x:player.x,y:.85,z:player.z};
+      this.combatEffects.emit({kind:'impact',at:time+70,duration:320,from:at,to:at,color:COMBAT_PALETTE.enemy});
+    }
     this.previousPlayerHp=this.state.player.hp;
     const hurt=time-this.playerHurtAt<380;
     this.playerRig.animate(
@@ -2778,6 +2795,7 @@ export class Elaris3DRenderer {
       this.syncFollowerCreatures(time,reducedMotion,presentation?.gatherAssistance);
       this.syncArcaneStrikes(reducedMotion);
       this.updateArrows(deltaSeconds, reducedMotion);
+      this.updateCombatEffects(presentation,time,reducedMotion);
       this.updateAmbientMotes(time, reducedMotion);
       this.entrance?.update(time, reducedMotion);
       this.vegetation?.update(player.x, player.z);
@@ -2807,6 +2825,7 @@ export class Elaris3DRenderer {
     this.workerRoot.visible = false;
     this.stormRoot.visible = false;
     this.arrowRoot.visible = false;
+    this.combatEffects.root.visible=false;
     this.feedbackRoot.visible = false;
     this.protectionRoot.visible = false;
     this.playerRoot.visible = true;
