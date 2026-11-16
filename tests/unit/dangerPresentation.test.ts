@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DANGER_PRESENTATION,
   dangerSafeCells,
-  dangerSafeRects,
+  playerExposedTo,
   purifierProtectedCells,
   purifierProtectedRects,
 } from '../../src/scenes/dangerPresentation';
@@ -10,18 +10,45 @@ import { createInitialState } from '../../src/simulation/state';
 import { enclosedEnvironment } from './helpers/buildings';
 
 describe('danger presentation', () => {
-  it('uses a dark night palette for raids rather than the poison-green palette', () => {
-    expect(DANGER_PRESENTATION.raid.baseColor).toBe(0x050913);
-    expect(DANGER_PRESENTATION.raid.baseColor).not.toBe(DANGER_PRESENTATION.fog.baseColor);
-    expect(DANGER_PRESENTATION.raid.wispColors).not.toEqual(DANGER_PRESENTATION.fog.wispColors);
+  it('tints each threat its own hue: green poison, black night, violet storm', () => {
+    const { fog, raid, storm } = DANGER_PRESENTATION;
+    expect(new Set([fog.tintColor, raid.tintColor, storm.tintColor]).size).toBe(3);
+    expect(new Set([fog.skyZenith, raid.skyZenith, storm.skyZenith]).size).toBe(3);
+    const channels = (color: number) => [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff] as const;
+    const [fogR, fogG, fogB] = channels(fog.tintColor);
+    expect(fogG).toBeGreaterThan(Math.max(fogR, fogB));
+    expect(Math.max(...channels(raid.tintColor))).toBeLessThan(16);
+    const [stormR, stormG, stormB] = channels(storm.tintColor);
+    expect(stormB).toBeGreaterThan(stormG);
+    expect(stormR).toBeGreaterThan(stormG);
   });
 
-  it('gives the storm a violet palette of its own', () => {
-    expect(DANGER_PRESENTATION.storm.baseColor).not.toBe(DANGER_PRESENTATION.fog.baseColor);
-    expect(DANGER_PRESENTATION.storm.baseColor).not.toBe(DANGER_PRESENTATION.raid.baseColor);
-    expect(DANGER_PRESENTATION.storm.wispColors).not.toEqual(DANGER_PRESENTATION.raid.wispColors);
+  it('keeps the tint slight at the centre so the ground stays readable', () => {
+    for (const style of Object.values(DANGER_PRESENTATION)) {
+      expect(style.tintCenterAlpha).toBeLessThanOrEqual(0.2);
+      expect(style.tintEdgeAlpha).toBeGreaterThan(style.tintCenterAlpha);
+      expect(style.tintEdgeAlpha).toBeLessThan(0.7);
+    }
     // Lighter than a raid night: the player has to read the ground through it.
-    expect(DANGER_PRESENTATION.storm.baseAlpha).toBeLessThan(DANGER_PRESENTATION.raid.baseAlpha);
+    expect(DANGER_PRESENTATION.storm.tintEdgeAlpha).toBeLessThan(DANGER_PRESENTATION.raid.tintEdgeAlpha);
+  });
+
+  it('tints the screen only while the threat can reach the player', () => {
+    const state = createInitialState(655);
+    state.currentArea = { key: '1,0', x: 1, y: 0, name: 'Away', theme: 'forest', seed: 9 };
+    state.buildings = enclosedEnvironment(10, 10, 3, 2, 'indoor');
+    state.player.x = 30 * 16 + 8;
+    state.player.y = 30 * 16 + 8;
+    expect(playerExposedTo(state, 'raid')).toBe(true);
+    expect(playerExposedTo(state, 'storm')).toBe(true);
+    expect(playerExposedTo(state, 'fog')).toBe(true);
+
+    state.player.x = 11 * 16 + 8;
+    state.player.y = 10 * 16 + 8;
+    // Walls answer a raid and a storm; poison needs purified air as well.
+    expect(playerExposedTo(state, 'raid')).toBe(false);
+    expect(playerExposedTo(state, 'storm')).toBe(false);
+    expect(playerExposedTo(state, 'fog')).toBe(true);
   });
 
   it('punches nothing the player built out of a storm', () => {
@@ -74,16 +101,6 @@ describe('danger presentation', () => {
     state.player.x = 11 * 16 + 8;
     state.player.y = 10 * 16 + 8;
     expect(dangerSafeCells(state, 'raid')).toEqual(outside);
-  });
-
-  it('merges adjacent safe cells into compact strips for the 3D mask', () => {
-    const state = createInitialState(321);
-    state.currentArea = { key: '1,0', x: 1, y: 0, name: 'Away', theme: 'forest', seed: 9 };
-    state.buildings = enclosedEnvironment(10, 10, 3, 2, 'indoor');
-    expect(dangerSafeRects(state, 'raid')).toEqual([
-      { tileX: 10, tileY: 10, tilesWide: 3, tilesHigh: 1 },
-      { tileX: 10, tileY: 11, tilesWide: 3, tilesHigh: 1 },
-    ]);
   });
 
   it('uses the same outdoor 3x3 coverage for fog masking and the blue floor cue', () => {

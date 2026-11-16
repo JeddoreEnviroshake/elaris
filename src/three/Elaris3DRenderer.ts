@@ -73,9 +73,8 @@ import {
 } from './arcaneStormRigs';
 import {
   DANGER_PRESENTATION,
-  dangerSafeRects,
+  playerExposedTo,
   purifierProtectedRects,
-  type DangerSafeRect,
 } from '../scenes/dangerPresentation';
 import { ThreeBattleStage } from './ThreeBattleStage';
 import {CombatEffects,COMBAT_PALETTE} from './combatEffects';
@@ -152,13 +151,19 @@ const BASE_FOG_NEAR = 34;
 const BASE_FOG_FAR = 76;
 
 /**
- * Danger-phase poison fog: the 3D twin of the Phaser overlay's green wash. The
- * haze closes in and the light sickens while the player is exposed, and lifts
- * the moment they reach a purified room — the same shelter rule the simulation
- * uses for exposure damage.
+ * A danger phase settles over the whole world — sky, light and distance haze —
+ * at the same pace for everyone, sheltered or not.
  */
 const DANGER_FOG_FADE_IN_SECONDS = 0.9;
 const DANGER_FOG_FADE_OUT_SECONDS = 0.7;
+/**
+ * The exposure tint is the player's own cue: a slight full-screen hue while the
+ * threat can reach them, eased so stepping through a doorway is a soft
+ * breath rather than a hard cut.
+ */
+const EXPOSURE_TINT_FADE_IN_SECONDS = 1.1;
+const EXPOSURE_TINT_FADE_OUT_SECONDS = 0.6;
+const EXPOSURE_CHECK_MS = 200;
 const DANGER_MASK_REFRESH_MS = 400;
 const PROTECTION_HIGHLIGHT_COLOR = 0x79efc2;
 const PROTECTION_HIGHLIGHT_ALPHA = 0.11;
@@ -202,11 +207,6 @@ interface FeedbackParticle {
   readonly scaleFrom?: number;
   readonly scaleTo?: number;
   readonly baseScale?: THREE.Vector3;
-}
-
-interface ScreenPoint {
-  readonly x: number;
-  readonly y: number;
 }
 
 /** A raider rig plus the smoothed transform it is chasing. */
@@ -361,14 +361,17 @@ export class Elaris3DRenderer {
   private readonly protectionMaterials: ProtectionMaterial[] = [];
   private readonly lastCreatureTraceAt = new Map<string, number>();
   private areaRevealStartedAt = performance.now();
-  private readonly dangerOverlay: HTMLCanvasElement;
-  private readonly dangerOverlayContext: CanvasRenderingContext2D;
+  private readonly dangerOverlay: HTMLDivElement;
   private dangerFogStrength = 0;
+  /** The threat being shown; latched while it fades out so the sky never flips to the next one. */
   private dangerThreat: DangerThreat = 'fog';
-  private dangerMaskRects: DangerSafeRect[] = [];
+  private exposureStrength = 0;
+  private playerExposed = false;
+  private lastExposureCheckAt = Number.NEGATIVE_INFINITY;
+  private tintThreat: DangerThreat | null = null;
+  private tintOpacity = -1;
   private protectionSignature = '';
   private lastProtectionSyncAt = Number.NEGATIVE_INFINITY;
-  private lastDangerMaskAt = Number.NEGATIVE_INFINITY;
   private readonly creatureRigs = new Map<string, CreatureRig>();
   // Raiders live outside entityRoot: they move every tick, and entityRoot is
   // torn down and rebuilt whenever the entity signature changes.
@@ -455,16 +458,16 @@ export class Elaris3DRenderer {
     this.renderer.domElement.id = 'elaris-three-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Elaris 3D world');
     this.container.appendChild(this.renderer.domElement);
-    this.dangerOverlay = document.createElement('canvas');
+    this.dangerOverlay = document.createElement('div');
+    this.dangerOverlay.className = 'elaris-exposure-tint';
     this.dangerOverlay.setAttribute('aria-hidden', 'true');
     Object.assign(this.dangerOverlay.style, {
       position: 'absolute',
       inset: '0',
       pointerEvents: 'none',
+      opacity: '0',
+      willChange: 'opacity',
     } satisfies Partial<CSSStyleDeclaration>);
-    const dangerOverlayContext = this.dangerOverlay.getContext('2d');
-    if (!dangerOverlayContext) throw new Error('Danger overlay canvas is unavailable');
-    this.dangerOverlayContext = dangerOverlayContext;
     this.container.appendChild(this.dangerOverlay);
 
     this.scene.add(
@@ -748,10 +751,6 @@ export class Elaris3DRenderer {
     const height = Math.max(1, this.container.clientHeight);
     this.renderer.setSize(width, height, false);
     this.finish.resize(width, height);
-    const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
-    this.dangerOverlay.width = Math.round(width * pixelRatio);
-    this.dangerOverlay.height = Math.round(height * pixelRatio);
-    this.dangerOverlayContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     const aspect = width / height;
     const shortAxis = Math.min(width, height);
     const viewHeight = shortAxis <= 480 ? 23 : shortAxis <= 900 ? 25 : 27;
@@ -3380,10 +3379,19 @@ export class Elaris3DRenderer {
     const cue = atmosphereCue(timer, this.state.gameBalance.raid.safePhaseSeconds, this.dangerFogStrength);
     const pulse = reducedMotion ? 0 : Math.sin(time * 0.00018) * 0.055;
     const palette = this.areaPalette();
-    const tintWeight = 0.16 + cue.twilight * 0.42 + cue.night * 0.5;
+    // A danger night takes most of the sky: the horizon (and so the distance
+    // haze that fades into it) wears the event's own colour.
+    const tintWeight = 0.16 + cue.twilight * 0.42 + cue.night * 0.72;
     const sky = new THREE.Color(palette.sky).lerp(new THREE.Color(cue.skyTint), tintWeight);
     this.scene.background = sky;
-    this.woodlandSky.update(this.firstPersonCamera, sky, Math.max(cue.night, this.dangerFogStrength * .8));
+    this.woodlandSky.update(
+      this.firstPersonCamera,
+      sky,
+      Math.max(cue.night, this.dangerFogStrength * .8),
+      this.dangerThreat,
+      this.dangerFogStrength,
+      reducedMotion ? 0 : time / 1000,
+    );
     if (this.scene.fog instanceof THREE.Fog) {
       this.scene.fog.color.copy(sky);
       this.scene.fog.near = cue.fogNear;
@@ -3423,66 +3431,59 @@ export class Elaris3DRenderer {
   }
 
   /**
-   * Draw the hazard as a projected world mask. Unlike scene-wide lighting or
-   * distance fog, this can punch safe rooms out while leaving the unsafe world
-   * beyond them visibly affected.
+   * Advance the danger fade and lay the exposure tint over the screen.
+   *
+   * The world itself (sky, light, haze) wears the event everywhere. The tint is
+   * one flat full-screen layer — slight at the centre, deeper at the edges — and
+   * it answers a single question: can the threat reach the player right now?
+   * Nothing is projected or cut out per frame, so walking never makes the
+   * ground flicker.
    */
   private updateDangerOverlay(
     time: number,
     deltaSeconds: number,
-    reducedMotion: boolean,
+    _reducedMotion: boolean,
     battleActive: boolean,
   ): void {
     const timer = survivalSchedule(this.state);
     const active = timer.phase === 'danger' && !battleActive;
+    if (timer.phase === 'danger') this.dangerThreat = timer.threat;
     const fadeSeconds = active ? DANGER_FOG_FADE_IN_SECONDS : DANGER_FOG_FADE_OUT_SECONDS;
-    const strength = THREE.MathUtils.clamp(
+    this.dangerFogStrength = THREE.MathUtils.clamp(
       battleActive ? 0 : this.dangerFogStrength + (active ? deltaSeconds : -deltaSeconds) / fadeSeconds,
       0,
       1,
     );
-    this.dangerFogStrength = strength;
-    const context = this.dangerOverlayContext;
-    const width = this.container.clientWidth;
-    const height = this.container.clientHeight;
-    context.clearRect(0, 0, width, height);
-    if (battleActive) return;
 
-    if (timer.threat !== this.dangerThreat) {
-      this.dangerThreat = timer.threat;
-      this.lastDangerMaskAt = Number.NEGATIVE_INFINITY;
+    if (!active) {
+      this.playerExposed = false;
+    } else if (time - this.lastExposureCheckAt > EXPOSURE_CHECK_MS) {
+      this.lastExposureCheckAt = time;
+      this.playerExposed = playerExposedTo(this.state, this.dangerThreat);
     }
-    if (time - this.lastDangerMaskAt > DANGER_MASK_REFRESH_MS) {
-      this.lastDangerMaskAt = time;
-      this.dangerMaskRects = dangerSafeRects(this.state, timer.threat);
+    const tintFade = this.playerExposed ? EXPOSURE_TINT_FADE_IN_SECONDS : EXPOSURE_TINT_FADE_OUT_SECONDS;
+    this.exposureStrength = battleActive ? 0 : THREE.MathUtils.clamp(
+      this.exposureStrength + (this.playerExposed ? deltaSeconds : -deltaSeconds) / tintFade,
+      0,
+      1,
+    );
+
+    if (this.tintThreat !== this.dangerThreat) {
+      this.tintThreat = this.dangerThreat;
+      const style = DANGER_PRESENTATION[this.dangerThreat];
+      this.dangerOverlay.style.background = `radial-gradient(ellipse 75% 70% at 50% 52%, ${
+        colorCss(style.tintColor, style.tintCenterAlpha)} 0%, ${
+        colorCss(style.tintColor, style.tintCenterAlpha)} 35%, ${
+        colorCss(style.tintColor, style.tintEdgeAlpha)} 100%)`;
     }
-
-    if (strength === 0) return;
-
-    const style = DANGER_PRESENTATION[timer.threat];
-    context.globalCompositeOperation = 'source-over';
-    context.globalAlpha = style.baseAlpha * strength;
-    context.fillStyle = colorCss(style.baseColor);
-    context.fillRect(0, 0, width, height);
-
-    const seconds = reducedMotion ? 0 : time / 1000;
-    for (let index = 0; index < 6; index += 1) {
-      const radius = Math.max(width, height) * (0.24 + index * 0.025);
-      const x = width * ((index * 0.31 + 0.12) % 1) + Math.sin(seconds * 0.08 + index) * 28;
-      const y = height * ((index * 0.43 + 0.18) % 1) + Math.cos(seconds * 0.06 + index) * 22;
-      const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
-      gradient.addColorStop(0, colorCss(style.wispColors[index % style.wispColors.length]!, 0.34));
-      gradient.addColorStop(1, colorCss(style.wispColors[index % style.wispColors.length]!, 0));
-      context.globalAlpha = strength;
-      context.fillStyle = gradient;
-      context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    // Eased so the hue settles in rather than snapping, and written only when
+    // it visibly changes so a steady tint costs the compositor nothing.
+    const eased = this.exposureStrength * this.exposureStrength * (3 - 2 * this.exposureStrength);
+    const opacity = Math.round(eased * this.dangerFogStrength * 200) / 200;
+    if (opacity !== this.tintOpacity) {
+      this.tintOpacity = opacity;
+      this.dangerOverlay.style.opacity = String(opacity);
     }
-
-    context.globalCompositeOperation = 'destination-out';
-    context.globalAlpha = 1;
-    context.fillStyle = '#fff';
-    for (const rect of this.dangerMaskRects) this.punchDangerSafeRect(rect, width, height);
-    context.globalCompositeOperation = 'source-over';
   }
 
   private maybeSpawnCreatureTrace(id: string, rig: CreatureRig, time: number): void {
@@ -3615,48 +3616,6 @@ export class Elaris3DRenderer {
     }
   }
 
-  private punchDangerSafeRect(rect: DangerSafeRect, width: number, height: number): void {
-    const left = rect.tileX - 0.08;
-    const right = rect.tileX + rect.tilesWide + 0.08;
-    const top = rect.tileY - 0.08;
-    const bottom = rect.tileY + rect.tilesHigh + 0.08;
-    const points: ScreenPoint[] = [];
-    for (const y of [0, 4.2]) {
-      for (const [x, z] of [[left, top], [right, top], [right, bottom], [left, bottom]] as const) {
-        const projected = new THREE.Vector3(x, y, z).project(this.activeCamera());
-        points.push({
-          x: (projected.x + 1) * width / 2,
-          y: (1 - projected.y) * height / 2,
-        });
-      }
-    }
-    const hull = convexHull(points);
-    if (hull.length < 3) return;
-    const context = this.dangerOverlayContext;
-    const sum = hull.reduce((total, point) => ({ x: total.x + point.x, y: total.y + point.y }), { x: 0, y: 0 });
-    const center = { x: sum.x / hull.length, y: sum.y / hull.length };
-    const drawHull = (scale: number): void => {
-      context.beginPath();
-      context.moveTo(
-        center.x + (hull[0]!.x - center.x) * scale,
-        center.y + (hull[0]!.y - center.y) * scale,
-      );
-      for (const point of hull.slice(1)) {
-        context.lineTo(center.x + (point.x - center.x) * scale, center.y + (point.y - center.y) * scale);
-      }
-      context.closePath();
-      context.fill();
-    };
-    // Several faint expanded silhouettes form a soft pressure boundary, then
-    // the authoritative safe volume is removed completely at its true edge.
-    for (const [scale, alpha] of [[1.16, 0.08], [1.11, 0.12], [1.07, 0.2], [1.035, 0.34]] as const) {
-      context.globalAlpha = alpha;
-      drawHull(scale);
-    }
-    context.globalAlpha = 1;
-    drawHull(1);
-  }
-
   private clearGroup(group: THREE.Group): void {
     for (const child of [...group.children]) {
       group.remove(child);
@@ -3725,25 +3684,4 @@ function colorCss(color: number, alpha = 1): string {
   const green = (color >> 8) & 0xff;
   const blue = color & 0xff;
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
-/** Convex screen silhouette of a safe floor strip and the air above it. */
-function convexHull(points: readonly ScreenPoint[]): ScreenPoint[] {
-  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
-  if (sorted.length <= 2) return sorted;
-  const cross = (origin: ScreenPoint, a: ScreenPoint, b: ScreenPoint): number =>
-    (a.x - origin.x) * (b.y - origin.y) - (a.y - origin.y) * (b.x - origin.x);
-  const lower: ScreenPoint[] = [];
-  for (const point of sorted) {
-    while (lower.length >= 2 && cross(lower.at(-2)!, lower.at(-1)!, point) <= 0) lower.pop();
-    lower.push(point);
-  }
-  const upper: ScreenPoint[] = [];
-  for (const point of [...sorted].reverse()) {
-    while (upper.length >= 2 && cross(upper.at(-2)!, upper.at(-1)!, point) <= 0) upper.pop();
-    upper.push(point);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
 }

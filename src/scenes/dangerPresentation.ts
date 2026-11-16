@@ -6,13 +6,27 @@ import { environments } from '../simulation/environmentProgress';
 import type { GameState } from '../simulation/state';
 import {
   airPurifierProtectedCells,
+  isPlayerEnclosed,
+  isPlayerSheltered,
   type DangerThreat,
 } from '../simulation/survivalCycle';
 
+/**
+ * How a danger phase reads on screen. The sky always wears the event, sheltered
+ * or not; the screen tint is the player's own exposure cue and only appears
+ * while they are standing somewhere the threat can reach them.
+ */
 export interface DangerPresentationStyle {
-  readonly baseColor: number;
-  readonly baseAlpha: number;
-  readonly wispColors: readonly number[];
+  /** Full-screen hue laid over the world while the player is exposed. */
+  readonly tintColor: number;
+  /** Tint strength at the centre of the view, kept light so the ground reads. */
+  readonly tintCenterAlpha: number;
+  /** Tint strength at the screen edges, where the vignette closes in. */
+  readonly tintEdgeAlpha: number;
+  /** Top of the event sky dome. */
+  readonly skyZenith: number;
+  /** Cloud, star or vortex colour painted into the event sky. */
+  readonly skyAccent: number;
 }
 
 export interface DangerSafeRect {
@@ -23,30 +37,45 @@ export interface DangerSafeRect {
 }
 
 /**
- * Poison reads green; a raid reads as moonless night, with no green cast; the
- * storm reads violet over navy, so a glance at the sky names the threat before
- * the timer does.
+ * Poison reads green, a raid reads as a black night, and the storm reads
+ * violet, so a glance at the sky names the threat before the timer does.
  */
 export const DANGER_PRESENTATION: Readonly<Record<DangerThreat, DangerPresentationStyle>> = {
   fog: {
-    baseColor: 0x13301a,
-    baseAlpha: 0.58,
-    wispColors: [0x74a03a, 0x8fbc4a, 0x4d7f2c],
+    tintColor: 0x3f7a1e,
+    tintCenterAlpha: 0.1,
+    tintEdgeAlpha: 0.42,
+    skyZenith: 0x142a14,
+    skyAccent: 0x9cc44a,
   },
   raid: {
-    baseColor: 0x050913,
-    baseAlpha: 0.72,
-    wispColors: [0x111a2b, 0x172238, 0x0c1424],
+    tintColor: 0x02040a,
+    tintCenterAlpha: 0.2,
+    tintEdgeAlpha: 0.62,
+    skyZenith: 0x03050c,
+    skyAccent: 0xe8eeff,
   },
   // Lighter than a raid night on purpose: the storm is the one danger the
-  // player has to read the ground during, so the wash must never compete with
+  // player has to read the ground during, so the tint must never compete with
   // a strike marker for legibility.
   storm: {
-    baseColor: 0x140b2e,
-    baseAlpha: 0.5,
-    wispColors: [0x6a4bd0, 0x8f6ef0, 0x3d2a86],
+    tintColor: 0x5a2aa8,
+    tintCenterAlpha: 0.08,
+    tintEdgeAlpha: 0.38,
+    skyZenith: 0x150a33,
+    skyAccent: 0xc78cff,
   },
 };
+
+/**
+ * Whether the threat outside can reach the player where they stand: fog asks
+ * for purified air, a raid and a storm for walls. This is the same rule the
+ * survival timer uses for its SHELTERED / SEALED IN / UNDER COVER badge, so the
+ * screen tint and the badge never disagree.
+ */
+export function playerExposedTo(state: GameState, threat: DangerThreat): boolean {
+  return threat === 'fog' ? !isPlayerSheltered(state) : !isPlayerEnclosed(state);
+}
 
 const TOWN_SAFE_CELLS = townSafeCells();
 
@@ -81,11 +110,6 @@ function unionCells(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<
   const merged = new Set(left);
   for (const cell of right) merged.add(cell);
   return merged;
-}
-
-/** Merge adjacent safe cells into row strips for inexpensive projected masks. */
-export function dangerSafeRects(state: GameState, threat: DangerThreat): DangerSafeRect[] {
-  return cellsToRects(dangerSafeCells(state, threat));
 }
 
 /** Compact strips for rendering the persistent protected-floor highlight. */
