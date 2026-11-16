@@ -29,11 +29,12 @@ import type { BuildingState, GameState } from './state';
 export const ELARIS_AREA_KEY = '0,0';
 
 /**
- * Authored position: open ground east of the Farm and north of the Market, in
- * the middle of where a new character already walks. Covered by a test that
- * asserts it overlaps no town footprint or doorway.
+ * Authored position: the bench outside the Weaponsmith, west of Mara's door,
+ * where the forge front already reads as a place to make things. It used to
+ * stand alone in the middle of the street. Covered by a test that asserts it
+ * overlaps no town footprint or doorway.
  */
-export const ELARIS_PUBLIC_WORKBENCH_TILE = { tileX: 84, tileY: 83 } as const;
+export const ELARIS_PUBLIC_WORKBENCH_TILE = { tileX: 73, tileY: 80 } as const;
 
 /** Two tiles wide and one deep, matching the Workbench footprint. */
 export const ELARIS_PUBLIC_WORKBENCH_SIZE = { tilesWide: 2, tilesHigh: 1 } as const;

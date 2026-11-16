@@ -12,7 +12,7 @@ import {
   stepMovement,
 } from '../simulation/commands';
 import { FixedStepLoop } from '../simulation/fixedStep';
-import { buildableById, FACILITY_INTERACTION_RANGE_PX, attackFacedWall, collectNearestGroundDrop, depositResourceStackInFieldCache, depositToolInFieldCache, dropResourceStack, selectCompanionAbility, setBattleCompanion, setCreatureRole, craftTool, craftRowboat, equipBareHands, equippedBow, equipTool, gatherNearest, isStructureDamaged, nearestFacedWall, repairStructure, nearestLiveNode, nearestUsableFacility, nearestWildCreature, repairTool, dropTool, splitResourceStack, withdrawFromFieldCache, withdrawResourceStackFromFieldCache, withdrawToolFromFieldCache, removeBuilding, rowboatActionLabel, toggleRowboat, type CommandResult } from '../simulation/gameplayCommands';
+import { buildableById, FACILITY_INTERACTION_RANGE_PX, attackFacedWall, collectNearestGroundDrop, depositResourceStackInFieldCache, depositToolInFieldCache, dropResourceStack, selectCompanionAbility, setBattleCompanion, setCreatureRole, craftTool, craftRowboat, equipBareHands, equippedBow, equipTool, gatherNearest, isStructureDamaged, structureHp, structureMaxHp, nearestFacedWall, repairStructure, nearestLiveNode, nearestUsableFacility, nearestWildCreature, repairTool, dropTool, splitResourceStack, withdrawFromFieldCache, withdrawResourceStackFromFieldCache, withdrawToolFromFieldCache, removeBuilding, rowboatActionLabel, toggleRowboat, type CommandResult } from '../simulation/gameplayCommands';
 import { craftArrows, craftClothMask, craftReinforcedSnare, craftTamingSnare } from '../simulation/supplyCrafting';
 import { isEating, isStaggered, tameChance } from '../simulation/tameChance';
 import { useHotbarItem } from '../simulation/hotbarItems';
@@ -927,7 +927,21 @@ export class WorldScene extends Phaser.Scene {
           label: isStructureDamaged(building) ? 'Repair' : 'Inspect',
           run: () => this.openBuildingItemMenu(building, window.innerWidth / 2, window.innerHeight / 2),
         }
-      : null);
+      : null, this.crosshairTargetHealth(target, building));
+  }
+
+  /** The aimed target's health, shown under its name only once it has been hit. */
+  private crosshairTargetHealth(target: CrosshairCandidate | null, building: BuildingState | null): { hp: number; maxHp: number } | null {
+    if (!target) return null;
+    let pool: { hp: number; maxHp: number } | null = null;
+    if (target.kind === 'raider') pool = this.state.raiders.find((raider) => raider.id === target.id) ?? null;
+    else if (target.kind === 'creature') pool = this.creaturesById.get(target.id) ?? null;
+    else if (target.kind === 'resource') pool = this.resourceNodesById.get(target.id) ?? null;
+    else if (building) {
+      const maxHp = structureMaxHp(building, this.state.gameBalance);
+      pool = maxHp === null ? null : { hp: structureHp(building, this.state.gameBalance)!, maxHp };
+    }
+    return pool && pool.hp < pool.maxHp ? { hp: pool.hp, maxHp: pool.maxHp } : null;
   }
 
   /** Everything a tap could have meant, as ground points with a reach. */

@@ -70,7 +70,7 @@ test('3D journey returns home, registers, builds and harvests a real garden, the
   await expect(register).toBeDisabled();
   await expect(page.getByLabel('Garden journey directions', { exact: true })).toContainText('Public workbench');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await walkTo(page, initial, { tileX: 84, tileY: 83 });
+  await walkTo(page, initial, { tileX: 73, tileY: 81 });
   await page.getByRole('button', { name: 'Garden guide', exact: true }).click();
   await expect(register).toBeEnabled(); if (isMobile) await register.tap(); else await register.click();
   await expect.poll(async () => (await saved(page)).onboarding.completedMilestoneIds).toContain('register-discovery');

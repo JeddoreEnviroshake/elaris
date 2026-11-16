@@ -14,6 +14,10 @@ export class FirstPersonHud {
   private readonly toggleButton: HTMLButtonElement;
   private readonly crosshair: HTMLDivElement;
   private readonly targetLabel: HTMLDivElement;
+  private readonly targetName: HTMLDivElement;
+  private readonly healthRow: HTMLDivElement;
+  private readonly healthFill: HTMLDivElement;
+  private readonly healthText: HTMLSpanElement;
   private readonly secondaryButton: HTMLButtonElement;
   private secondaryAction: (() => void) | null = null;
   private readonly unsubscribe: () => void;
@@ -60,10 +64,32 @@ export class FirstPersonHud {
       color: '#f5ecd6',
       font: '600 12px system-ui, sans-serif',
       whiteSpace: 'nowrap',
+      textAlign: 'center',
       pointerEvents: 'none',
       zIndex: '9',
       display: 'none',
     } satisfies Partial<CSSStyleDeclaration>);
+    this.targetName = document.createElement('div');
+    this.targetLabel.appendChild(this.targetName);
+    // Health sits under the name once the target has been hit, so the player
+    // sees each strike land without looking away from the crosshair.
+    this.healthRow = document.createElement('div');
+    this.healthRow.dataset.firstPersonTargetHealth = '';
+    Object.assign(this.healthRow.style, {
+      display: 'none', alignItems: 'center', gap: '6px', marginTop: '3px',
+      font: '600 10px system-ui, sans-serif',
+    } satisfies Partial<CSSStyleDeclaration>);
+    const track = document.createElement('div');
+    Object.assign(track.style, {
+      width: '64px', height: '5px', borderRadius: '3px', overflow: 'hidden',
+      background: 'rgba(255,255,255,0.18)',
+    } satisfies Partial<CSSStyleDeclaration>);
+    this.healthFill = document.createElement('div');
+    Object.assign(this.healthFill.style, { height: '100%', width: '100%', background: '#7fd37a' } satisfies Partial<CSSStyleDeclaration>);
+    track.appendChild(this.healthFill);
+    this.healthText = document.createElement('span');
+    this.healthRow.append(track, this.healthText);
+    this.targetLabel.appendChild(this.healthRow);
     parent.appendChild(this.targetLabel);
 
     this.secondaryButton = uiButton('Inspect', () => this.secondaryAction?.());
@@ -83,11 +109,27 @@ export class FirstPersonHud {
   }
 
   /** Show or hide the first-person furniture; called every frame by WorldScene. */
-  update(active: boolean, targetName: string | null, secondary: { label: string; run: () => void } | null): void {
+  update(
+    active: boolean,
+    targetName: string | null,
+    secondary: { label: string; run: () => void } | null,
+    health: { hp: number; maxHp: number } | null = null,
+  ): void {
     this.crosshair.style.display = active ? 'block' : 'none';
     const label = active ? targetName : null;
-    if (this.targetLabel.textContent !== (label ?? '')) this.targetLabel.textContent = label ?? '';
+    if (this.targetName.textContent !== (label ?? '')) this.targetName.textContent = label ?? '';
     this.targetLabel.style.display = label ? 'block' : 'none';
+    const showHealth = label !== null && health !== null && health.maxHp > 0;
+    this.healthRow.style.display = showHealth ? 'flex' : 'none';
+    if (showHealth) {
+      const hp = Math.max(0, Math.min(health.hp, health.maxHp));
+      const ratio = hp / health.maxHp;
+      const width = `${Math.round(ratio * 100)}%`;
+      if (this.healthFill.style.width !== width) this.healthFill.style.width = width;
+      this.healthFill.style.background = ratio > 0.5 ? '#7fd37a' : ratio > 0.25 ? '#e8c35a' : '#e06a5a';
+      const text = `${Math.ceil(hp)}/${health.maxHp}`;
+      if (this.healthText.textContent !== text) this.healthText.textContent = text;
+    }
     const showSecondary = active && secondary !== null;
     this.secondaryAction = showSecondary ? secondary.run : null;
     if (showSecondary && this.secondaryButton.textContent !== secondary.label) {

@@ -1113,7 +1113,7 @@ export class GameplayHud {
     if (this.firstPersonLayout === active) return;
     this.firstPersonLayout = active;
     Object.assign(this.target.style, active
-      ? { top: 'calc(50% + 38px)', bottom: '', pointerEvents: 'none', zIndex: '9' }
+      ? { top: 'calc(50% + 54px)', bottom: '', pointerEvents: 'none', zIndex: '9' }
       : { top: '', bottom: 'calc(env(safe-area-inset-bottom) + 72px)', pointerEvents: '', zIndex: '' });
   }
 

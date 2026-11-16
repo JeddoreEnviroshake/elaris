@@ -18,6 +18,7 @@ import { paddockView } from '../../src/simulation/openingPaddock';
 import { survivalSchedule } from '../../src/simulation/survivalCycle';
 import { enterWorldArea } from '../../src/simulation/areas';
 import { recordOpeningGardenHarvest } from '../../src/simulation/onboardingProgress';
+import { elarisPublicWorkbenchCenterPx } from '../../src/simulation/elarisWorkbench';
 
 const envelope = (state: GameState, version = SAVE_SCHEMA_VERSION) => ({ meta: { saveVersion: version, contentVersion: CONTENT_VERSION, worldGenVersion: WORLD_GEN_VERSION, appVersion: 'test', savedAt: 1 }, state });
 function registered(seed = 42) { const state = readyGarden(seed); expect(registerOpeningDiscovery(state).ok).toBe(true); reconcileQuestProgress(state); return state; }
@@ -38,7 +39,7 @@ describe('return home and first garden payoff', () => {
     const bag = { ...state.inventory }; state.player.x = 34 * 16; state.player.y = 85 * 16;
     expect(canRegisterHere(state)).toBe(false); expect(registerOpeningDiscovery(state).ok).toBe(false);
     expect(state.carriedBlueprints.some((paper) => paper.instanceId === id)).toBe(true);
-    state.player.x = 84 * 16; state.player.y = 83 * 16;
+    ({ x: state.player.x, y: state.player.y } = elarisPublicWorkbenchCenterPx());
     expect(registerOpeningDiscovery(state).ok).toBe(true); reconcileQuestProgress(state);
     expect(state.unlockedItemIds).toContain('garden-bed'); expect(state.carriedBlueprints).toHaveLength(0);
     expect(state.inventory).toEqual(bag); expect(registerOpeningDiscovery(state).ok).toBe(false);
@@ -142,7 +143,7 @@ describe('return home and first garden payoff', () => {
     expect(drop.blueprintId).toBe('garden-bed'); expect(drop.expiresAtTick).toBe(Number.MAX_SAFE_INTEGER);
     expect(openingGardenTarget(state)!.label).toBe('Discovery paper');
     state.player.x = drop.x; state.player.y = drop.y; expect(recoverBlueprintDrop(state, drop.id).ok).toBe(true);
-    state.player.x = 84 * 16; state.player.y = 83 * 16; expect(registerOpeningDiscovery(state).ok).toBe(true);
+    ({ x: state.player.x, y: state.player.y } = elarisPublicWorkbenchCenterPx()); expect(registerOpeningDiscovery(state).ok).toBe(true);
     reconcileQuestProgress(state); expect(state.onboarding.completedMilestoneIds).toContain('register-discovery');
   });
 

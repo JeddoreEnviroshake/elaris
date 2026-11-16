@@ -119,7 +119,7 @@ const mainQuests: QuestDefinition[] = [
   },
   {
     id: 'tame-tuftle', title: 'Make a New Friend', category: 'main', tier: 2,
-    objective: () => 'Befriend your first Tuftle',
+    objective: () => 'Add a Berry and your Taming Snare to your hotbar, then feed and snare your first Tuftle',
     complete: (state) => state.firstTamedSpeciesIds.includes('tuftle'), reward: coins(8),
   },
   {

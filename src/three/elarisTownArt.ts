@@ -205,7 +205,7 @@ function signTexture(building: TownBuildingDefinition, ruined: boolean): THREE.C
 }
 
 /** Physical facade signs survive view changes; all dressing is outside the doorway. */
-export function addElarisEntranceArt(parent: THREE.Group, building: TownBuildingDefinition, ruined: boolean, art: QuaterniusArt): void {
+export function addElarisEntranceArt(parent: THREE.Group, building: TownBuildingDefinition, ruined: boolean, _art: QuaterniusArt): void {
   if (building.areaKey !== '0,0') return;
   const frame = elarisEntranceFrame(building);
   const root = new THREE.Group(); root.name = `entrance-art.${building.id}`;
@@ -232,6 +232,7 @@ export function addElarisEntranceArt(parent: THREE.Group, building: TownBuilding
   face.name = 'building-sign.lettering'; face.position.z = .065; sign.add(face);
   if (!ruined) {
     entranceProps(root, building.id, frame.signSide);
-    if (building.id === 'weaponsmith') void art.add(root, { key: 'survival.workbench-anvil', x: -2.15, y: 0, z: .73, height: .75 });
+    // The bench outside the Weaponsmith is the town's public workbench, drawn
+    // (and made usable) at ELARIS_PUBLIC_WORKBENCH_TILE by the renderer.
   }
 }
