@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { openAppInStarterGrove, gatherStarterTree } from './gather';
 import { openAdmin, openMenuTab, grantBlueprints } from './menu';
 
@@ -82,8 +82,7 @@ test('gathers wood, crafts a pick, and restores it after reload', async ({ page 
   await gatherStarterTree(page);
   await gatherStarterTree(page);
   await page.getByRole('button', { name: 'Menu' }).click();
-  await expect(page.getByText('Wood', { exact: true })).toBeVisible();
-  await expect(page.getByText('×8')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wood stack, 8', exact: true })).toBeVisible();
   await grantBlueprints(page, 'wooden-pick');
   await openMenuTab(page, 'Craft');
   await page.getByRole('button', { name: 'Craft & equip' }).click();
@@ -95,7 +94,7 @@ test('gathers wood, crafts a pick, and restores it after reload', async ({ page 
   // to commit so an instant reload cannot abort it (slower mobile emulation
   // loses this race). Durable flush-before-navigation belongs to the save layer.
   await page.waitForTimeout(700);
-  await page.reload();
+  await reloadApp(page);
   await page.getByRole('button', { name: 'Menu' }).click();
   await expect(page.getByRole('button', { name: 'Wood stack, 3' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Wooden Pick \d+\/\d+, equipped/ })).toBeVisible();

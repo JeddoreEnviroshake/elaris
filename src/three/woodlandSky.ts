@@ -80,7 +80,7 @@ export class WoodlandSky {
           vec3 cell=floor(d*140.);
           float h=hash3(cell);
           vec3 local=fract(d*140.)-.5;
-          float star=step(.989,h)*smoothstep(.5,0.,length(local));
+          float star=step(.989,h)*(1.-smoothstep(0.,.5,length(local)));
           float twinkle=.65+.35*sin(time*1.7+h*91.);
           color+=raidAccent*star*twinkle*smoothstep(.04,.28,up)*eventMix.y*.9;
           vec3 moonDirection=normalize(vec3(26.,30.,20.));

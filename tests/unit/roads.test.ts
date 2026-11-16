@@ -16,7 +16,7 @@ describe('roads, scenery clearance, and real water crossings', () => {
     state.buildings.push({ id: 'player-road-box', definitionId: 'field-cache', tileX: 30, tileY: 85, storage: { ...state.inventory, wood: 12, fiber: 0, stone: 0 } });
     storageBoxContents(state.buildings[0]!);
     const loaded = migrateToCurrent({ meta: { saveVersion: 88, contentVersion: 66, worldGenVersion: 12, appVersion: 'test', savedAt: 1 }, state }).save;
-    expect(loaded.meta).toMatchObject({ saveVersion: 90, contentVersion: 68, worldGenVersion: 13 });
+    expect(loaded.meta).toMatchObject({ saveVersion: 91, contentVersion: 69, worldGenVersion: 13 });
     expect(loaded.state.inventory.wood).toBe(17); expect(loaded.state.buildings[0]!.storage!.wood).toBe(12);
   });
   it('covers the full four-tile main road and bridges exactly the wet parts across seeds and regions', () => {

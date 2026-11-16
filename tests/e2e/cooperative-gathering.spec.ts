@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { DEFAULT_WORLD_SEED } from '../../src/config/platform';
@@ -25,7 +25,7 @@ test('3D assisted harvest shows the partner contribution and saves shelter knowl
   await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -41,7 +41,7 @@ test('3D assisted harvest shows the partner contribution and saves shelter knowl
       tx.onerror = () => reject(tx.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.locator('#elaris-three-canvas')).toBeVisible();
   await expect(page.locator('[data-target-hint]')).toHaveAttribute('data-resource-target-kind', 'plant');
   const action = page.locator('[data-action-button]');
@@ -60,7 +60,7 @@ test('3D assisted harvest shows the partner contribution and saves shelter knowl
   expect(saved.onboarding.issuedRewardIds).toEqual(expect.arrayContaining(['starter-partner', 'shelter-recipes']));
   expect(saved.unlockedItemIds).toContain('air-purifier');
   expect(saved.unlockedItemIds).toContain('field-cache');
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
   const loaded = await readSavedState(page) as unknown as GameState;
   expect(loaded.onboarding).toEqual(saved.onboarding);

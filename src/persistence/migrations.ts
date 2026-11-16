@@ -11,7 +11,7 @@ import type { PortableSave } from './types';
 import { SAVE_VERSION } from './types';
 import {
   createDefaultGameBalance, DANGER_PHASE_SECONDS, RESOURCE_BALANCE, RESOURCE_NODE_KINDS, RESOURCE_STACK_SIZE,
-  STORAGE_BOX_SLOTS, WAREHOUSE_SLOTS, STRIKE_TARGETS, STRUCTURE_FACILITY_IDS, WALL_MATERIAL_IDS,
+  STRIKE_TARGETS, STRUCTURE_FACILITY_IDS, WALL_MATERIAL_IDS,
 } from '../config/balance';
 import { DANGER_THREAT_IDS } from '../content/dangerThreats';
 import {
@@ -30,6 +30,9 @@ import { blueprintsGrantedUpToLevel } from '../content/blueprintGates';
 import { predicateSatisfied } from '../simulation/unlocks';
 import type { AreaThemeId, GameState } from '../simulation/state';
 import { isNpcId } from '../content/npcs';
+import { MAX_FACILITY_LEVEL, isLeveledFacilityId } from '../content/facilityLevels';
+import { storageSlotsForLevel } from '../simulation/facilityLevels';
+import type { BuildingState } from '../simulation/state';
 
 /**
  * Save migrations. Each entry upgrades a save from version N to N+1. The chain
@@ -2217,6 +2220,12 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
       },
     };
   },
+  // v90 -> v91: facility levels and in-place part upgrades. `level` is
+  // optional on a building and absent means level 1, so nothing in a save
+  // needs rewriting; the step exists so the version records that saves from
+  // here on may carry levelled facilities, and so the validator below (which
+  // sizes storage by level) only ever sees saves that know about levels.
+  90: (raw) => ({ ...raw, meta: { ...asRecord(raw['meta']), saveVersion: 91, contentVersion: 69 } }),
 };
 
 /**
@@ -2597,6 +2606,13 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
     if (building['rotated'] !== undefined && typeof building['rotated'] !== 'boolean') {
       throw new SaveValidationError('invalid building rotation');
     }
+    if (building['level'] !== undefined) {
+      const level = building['level'];
+      if (!Number.isSafeInteger(level) || (level as number) < 1 || (level as number) > MAX_FACILITY_LEVEL
+        || !isLeveledFacilityId(String(building['definitionId']))) {
+        throw new SaveValidationError('invalid building level');
+      }
+    }
     const definition = buildableById(building['definitionId'] as Parameters<typeof buildableById>[0]);
     if (definition.layer === 'boundary' && !['north', 'east', 'south', 'west'].includes(building['boundaryEdge'] as string)) {
       throw new SaveValidationError('invalid building boundary edge');
@@ -2627,7 +2643,8 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
         }
         usedStorageSlots += stacks.length;
       }
-      const capacity = building['definitionId'] === 'warehouse' ? WAREHOUSE_SLOTS : STORAGE_BOX_SLOTS;
+      // Sized by level: an upgraded box legitimately holds more than the base.
+      const capacity = storageSlotsForLevel(building as unknown as Pick<BuildingState, 'definitionId' | 'level'>);
       if (usedStorageSlots > capacity) throw new SaveValidationError('storage container exceeds capacity');
       for (const tool of storedTools) {
         if (!isRecord(tool) || typeof tool['instanceId'] !== 'string' || !entityIds.add(tool['instanceId'])

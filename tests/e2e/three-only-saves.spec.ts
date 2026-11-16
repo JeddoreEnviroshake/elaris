@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createInitialState } from '../../src/simulation/state';
 import { storageBoxContents } from '../../src/simulation/storageBox';
 import { createOpeningChapter } from '../../src/content/onboarding';
-import { openApp, waitForDebugHandles } from './app';
+import { openApp, waitForDebugHandles, reloadApp } from './app';
 
 test('existing equipment, inventory, storage and companions survive a 2D preference upgrade', async ({ page }) => {
   await openApp(page, 'render=2d');
@@ -25,7 +25,7 @@ test('existing equipment, inventory, storage and companions survive a 2D prefere
     await debug.__controller.flushAndRelease();
     localStorage.setItem('elaris.presentation-mode','2d');
   },fixture);
-  await page.reload();
+  await reloadApp(page);
   await waitForDebugHandles(page);
   await expect(page.locator('#elaris-three-canvas')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-presentation','3d');

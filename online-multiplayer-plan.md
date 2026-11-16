@@ -76,15 +76,14 @@ Codes are short, unambiguous, and drawn from an alphabet with no `0/O` or `1/I`.
 - **Version gates exist**: `WORLD_GEN_VERSION`, `CONTENT_VERSION`,
   `SAVE_SCHEMA_VERSION`, `APP_VERSION` — these become the connection handshake.
 
-### The three things that must change first
+### Foundation status
 
-- **Storage is single-slot.** `IndexedDbSaveRepository` holds one `current`
-  snapshot, and `SaveController` owns one lease. The menu needs *N* worlds per
-  device, so snapshots and leases must be keyed by `worldId`. This is the
-  largest local change in the plan and it blocks the menu.
-- **Boot auto-loads.** `main.ts` constructs state and calls `controller.start()`
-  unconditionally. Boot has to become: menu first, world chosen, *then* build
-  the save controller and the Phaser game.
+- **Multi-world storage is implemented.** `LocalWorlds` owns the device's
+  directory; `IndexedDbSaveRepository` scopes snapshots, recovery data, writer
+  leases and notifications by `worldId` in independent databases.
+- **Menu-first boot is implemented.** `main.ts` waits for a world choice before
+  creating the save controller, Phaser game and Three.js renderer. Quit saves,
+  releases the lease, disposes the session, and returns to the directory.
 - `src/simulation/admin.ts:10` imports camera constants from `src/three/`. Move
   those into `src/config/` so the sim has no presentation dependency.
 
@@ -191,6 +190,12 @@ behaviour — it is the player's own save, and there is nobody to cheat.
 ## Phases
 
 **Phase 1 — The menu, local only**
+Implemented: the menu, local world directory, independent snapshots/leases,
+legacy-save adoption with a retained raw backup, offline creation/continuation,
+and Quit to Menu. The directory lives in `elaris-worlds:{profileId}`; each
+world's existing save stores live in `elaris:{profileId}:world:{worldId}`.
+Join Game reports that online play is not available yet.
+
 Multi-world storage keyed by `worldId` (snapshots and leases), the session menu
 with Continue / New Game / Join Game, Quit to Menu, and a world list. New Game
 and Continue fully work offline. Join Game is present and reports that online

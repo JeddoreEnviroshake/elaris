@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { GameState } from '../../src/simulation/state';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { releaseSaveWriter, readSavedState } from './save';
 
 test.setTimeout(60_000);
@@ -27,7 +27,7 @@ test('3D opening resumes trust, creates one named follower, and persists the par
   await dialog.getByRole('button', { name: 'Stay steady', exact: true }).click();
   await expect.poll(async () => (await saved(page))?.onboarding.trustSession?.beatsRemaining).toBe(3);
   const beforeReload = (await saved(page))!;
-  await page.reload();
+  await reloadApp(page);
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('status').first()).toContainText('3 actions left');
   await expect.poll(async () => (await saved(page))?.onboarding.trustSession).toEqual(beforeReload.onboarding.trustSession);
@@ -47,7 +47,7 @@ test('3D opening resumes trust, creates one named follower, and persists the par
   await naming.getByRole('button', { name: 'Save name', exact: true }).click();
   await expect(naming).toBeHidden();
   await expect.poll(async () => (await saved(page))?.ownedCreatures.filter((creature) => creature.speciesId === 'tuftle')).toMatchObject([{ name: 'Moss', role: 'follow' }]);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
   await expect(page.getByTestId('opening-partnership')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Help Tuftle', exact: true })).toBeHidden();
@@ -94,7 +94,7 @@ test('an existing v81 save keeps its progress and does not receive the new intro
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -118,7 +118,7 @@ test('an existing v81 save keeps its progress and does not receive the new intro
       transaction.onerror = () => reject(transaction.error);
     });
   });
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
   await expect.poll(async () => (await saved(page))?.onboarding.status).toBe('legacy');
   const state = (await saved(page))!;

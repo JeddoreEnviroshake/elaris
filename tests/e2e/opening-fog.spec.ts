@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
@@ -38,7 +38,7 @@ async function putFixture(page: Page, state: GameState) {
   await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
@@ -62,10 +62,10 @@ test('3D first fog waits for shelter, resumes on reload, and saves the return to
   await expect.poll(() => readSavedState(page)).not.toBeNull();
   const fixture = fogFixture();
   await putFixture(page, fixture);
-  await page.reload();
+  await reloadApp(page);
   await expect(timer).toContainText('FIRST FOG IN');
   await expect.poll(async () => (await saved(page)).onboarding.firstThreat!.fogStartsAtTick).toBe(fixture.onboarding.firstThreat!.fogStartsAtTick);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
   expect((await saved(page)).onboarding.firstThreat!.fogEndsAtTick).toBe(fixture.onboarding.firstThreat!.fogEndsAtTick);
   await expect(timer).toContainText('POISON FOG', { timeout: 25_000 });
@@ -78,7 +78,7 @@ test('3D first fog waits for shelter, resumes on reload, and saves the return to
   await openMenuTab(page, 'Bag');
   await expect(page.getByRole('tab', { name: 'Bag', exact: true })).toHaveAttribute('aria-selected', 'true');
   const beforeReload = await saved(page);
-  await page.reload();
+  await reloadApp(page);
   await expect(timer).toContainText('POISON FOG');
   const resumed = await saved(page);
   expect(resumed.tick).toBeGreaterThanOrEqual(beforeReload.tick);
@@ -94,13 +94,13 @@ test('3D first fog waits for shelter, resumes on reload, and saves the return to
   expect(after.onboarding.status).toBe('active');
   expect(after.buildings).toHaveLength(22);
   await page.screenshot({ path: `tmp/opening-fog-aftermath-${testInfo.project.name}.png` });
-  await page.reload();
+  await reloadApp(page);
   await openMenuTab(page, 'Shelter');
   await expect(page.getByLabel('First fog lesson')).toContainText('The air is clear');
   await page.getByLabel('First fog lesson').getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('First fog lesson')).toBeHidden();
   await expect.poll(async () => (await saved(page)).onboarding.firstThreat!.aftermathAcknowledged).toBe(true);
-  await page.reload();
+  await reloadApp(page);
   await openMenuTab(page, 'Shelter');
   await expect(page.getByLabel('First fog lesson')).toBeHidden();
   expect((await saved(page)).onboarding.completedMilestoneIds.filter((id) => id === 'weather-fog')).toHaveLength(1);
@@ -114,7 +114,7 @@ test('3D fog protection text fits and a broken wall explains exposure', async ({
   const fixture = fogFixture();
   fixture.tick = fixture.onboarding.firstThreat!.fogStartsAtTick! + 3 * 60;
   await putFixture(page, fixture);
-  await page.reload();
+  await reloadApp(page);
   const timer = page.locator('[data-survival-timer]');
   await expect(timer).toContainText('SHELTERED');
   const fits = await timer.evaluate((element) => {
@@ -128,7 +128,7 @@ test('3D fog protection text fits and a broken wall explains exposure', async ({
   broken.buildings = broken.buildings.filter((building) => building.id !== wall.id);
   broken.player.x = (site.tileX + 3.5) * 16;
   await putFixture(page, broken);
-  await page.reload();
+  await reloadApp(page);
   await expect(timer).toHaveAttribute('aria-label', /Poison fog.*exposed/);
   await openMenuTab(page, 'Shelter');
   await expect(page.getByLabel('First fog lesson')).toContainText('You are exposed');

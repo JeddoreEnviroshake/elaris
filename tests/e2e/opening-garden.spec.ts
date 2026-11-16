@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readyGarden } from '../helpers/openingJourney';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { stepDpad } from './routeInput';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
@@ -29,7 +29,7 @@ async function loadFixture(page: Page, prepare?: (state: GameState) => void, old
   await releaseSaveWriter(page);
   await page.evaluate(async ({ fixture, old }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('snapshots', 'readwrite'); const store = tx.objectStore('snapshots'); const request = store.get('current');
@@ -37,7 +37,7 @@ async function loadFixture(page: Page, prepare?: (state: GameState) => void, old
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, { fixture: state, old: oldVersion });
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Garden guide', exact: true })).toBeVisible();
   return state;
 }
@@ -76,7 +76,7 @@ test('3D journey returns home, registers, builds and harvests a real garden, the
   await expect.poll(async () => (await saved(page)).onboarding.completedMilestoneIds).toContain('register-discovery');
   const permanent = await saved(page); expect(permanent.unlockedItemIds).toContain('garden-bed'); expect(permanent.carriedBlueprints).toHaveLength(0);
   await page.screenshot({ path: `tmp/opening-garden-registered-${testInfo.project.name}.png` });
-  await page.reload();
+  await reloadApp(page);
   const registered = await saved(page); expect(registered.unlockedItemIds).toContain('garden-bed'); expect(registered.carriedBlueprints).toHaveLength(0);
   await walkTo(page, registered, openingGardenTarget(registered)!);
   await page.getByRole('button', { name: 'Garden guide', exact: true }).click();
@@ -96,7 +96,7 @@ test('3D journey returns home, registers, builds and harvests a real garden, the
   const scrollTop = await panel.evaluate((element) => element.scrollTop); expect(scrollTop).toBeGreaterThan(0);
   await expect.poll(async () => (await saved(page)).buildings.find((bed) => bed.id === planted.onboarding.garden!.bedId)!.garden!.progressTicks, { timeout: 20_000 }).toBeGreaterThanOrEqual(300);
   expect(await panel.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(scrollTop - 5);
-  const partial = await saved(page); await page.reload(); await openMenuTab(page, 'Garden');
+  const partial = await saved(page); await reloadApp(page); await openMenuTab(page, 'Garden');
   expect((await saved(page)).buildings.find((bed) => bed.id === planted.onboarding.garden!.bedId)!.garden!.progressTicks).toBeGreaterThanOrEqual(partial.buildings.find((bed) => bed.id === planted.onboarding.garden!.bedId)!.garden!.progressTicks);
   await expect(harvest).toBeEnabled({ timeout: 90_000 });
   await page.screenshot({ path: `tmp/opening-garden-ready-${testInfo.project.name}.png` });
@@ -108,7 +108,7 @@ test('3D journey returns home, registers, builds and harvests a real garden, the
   await page.screenshot({ path: `tmp/opening-garden-recap-${testInfo.project.name}.png` });
   await page.getByRole('button', { name: 'Explore beyond Elaris', exact: true }).click();
   await expect.poll(async () => (await saved(page)).onboarding.garden!.nextGoal).toBe('explore');
-  await page.reload(); await openMenuTab(page, 'Garden'); await expect(page.getByRole('button', { name: 'Explore beyond Elaris', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await reloadApp(page); await openMenuTab(page, 'Garden'); await expect(page.getByRole('button', { name: 'Explore beyond Elaris', exact: true })).toHaveAttribute('aria-pressed', 'true');
   const final = await saved(page); expect(final.buildings.filter((bed) => bed.definitionId === 'garden-bed')).toHaveLength(1); expect(final.ownedCreatures).toHaveLength(1);
   expect(final.onboarding.garden).toMatchObject({ harvestedFiber: 5, recapAcknowledged: true, nextGoal: 'explore' }); expect(errors).toEqual([]);
 });
@@ -125,7 +125,7 @@ test('3D upgraded garden keeps its output through a full bag and reload, then cr
   const harvest = page.getByRole('button', { name: 'Collect garden fiber', exact: true }); await expect(harvest).toBeEnabled();
   await harvest.click(); await expect(page.getByLabel('Garden growth and harvest', { exact: true })).toContainText('Stored 5/15');
   expect((await saved(page)).onboarding.garden!.harvestedFiber).toBe(0);
-  await page.reload(); await openMenuTab(page, 'Garden'); await expect(page.getByLabel('Garden growth and harvest', { exact: true })).toContainText('Stored 5/15');
+  await reloadApp(page); await openMenuTab(page, 'Garden'); await expect(page.getByLabel('Garden growth and harvest', { exact: true })).toContainText('Stored 5/15');
   await openMenuTab(page, 'Bag'); await page.getByRole('button', { name: /^Wood stack,/ }).first().click();
   await page.getByRole('dialog', { name: 'Wood stack actions', exact: true }).getByRole('button', { name: 'Drop', exact: true }).click();
   await openMenuTab(page, 'Garden'); await harvest.click(); await expect.poll(async () => (await saved(page)).onboarding.status).toBe('complete');

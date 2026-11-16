@@ -9,6 +9,7 @@ import { isInsideBufferedFootprint, type EnvironmentFootprint } from './environm
 import { ModelLibrary, type ModelPlacement } from './modelLibrary';
 import { finishRoof, SETTLEMENT_ROOFS } from './visualDirection';
 import { addRoofUnderside } from './buildingUndersides';
+import { DOORWAY_HALF_WIDTH, townBuildingShell } from '../content/interiors';
 
 export const artNoise = (seed: number, x: number, z: number): number => {
   const noise = coordinateHash(seed, x, z);
@@ -148,17 +149,77 @@ export function releaseArt(root: THREE.Object3D): void {
   for (const material of materials) material.dispose();
 }
 
-/** Partition a facade around its saved door, retaining its exact centre line. */
+const SETTLEMENT_WALL_HEIGHTS: Partial<Record<TownBuildingDefinition['id'], number>> = { church: 2.8, 'magic-shop': 2.7 };
+
+/** Wall height of a walk-in settlement building. */
+export function settlementWallHeight(building: TownBuildingDefinition): number {
+  return SETTLEMENT_WALL_HEIGHTS[building.id] ?? 2.4;
+}
+
+/** Visible doorway width as a fraction of each doorway wall model's own width. */
+const DOORWAY_OPENING_RATIO: Partial<Record<ModelAssetKey, number>> = { 'entrance.wall-door': .65, 'detail.arch-wall': .75 };
+
+/**
+ * The hinged door of a walk-in building, in the building group's local frame
+ * (origin at the footprint centre). The leaf's own hinge is its model origin,
+ * so a pivot at (`hingeX`, `hingeZ`) turned by `rotation` hangs it in the
+ * doorway; turning that pivot further by a positive angle swings it inward.
+ */
+export interface SettlementDoor {
+  readonly key: ModelAssetKey;
+  readonly hingeX: number;
+  readonly hingeZ: number;
+  readonly rotation: number;
+  readonly width: number;
+  readonly height: number;
+  /** Doorway centre, for the swing's proximity test. */
+  readonly centreX: number;
+  readonly centreZ: number;
+}
+
+function shellFrame(building: TownBuildingDefinition) {
+  const shell = townBuildingShell(building);
+  const width = shell.right - shell.left;
+  const depth = shell.bottom - shell.top;
+  const northSouth = shell.door.side === 'north' || shell.door.side === 'south';
+  const side = shell.door.side === 'north' || shell.door.side === 'west' ? -1 : 1;
+  const alongDoor = shell.door.along - (northSouth ? shell.tilesWide : shell.tilesHigh) / 2;
+  return { shell, width, depth, northSouth, side, alongDoor };
+}
+
+/** The swinging leaf for a building's doorway. */
+export function settlementDoor(building: TownBuildingDefinition): SettlementDoor {
+  const { width, depth, northSouth, side, alongDoor } = shellFrame(building);
+  const wallHeight = settlementWallHeight(building);
+  const church = building.id === 'church';
+  const leafWidth = DOORWAY_HALF_WIDTH * 2 - .04;
+  // The leaf hangs in the middle of the masonry, which runs from 0.24 inside
+  // the wall line to 0.07 outside it.
+  const inset = .085;
+  const rotation = northSouth ? side > 0 ? 0 : Math.PI : side > 0 ? Math.PI / 2 : -Math.PI / 2;
+  // Model +x runs along the wall away from the hinge; for each rotation that
+  // direction is +x (south), -x (north), -z (east) and +z (west).
+  const hingeAlong = alongDoor - side * DOORWAY_HALF_WIDTH * (northSouth ? 1 : -1);
+  const wallLine = side * ((northSouth ? depth : width) / 2 - inset);
+  return {
+    key: church ? 'detail.round-door' : 'entrance.door',
+    hingeX: northSouth ? hingeAlong : wallLine,
+    hingeZ: northSouth ? wallLine : hingeAlong,
+    rotation,
+    width: leafWidth,
+    height: church ? 2.1 : wallHeight * .69,
+    centreX: northSouth ? alongDoor : wallLine,
+    centreZ: northSouth ? wallLine : alongDoor,
+  };
+}
+
+/** Partition a walk-in shell's walls around its doorway, on the shared shell lines. */
 export function settlementModules(building: TownBuildingDefinition): ArtModel[] {
-  const {footprint, door} = building;
-  const width = footprint.tilesWide * .84, depth = footprint.tilesHigh * .8;
-  const height = building.id === 'church' ? 2.8 : building.id === 'magic-shop' ? 2.7 : 2.4;
+  const { width, depth, northSouth, side, alongDoor } = shellFrame(building);
+  const height = settlementWallHeight(building);
   const pieces: ArtModel[] = [];
-  const northSouth = door.tileY === footprint.tileY || door.tileY === footprint.tileY + footprint.tilesHigh - 1;
-  const side = northSouth ? door.tileY === footprint.tileY ? -1 : 1 : door.tileX === footprint.tileX ? -1 : 1;
-  const alongDoor = northSouth ? door.tileX + building.doorWidth / 2 - footprint.tileX - footprint.tilesWide / 2
-    : door.tileY + building.doorWidth / 2 - footprint.tileY - footprint.tilesHigh / 2;
-  const doorSpan = Math.min(2, (northSouth ? width : depth) * .4);
+  const doorKey: ModelAssetKey = building.id === 'church' ? 'detail.arch-wall' : 'entrance.wall-door';
+  const doorSpan = DOORWAY_HALF_WIDTH * 2 / DOORWAY_OPENING_RATIO[doorKey]!;
   const panel = (key: ModelAssetKey, along: number, span: number, boundary: number, horizontal: boolean, direction: number): void => {
     const rotation = horizontal ? direction > 0 ? 0 : Math.PI : direction > 0 ? Math.PI / 2 : -Math.PI / 2;
     pieces.push({key, x: horizontal ? along : boundary, y: 0, z: horizontal ? boundary : along, height, width: span, rotation});
@@ -177,34 +238,34 @@ export function settlementModules(building: TownBuildingDefinition): ArtModel[] 
     const x = direction * width / 2;
     if (northSouth && side === direction) {
       run(-width / 2, alongDoor - doorSpan / 2, z, true, direction);
-      panel(building.id==='church'?'detail.arch-wall':'entrance.wall-door', alongDoor, doorSpan, z, true, direction);
+      panel(doorKey, alongDoor, doorSpan, z, true, direction);
       run(alongDoor + doorSpan / 2, width / 2, z, true, direction);
     } else run(-width / 2, width / 2, z, true, direction);
     if (!northSouth && side === direction) {
       run(-depth / 2, alongDoor - doorSpan / 2, x, false, direction);
-      panel('entrance.wall-door', alongDoor, doorSpan, x, false, direction);
+      panel(doorKey, alongDoor, doorSpan, x, false, direction);
       run(alongDoor + doorSpan / 2, depth / 2, x, false, direction);
     } else run(-depth / 2, depth / 2, x, false, direction);
   }
   pieces.push({key:'entrance.roof',x:0,y:height-.04,z:0,height:building.id==='church'?2.2:1.9,width:width+.6,depth:depth+.7,roofColor:SETTLEMENT_ROOFS[building.id]});
-  pieces.push({key:building.id==='church'?'detail.round-door':'entrance.door',x:northSouth?alongDoor:side*(width/2+.06),y:.01,
-    z:northSouth?side*(depth/2+.06):alongDoor,height:height*.69,
-    rotation:northSouth?side>0?0:Math.PI:side>0?Math.PI/2:-Math.PI/2});
-  pieces.push({key:'town.lantern',x:northSouth?alongDoor+.85:side*(width/2+.2),y:height*.65,
-    z:northSouth?side*(depth/2+.2):alongDoor+.85,height:.55});
+  pieces.push({key:'town.lantern',x:northSouth?alongDoor+DOORWAY_HALF_WIDTH+.3:side*(width/2+.2),y:height*.65,
+    z:northSouth?side*(depth/2+.2):alongDoor+DOORWAY_HALF_WIDTH+.3,height:.55});
   return pieces;
 }
+
+/** Roof-level art a ruin has lost; its walls still stand around an open floor. */
+const ROOF_KEYS: ReadonlySet<ModelAssetKey> = new Set<ModelAssetKey>(['entrance.roof', 'detail.tower-roof', 'detail.dormer', 'entrance.chimney', 'detail.wood-roof']);
 
 export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Group, building: TownBuildingDefinition,
   ruined: boolean): Promise<THREE.Material[]> {
   const pieces = settlementModules(building);
-  const width = building.footprint.tilesWide * .84, depth = building.footprint.tilesHigh * .8;
-  const wallHeight = building.id === 'church' ? 2.8 : building.id === 'magic-shop' ? 2.7 : 2.4;
-  const linings = [addRoofUnderside(root, width + .58, depth + .68, wallHeight - .05)];
+  const { width, depth } = shellFrame(building);
+  const wallHeight = settlementWallHeight(building);
+  const linings: THREE.Group[] = ruined ? [] : [addRoofUnderside(root, width + .58, depth + .68, wallHeight - .05)];
   const add = (key: ModelAssetKey,x:number,y:number,z:number,height:number,rotation=0,width?:number,modelDepth?:number): void => {
     pieces.push({key,x,y,z,height,rotation,roofColor:SETTLEMENT_ROOFS[building.id],...(width===undefined?{}:{width}),...(modelDepth===undefined?{}:{depth:modelDepth})});
   };
-  if (building.id === 'church' || building.id === 'magic-shop') {
+  if ((building.id === 'church' || building.id === 'magic-shop') && !ruined) {
     const level = building.id === 'church' ? 3.2 : 3;
     for (const direction of [-1,1]) {
       add('entrance.wall-window',direction*.95,level,0,1.8,direction>0?Math.PI/2:-Math.PI/2,1.9);
@@ -219,7 +280,7 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
       root.add(upright,crossbar);
     } else {
       const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(.42),new THREE.MeshStandardMaterial({color:0xb7b4f4,
-        emissive:0x7766bd,emissiveIntensity:ruined?0:1.2,roughness:.45}));
+        emissive:0x7766bd,emissiveIntensity:1.2,roughness:.45}));
       crystal.position.set(0,7.8,0); root.add(crystal);
     }
   }
@@ -232,38 +293,32 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
     for(const x of [-1.9,1.2])add('detail.support',x,0,front*(depth/2+.1),2.15,front<0?Math.PI:0);
     if(building.id==='farm') {
       add('detail.wood-roof',-.35,2.15,front*(depth/2+.65),.55,front<0?Math.PI:0,4,1.65);
-      linings.push(addRoofUnderside(root, 3.98, 1.63, 2.13, -.35, front * (depth / 2 + .65)));
+      if (!ruined) linings.push(addRoofUnderside(root, 3.98, 1.63, 2.13, -.35, front * (depth / 2 + .65)));
     }
   }
   if(building.id==='magic-shop')add('detail.balcony',0,2.1,depth/2+.15,.6,0,2.2,.6);
+  // Street dressing stands outside the walls: inside them is now a furnished room.
   if (building.id === 'market') {
     add('town.stall-green',-width*.3,0,-depth/2-.08,1.7,Math.PI,1.9,.8);
     add('town.stall-red',width*.3,0,-depth/2-.08,1.7,Math.PI,1.9,.8);
-    for (const x of [-width*.32,width*.32]) add('entrance.crate',x,0,depth*.28,.65);
-  } else if (building.id === 'farm') {
-    add('entrance.wagon',-width*.27,0,depth*.25,1.2,Math.PI/2);
-    add('entrance.crate',width*.3,0,depth*.27,.7);
-    add('entrance.grass',width*.3,.7,depth*.27,.5);
   } else if (building.id === 'tavern') {
-    add('survival.barrel',-width*.34,0,-depth*.25,.85);
-    add('survival.barrel',width*.34,0,-depth*.25,.85);
     add('town.banner-red',-width*.26,1.3,-depth/2-.12,1.1,Math.PI/2);
   } else if (building.id === 'armoury') {
     add('town.blade-sign',width*.28,1.3,depth/2+.15,1,Math.PI/2);
     add('town.banner-red',-width*.3,1.2,depth/2+.14,1.2,Math.PI/2);
-  } else if (building.id === 'weaponsmith') {
-    add('survival.workbench-anvil',-width*.3,0,depth*.31,.9);
   }
   add('detail.vine',-width/2-.05,.15,depth*.12,1.4,-Math.PI/2);
+  const built = ruined ? pieces.filter((piece) => !ROOF_KEYS.has(piece.key)) : pieces;
+  // The foundation's top is flush with the room floor so nobody wades into it.
   const base = new THREE.Mesh(new THREE.BoxGeometry(width+.12,.18,depth+.12),new THREE.MeshStandardMaterial({color:0x8c8976,roughness:1}));
-  base.position.y=-.015; base.receiveShadow=true; root.add(base);
+  base.position.y=-.07; base.receiveShadow=true; root.add(base);
   void art.surface(base,'entrance.paving',.1);
-  const materials = await art.modules(root,pieces);
+  const materials = await art.modules(root,built);
   materials.push(base.material);
   for (const lining of linings) lining.traverse(child => {
     if (child instanceof THREE.Mesh && child.material instanceof THREE.Material && !materials.includes(child.material)) materials.push(child.material);
   });
-  const windows=pieces.filter(piece=>piece.key==='entrance.wall-window');
+  const windows=built.filter(piece=>piece.key==='entrance.wall-window');
   if(windows.length) {
     const glazing=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),
       new THREE.MeshBasicMaterial({color:building.id==='church'?0x90b8c5:building.id==='magic-shop'?0xb5a7d9:0xd9bb7a,
@@ -279,6 +334,7 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
     root.add(glazing);materials.push(glazing.material);
   }
   if (ruined) {
+    // Broken walls at two-thirds height: a ruin is open to the sky.
     root.scale.y=.62;
     for (const material of materials) if (material instanceof THREE.MeshStandardMaterial) {
       material.color.multiplyScalar(.45); material.emissive.setHex(0);

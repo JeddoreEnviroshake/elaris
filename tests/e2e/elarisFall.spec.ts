@@ -1,6 +1,6 @@
 import { releaseSaveWriter } from './save';
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 
 /**
  * Elaris is the tutorial's safe town and nothing more. Past the last safe level
@@ -17,7 +17,7 @@ test('a character past the last safe level finds Elaris in ruins', async ({ page
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -35,7 +35,7 @@ test('a character past the last safe level finds Elaris in ruins', async ({ page
       transaction.onerror = () => reject(transaction.error);
     });
   });
-  await page.reload();
+  await reloadApp(page);
 
   await expect(page.getByText(/Ruins of Elaris · X \d+ +Y \d+/)).toBeVisible();
 });

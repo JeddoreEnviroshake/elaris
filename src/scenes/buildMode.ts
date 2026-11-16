@@ -7,6 +7,7 @@ import { effectiveBoundaryEdge, effectiveBuildingDimensions, effectiveDimensions
 import type { BuildPlacementPresentation } from '../three/presentationState';
 import { buildableById, checkPlacement, clampTileToBounds, defaultGhostTile, defaultBoundaryEdgeFromFacing, placeBuilding, placementTargetFromWorld, undoBuildingPlacement, type BuildableDefinition, type BuildableId, type PlacementCheck, type PlaceResult } from './buildPlacement';
 import { nearestBuilding, nextBuildingInDirection } from './deleteSelection';
+import { upgradeTarget } from '../simulation/partUpgrades';
 import { batchCost, checkBuildBatch, placeBuildBatch, shapedBuildRequests, undoBuildGroup, type BuildRequest, type PlacementShape } from '../simulation/batchBuilding';
 export interface BatchPreview { mode: PlacementShape; anchored: boolean; count: number; cost: ReturnType<typeof batchCost>; fixed: boolean }
 
@@ -57,6 +58,13 @@ export class BuildModeController {
   private selectedBuildingId: string | null = null;
   /** Delete mode: the d-pad steers the red cursor and Delete is the only commit. */
   private deleting = false;
+  /**
+   * What the part cursor is for. Upgrade Mode reuses the Delete cursor whole —
+   * the d-pad hop, the world-tap aim, the hidden thumb controls — so every
+   * place the scene asks `deleteMode` treats both the same; only the commit
+   * and the parts the cursor may land on differ.
+   */
+  private cursorPurpose: 'delete' | 'upgrade' = 'delete';
   private markerKind: EnvironmentKind = 'indoor';
 
   constructor(private readonly state: GameState, private readonly callbacks: BuildModeCallbacks) {}
@@ -167,6 +175,18 @@ export class BuildModeController {
     return this.deleting;
   }
 
+  /** True while the part cursor is choosing what to upgrade rather than remove. */
+  get upgradeMode(): boolean {
+    return this.deleting && this.cursorPurpose === 'upgrade';
+  }
+
+  /** Parts the cursor may land on: everything, or in Upgrade Mode only parts with a next material. */
+  private cursorCandidates(): BuildingState[] {
+    return this.cursorPurpose === 'upgrade'
+      ? this.state.buildings.filter((building) => upgradeTarget(buildableById(building.definitionId)) !== null)
+      : this.state.buildings;
+  }
+
   /** The part the Delete cursor is currently lighting up, if any. */
   get deleteTarget(): BuildingState | null {
     if (!this.deleting || !this.selectedBuildingId) return null;
@@ -178,9 +198,10 @@ export class BuildModeController {
    * mirrors placement: the d-pad only moves the red cursor, and Delete is the
    * single control that actually takes a structure down.
    */
-  startDeleting(): void {
+  startDeleting(purpose: 'delete' | 'upgrade' = 'delete'): void {
     this.cancel();
     this.deleting = true;
+    this.cursorPurpose = purpose;
     this.selectNearestForDelete();
   }
 
@@ -199,7 +220,7 @@ export class BuildModeController {
       this.selectNearestForDelete();
       return;
     }
-    const next = nextBuildingInDirection(this.state.buildings, current, dx, dy);
+    const next = nextBuildingInDirection(this.cursorCandidates(), current, dx, dy);
     if (!next || next.id === current.id) return;
     this.setSelectedBuilding(next.id);
     this.callbacks.onDeleteTarget(next);
@@ -239,7 +260,7 @@ export class BuildModeController {
   }
 
   private selectNearestForDelete(): void {
-    const nearest = nearestBuilding(this.state.buildings, this.state.player.x, this.state.player.y);
+    const nearest = nearestBuilding(this.cursorCandidates(), this.state.player.x, this.state.player.y);
     this.setSelectedBuilding(nearest?.id ?? null);
     this.callbacks.onDeleteTarget(nearest);
   }

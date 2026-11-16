@@ -1,6 +1,6 @@
 import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
-import { openApp, waitForDebugHandles } from './app';
+import { openApp, waitForDebugHandles, reloadApp } from './app';
 
 /**
  * Levels and aggression zones, asserted through the browser.
@@ -30,7 +30,7 @@ async function seedRoamer(page: Page, offsetX: number, level: number): Promise<v
   await releaseSaveWriter(page);
   await page.evaluate(async ({ player, offset, roamerLevel }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -63,7 +63,7 @@ async function seedRoamer(page: Page, offsetX: number, level: number): Promise<v
       transaction.onerror = () => reject(transaction.error);
     });
   }, { player: PLAYER, offset: offsetX, roamerLevel: level });
-  await page.reload();
+  await reloadApp(page);
   await waitForDebugHandles(page);
   await expect(page.locator('[data-action-button]')).toBeVisible();
 }

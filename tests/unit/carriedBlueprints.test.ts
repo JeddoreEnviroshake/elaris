@@ -21,7 +21,7 @@ import {
   withinElarisPublicWorkbench,
 } from '../../src/simulation/elarisWorkbench';
 import { ELARIS_LAST_SAFE_LEVEL } from '../../src/simulation/elarisFall';
-import { isSolidTownTile, townBuildingAtPlayerDoor } from '../../src/simulation/town';
+import { isTownPositionBlocked, townBuildingAroundPlayer } from '../../src/simulation/town';
 import { nearestUsableFacility, toolUnlockReason, usedInventorySlots } from '../../src/simulation/gameplayCommands';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 
@@ -137,10 +137,11 @@ describe('registering at a workbench', () => {
 
 describe('the Elaris public workbench', () => {
   it('stands on open ground, clear of every town footprint and doorway', () => {
+    const state = createInitialState(1);
     for (let dx = 0; dx < 2; dx += 1) {
-      const tileX = ELARIS_PUBLIC_WORKBENCH_TILE.tileX + dx;
-      const tileY = ELARIS_PUBLIC_WORKBENCH_TILE.tileY;
-      expect(isSolidTownTile(tileX, tileY, '0,0')).toBe(false);
+      const x = (ELARIS_PUBLIC_WORKBENCH_TILE.tileX + dx + 0.5) * 16;
+      const y = (ELARIS_PUBLIC_WORKBENCH_TILE.tileY + 0.5) * 16;
+      expect(isTownPositionBlocked(state, x, y)).toBe(false);
     }
   });
 
@@ -205,6 +206,6 @@ describe('the Elaris public workbench', () => {
     const state = atTownWorkbench();
     expect(state.buildings).toEqual([]);
     expect(canRegisterHere(state)).toBe(true);
-    expect(townBuildingAtPlayerDoor(state)).toBeNull();
+    expect(townBuildingAroundPlayer(state)).toBeNull();
   });
 });

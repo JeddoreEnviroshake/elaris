@@ -517,8 +517,9 @@ describe('survival timer badge', () => {
   it('shows the alternating safe and danger countdown states', () => {
     const state = createInitialState(123);
     // Exercise exposed/sheltered badge states away from Elaris's permanent
-    // municipal safe zone.
-    state.currentArea = { key: '1,0', x: 1, y: 0, name: 'Away', theme: 'forest', seed: 9 };
+    // municipal safe zone, in an area with no walk-in building around the
+    // starting position.
+    state.currentArea = { key: '1,1', x: 1, y: 1, name: 'Away', theme: 'forest', seed: 9 };
     const noop = (): void => {};
     const actions: GameplayHudActions = {
       onAction: noop, onCraftTool: noop, onCraftSnare: noop, onCraftReinforcedSnare: noop, onCraftArrows: noop, onCraftClothMask: noop,
@@ -569,7 +570,7 @@ describe('survival timer badge', () => {
 
   it('names the arcane storm, counts its impacts, and calls out charged ore', () => {
     const state = createInitialState(124);
-    state.currentArea = { key: '1,0', x: 1, y: 0, name: 'Away', theme: 'forest', seed: 9 };
+    state.currentArea = { key: '1,1', x: 1, y: 1, name: 'Away', theme: 'forest', seed: 9 };
     const noop = (): void => {};
     const actions: GameplayHudActions = {
       onAction: noop, onCraftTool: noop, onCraftSnare: noop, onCraftReinforcedSnare: noop, onCraftArrows: noop, onCraftClothMask: noop,
@@ -601,7 +602,7 @@ describe('survival timer badge', () => {
         id: 'strike-1',
         cycleIndex: 4,
         strikeIndex: 2,
-        areaKey: '1,0',
+        areaKey: '1,1',
         x: state.player.x,
         y: state.player.y,
         telegraphAtTick: state.tick,

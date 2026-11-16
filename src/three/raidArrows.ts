@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { TILE_SIZE } from '../config/platform';
 import { buildingCenter, playerShotDamage, playerShotRangePx, turrets } from '../simulation/raids';
 import type { GameState } from '../simulation/state';
+import { turretStats } from '../simulation/facilityLevels';
 
 /**
  * Arrows in flight, inferred from state rather than simulated.
@@ -91,7 +92,7 @@ export class ArrowShotTracker {
         if (before === undefined || after >= before) continue;
         const center = buildingCenter(turret);
         for (let shot = 0; shot < before - after; shot += 1) {
-          const target = nearestSample(previousRaiders, center.x, center.y, defense.turretRangeTiles * TILE_SIZE);
+          const target = nearestSample(previousRaiders, center.x, center.y, turretStats(turret, defense).rangeTiles * TILE_SIZE);
           if (!target) break;
           shots.push(this.shotTo(state, 'turret', turret.id, center.x, center.y, target));
         }

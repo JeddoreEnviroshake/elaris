@@ -222,10 +222,11 @@ describe('what does and does not protect', () => {
 
   it('spends slots without marking a player inside an NPC building', () => {
     // The Verdant Reach Farm stands in the same field area the storm is
-    // sweeping, so this is shelter the town is not paying for.
+    // sweeping, so this is shelter the town is not paying for. The player has
+    // walked in through the doorway and stands in the stockhouse.
     const state = stormingState();
-    state.player.x = (78 + 0.5) * TILE_SIZE;
-    state.player.y = (81 + 0.5) * TILE_SIZE;
+    state.player.x = (76 + 3) * TILE_SIZE;
+    state.player.y = (76 + 3) * TILE_SIZE;
     const hp = state.player.hp;
     runTo(state, tickAt(17));
 
@@ -234,13 +235,13 @@ describe('what does and does not protect', () => {
     expect(state.arcaneStorm.nextStrikeIndex).toBe(2);
   });
 
-  it('lets the storm through the doorway of a building Elaris no longer keeps', () => {
-    // Past the last safe level the market is rubble. Its doorway is still
-    // walkable, and standing in it is standing outside.
+  it('lets the storm into a building Elaris no longer keeps', () => {
+    // Past the last safe level the market is rubble. Its broken walls still
+    // stand, but it has no roof: standing inside it is standing outside.
     const state = createInitialState(902);
     state.player.level = ELARIS_LAST_SAFE_LEVEL + 1;
-    state.player.x = (79 + 0.5) * TILE_SIZE;
-    state.player.y = (86 + 0.5) * TILE_SIZE;
+    state.player.x = (76 + 4.5) * TILE_SIZE;
+    state.player.y = (86 + 2.5) * TILE_SIZE;
     state.tick = STORM_START_TICK;
     const hp = state.player.hp;
     runTo(state, tickAt(8));

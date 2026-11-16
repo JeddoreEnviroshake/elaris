@@ -1,5 +1,3 @@
-import type { InteriorDefinition } from '../content/interiors';
-import type { InteriorPose, InteriorTransition } from '../presentation/interiorSession';
 import type { GatherAssistancePresentation } from '../presentation/followerCreatures';
 import type { BoundaryEdge, BuildingDefinitionId, EnvironmentKind, ResourceNodeKind } from '../simulation/state';
 
@@ -19,7 +17,7 @@ export interface BuildPlacementPresentation {
   readonly blockedCells: readonly { tileX: number; tileY: number; reason: string }[];
 }
 
-export type InteractionTargetKind = 'resource' | 'drop' | 'creature' | 'facility' | 'garden' | 'woodlot' | 'door' | 'site-container';
+export type InteractionTargetKind = 'resource' | 'drop' | 'creature' | 'facility' | 'garden' | 'woodlot' | 'town-hotspot' | 'site-container';
 
 /** The same context-action target selected by WorldScene for the HUD. */
 export interface InteractionTargetPresentation {
@@ -51,10 +49,4 @@ export interface ThreePresentationState {
   readonly playerAction?:{readonly id:number;readonly arrowTracked:boolean;readonly kind:'melee'|'ranged'|'magic';readonly progress:number;readonly x:number;readonly y:number}|null;
   readonly gatherAssistance?: GatherAssistancePresentation | null;
   readonly prefersReducedMotion: boolean;
-  readonly interior: {
-    readonly definition: InteriorDefinition;
-    readonly pose: InteriorPose;
-    readonly focusedHotspotId: string | null;
-    readonly transition: InteriorTransition | null;
-  } | null;
 }

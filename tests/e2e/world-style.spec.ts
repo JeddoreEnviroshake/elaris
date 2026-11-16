@@ -5,7 +5,7 @@ import type { GameState } from '../../src/simulation/state';
 
 type Debug = {
   __game:{scene:{getScene(key:string):{state:GameState;snapRenderPoseToState():void;performEncounterStart():void}}};
-  __renderer3d:{worldRoot:THREE.Group;entityRoot:THREE.Group;interiorStage:{root:THREE.Group};battleStage:{root:THREE.Group};
+  __renderer3d:{worldRoot:THREE.Group;entityRoot:THREE.Group;battleStage:{root:THREE.Group};
     setCameraOrientation(orientation:{yawDegrees:number;pitchDegrees:number}):void;
     getSnapshot():{drawCalls:number;triangles:number;interiorActive:boolean;battleActive:boolean}};
 };
@@ -62,26 +62,26 @@ test('outposts and streamed regional vegetation reuse the same models',async({pa
   expect(errors).toEqual([]);
 });
 
-test('interior stonework and timber load while room interaction remains available',async({page})=>{
+test('walk-in rooms load their stonework and timber inside the town buildings',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   page.on('console',message=>{if(/\[3d\] Unable|Shader Error/.test(message.text()))errors.push(message.text());});
   await page.setViewportSize({width:1280,height:900});
   await openApp(page,'render=3d');await waitForDebugHandles(page);
+  // Standing just inside the tavern's doorway: the room is part of the world.
   await page.evaluate(()=>{
     const scene=(globalThis as unknown as Debug).__game.scene.getScene('world');
-    scene.state.player.x=90.5*16;scene.state.player.y=85.5*16;scene.snapRenderPoseToState();
+    scene.state.player.x=91*16;scene.state.player.y=87.2*16;scene.snapRenderPoseToState();
   });
-  await page.getByRole('button',{name:'Enter Tavern',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>{
-    const root=(globalThis as unknown as Debug).__renderer3d.interiorStage.root;
-    const floor=root.getObjectByName('room-floor:elaris-tavern') as THREE.Mesh|undefined;
+    const root=(globalThis as unknown as Debug).__renderer3d.worldRoot;
+    const room=root.getObjectByName('town-room:tavern');
+    const floor=room?.getObjectByName('room-floor:tavern') as THREE.Mesh|undefined;
     return !!floor&&(floor.material as THREE.MeshStandardMaterial).map!==null
-      && !!root.getObjectByName('batch.entrance.wall-window');
+      && !!root.getObjectByName('town.tavern')?.getObjectByName('batch.entrance.wall-window')
+      && (globalThis as unknown as Debug).__renderer3d.getSnapshot().interiorActive;
   })).toBe(true);
-  await expect(page.getByRole('button',{name:'Leave the Tavern'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Enter Tavern',exact:true})).toHaveCount(0);
   await page.screenshot({path:'tmp/world-style-tavern-interior.png'});
-  await page.getByRole('button',{name:'Leave the Tavern'}).click();
-  await expect.poll(()=>page.evaluate(()=>(globalThis as unknown as Debug).__renderer3d.getSnapshot().interiorActive)).toBe(false);
   expect(errors).toEqual([]);
 });
 

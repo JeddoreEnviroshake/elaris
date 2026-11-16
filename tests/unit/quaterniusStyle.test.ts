@@ -5,22 +5,25 @@ import { describeArea } from '../../src/simulation/areas';
 import { terrainAt } from '../../src/simulation/landscape';
 import { createInitialState } from '../../src/simulation/state';
 import { isInsideBufferedFootprint } from '../../src/three/environmentComposition';
-import { regionalPlanting, settlementModules } from '../../src/three/quaterniusArt';
+import { regionalPlanting, settlementDoor, settlementModules } from '../../src/three/quaterniusArt';
 import { createCreatureRig } from '../../src/three/characterRigs';
 
 describe('shared Quaternius art direction', () => {
   it('keeps each settlement door centred on its saved entrance, including north-facing shops', () => {
     for (const building of TOWN_BUILDINGS.filter(building=>building.id!=='arena')) {
       const modules=settlementModules(building);
-      const doors=modules.filter(module=>module.key==='entrance.door'||module.key==='detail.round-door');
-      expect(doors).toHaveLength(1);
-      const door=doors[0]!;
+      // The leaf hangs on its own hinge so it can swing; the wall leaves its doorway.
+      const doorways=modules.filter(module=>module.key==='entrance.wall-door'||module.key==='detail.arch-wall');
+      expect(doorways).toHaveLength(1);
+      const door=settlementDoor(building);
       const horizontal=building.door.tileY===building.footprint.tileY
         ||building.door.tileY===building.footprint.tileY+building.footprint.tilesHigh-1;
-      if(horizontal) expect(door.x+building.footprint.tileX+building.footprint.tilesWide/2)
+      for (const centre of [door.centreX, doorways[0]!.x]) if(horizontal) expect(centre+building.footprint.tileX+building.footprint.tilesWide/2)
         .toBeCloseTo(building.door.tileX+building.doorWidth/2);
-      else expect(door.z+building.footprint.tileY+building.footprint.tilesHigh/2)
+      if(!horizontal) expect(door.centreZ+building.footprint.tileY+building.footprint.tilesHigh/2)
         .toBeCloseTo(building.door.tileY+building.doorWidth/2);
+      // The hinge sits on the doorway's jamb, half a doorway from its centre.
+      expect(Math.hypot(door.hingeX-door.centreX,door.hingeZ-door.centreZ)).toBeCloseTo(.75);
       expect(modules.some(module=>module.key==='entrance.roof')).toBe(true);
       expect(modules.every(module=>Number.isFinite(module.x)&&Number.isFinite(module.z)&&(module.height??1)>0)).toBe(true);
     }

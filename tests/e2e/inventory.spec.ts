@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { gatherStarterTree, openAppInStarterGrove } from './gather';
 import { openBuildPalette, openMenuTab, grantBlueprints } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
@@ -13,7 +13,7 @@ async function seedEquippedPick(page: import('@playwright/test').Page): Promise<
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -40,7 +40,7 @@ async function seedEquippedPick(page: import('@playwright/test').Page): Promise<
       transaction.onerror = () => reject(transaction.error);
     });
   });
-  await page.reload();
+  await reloadApp(page);
 }
 
 /**
@@ -57,7 +57,7 @@ async function seedWornPick(page: import('@playwright/test').Page): Promise<void
   await page.waitForTimeout(500);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await putWornPick(page);
-    await page.reload();
+    await reloadApp(page);
     await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
     const seeded = await readSavedState(page);
     if (seeded && seeded.inventory['wood'] === 9) return;
@@ -69,7 +69,7 @@ async function putWornPick(page: import('@playwright/test').Page): Promise<void>
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -106,7 +106,7 @@ async function seedWoodStack(page: import('@playwright/test').Page, amount: numb
   await releaseSaveWriter(page);
   await page.evaluate(async (wood) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -125,7 +125,7 @@ async function seedWoodStack(page: import('@playwright/test').Page, amount: numb
       transaction.onerror = () => reject(transaction.error);
     });
   }, amount);
-  await page.reload();
+  await reloadApp(page);
 }
 
 /**
@@ -259,6 +259,7 @@ test('hotbar shows the crafted pick and equips by tap', async ({ page }) => {
   await expect(slot1).toHaveAttribute('aria-pressed', 'true');
 
   // Tapping an empty slot switches back to bare hands.
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Hotbar slot 2: empty' }).click();
   await expect(page.getByText('Switched to bare hands', { exact: true })).toBeVisible();
   await expect(slot1).toHaveAttribute('aria-pressed', 'false');

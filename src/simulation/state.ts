@@ -1222,6 +1222,12 @@ export interface BuildingState {
   /** Present only on Turrets. Loaded ammunition persists between raids. */
   turret?: TurretState;
   /**
+   * Facility level, 2 or 3, bought with salvage. Absent means level 1, the
+   * same convention `hp` uses, so older saves need no rewrite. See
+   * simulation/facilityLevels for every effect a level has.
+   */
+  level?: number;
+  /**
    * Structural health, written only once a wall has actually been damaged.
    * Absent means undamaged, so older saves read as full health without a
    * migration and an untouched wall costs nothing to persist.

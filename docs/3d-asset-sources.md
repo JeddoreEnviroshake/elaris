@@ -78,7 +78,8 @@ use instanced rendering. The bridge deck follows the authoritative bridge mask;
 railings face water and leave the road approaches open. Ground color variation,
 aggregate road texture, shoreline accents, ripples, gate timbers and forge smoke
 are original Elaris presentation work. Reduced motion freezes the new ambient
-animation. The forge retains the existing explicit interior entry and ruin state.
+animation. The forge is a walk-in shell on the shared town-building lines, with a
+hinged door and its furnished room inside, and keeps its ruin state.
 
 Resource damage and construction changes reconcile individual visual objects;
 they no longer rebuild the entire resource/creature/building presentation.

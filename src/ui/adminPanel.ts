@@ -42,6 +42,8 @@ export interface AdminSystemControls {
   openDiagnostics?: () => void;
   /** Wipe the save and restart the world from a fresh character. */
   resetGame?: () => void | Promise<void>;
+  /** Save and close the current local session. */
+  quitToMenu?: () => void | Promise<void>;
 }
 
 const GATHERABLE_RESOURCE_IDS: readonly GatherableResourceId[] = ['wood', 'stone', 'fiber', 'iron-ore', 'iron-ingot'];

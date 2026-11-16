@@ -1,6 +1,6 @@
 import { tapWorld } from './interact';
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { gatherStarterTree, openAppInStarterGrove } from './gather';
 import { buildPalette, openMenuTab, grantBlueprints } from './menu';
 import { releaseSaveWriter, expectSavedState, readSavedState } from './save';
@@ -26,7 +26,7 @@ async function loadRichBuilder(page: Page): Promise<void> {
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await patchRichSave(page);
-    await page.reload();
+    await reloadApp(page);
     const seeded = await readSavedState(page);
     if ((seeded?.inventory.wood ?? 0) >= 90) return;
   }
@@ -37,7 +37,7 @@ async function patchRichSave(page: Page): Promise<void> {
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -183,7 +183,11 @@ test('tapping the d-pad walks the ghost up-screen before Place commits it', asyn
   // The pad rests 16px in and 32px up from the corner with a 56px radius; the
   // up arrow sits near the top of that circle.
   for (let taps = 0; taps < 3; taps += 1) {
-    await page.locator('[data-dpad-arrow="up"]').click();
+    const arrow = await page.locator('[data-dpad-arrow="up"]').boundingBox();
+    if (!arrow) throw new Error('The up arrow is not visible');
+    // The moving pad knob may cover the decorative arrow; a real thumb still
+    // reaches the pad's coordinate-based input handler through that knob.
+    await page.mouse.click(arrow.x + arrow.width / 2, arrow.y + arrow.height / 2);
   }
   await page.getByRole('button', { name: 'Place' }).click();
 
@@ -215,11 +219,11 @@ test('the touch Place button confirms and placement persists across reload', asy
   await palette(page).getByRole('button', { name: /Storage Box \(small\)/ }).click();
   await page.getByRole('button', { name: 'Place' }).click();
   await expectSavedState(page, (state) => state.buildings.some((b) => b.definitionId === 'field-cache'));
-  await page.reload();
+  await reloadApp(page);
 
   const persisted = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

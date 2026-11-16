@@ -60,6 +60,28 @@ export const SELL_PRICES: Readonly<Record<ResourceId, number>> = {
  */
 export const BLACKSMITH_UPGRADE_COSTS = [30, 70, 320, 900] as const;
 
+/**
+ * Tempering at your own Workbench: the same four ranks Mara sells for coins,
+ * bought instead with salvage. Index 0 is rank 1. The bench's level caps the
+ * rank (see WORKBENCH_MAX_TEMPER_RANK_BY_LEVEL).
+ */
+export const TEMPER_COSTS: readonly [
+  Readonly<Partial<Record<ResourceId, number>>>, Readonly<Partial<Record<ResourceId, number>>>,
+  Readonly<Partial<Record<ResourceId, number>>>, Readonly<Partial<Record<ResourceId, number>>>,
+] = [
+  { 'scrap-iron': 4 },
+  { 'scrap-iron': 8, clockwork: 2 },
+  { clockwork: 6, lens: 2 },
+  { 'construct-core': 1, 'ancient-alloy': 1 },
+];
+
+/**
+ * Scrap Iron returned for breaking a tool down at a Workbench, at full
+ * durability; scaled by what durability remains. Wooden tools return nothing
+ * and cannot be scrapped.
+ */
+export const TOOL_SCRAP_IRON = { stone: 1, iron: 2, reinforced: 4, masterwork: 6, ancient: 8 } as const;
+
 export const FARM_ORDER_COSTS: Readonly<Record<SpeciesId, number>> = {
   tuftle: 120,
   craghopper: 180,

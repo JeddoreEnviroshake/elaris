@@ -1,23 +1,25 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { openAdmin } from './menu';
-import { outsideDoorTile, townBuildingById } from '../../src/content/townBuildings';
+import { townBuildingById } from '../../src/content/townBuildings';
+import { shellDoorstep, townBuildingShell } from '../../src/content/interiors';
 
-test('walks into the Market, sells a resource inside, and leaves safely', async ({ page }) => {
+test('walks into the Market, sells a resource at the counter, and walks back out', async ({ page }) => {
   await openApp(page);
   await openAdmin(page);
-  const door = outsideDoorTile(townBuildingById('market'));
-  await page.getByLabel('X', { exact: true }).fill(String((door.tileX + .5) * 16));
-  await page.getByLabel('Y', { exact: true }).fill(String((door.tileY + .5) * 16));
+  const market = townBuildingById('market');
+  const doorstep = shellDoorstep(townBuildingShell(market));
+  // The Market's door is on its north wall, so the doorstep is above it on screen.
+  await page.getByLabel('X', { exact: true }).fill(String(Math.round((market.footprint.tileX + doorstep.x) * 16)));
+  await page.getByLabel('Y', { exact: true }).fill(String(Math.round((market.footprint.tileY + doorstep.y - 1) * 16)));
   await page.getByLabel('Wood', { exact: true }).fill('4');
   await page.getByRole('button', { name: 'Push Local Values' }).click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  const interior = page.getByRole('dialog', { name: 'Market service' });
-  await expect(page.getByRole('button', { name: 'Enter Market' })).toBeVisible();
-  await page.keyboard.press('e');
-  await expect(page.getByRole('button', { name: 'Leave the Market', exact: true })).toBeVisible();
+  const service = page.getByRole('dialog', { name: 'Market service' });
+  // There is no door to "enter": the player walks straight through it.
+  await expect(page.getByRole('button', { name: 'Enter Market' })).toHaveCount(0);
 
-  // Walk down the clear aisle until Tavi can be reached, before the counter.
+  // Walk down through the doorway and the aisle until Tavi is in reach.
   await page.keyboard.down('s');
   try {
     await expect(page.getByRole('button', { name: 'Talk to Tavi' })).toBeVisible({ timeout: 10_000 });
@@ -29,21 +31,23 @@ test('walks into the Market, sells a resource inside, and leaves safely', async 
   await expect(conversation).toBeVisible();
   await page.keyboard.press('Enter');
   await conversation.getByRole('button', { name: /Let us get to work|Show me your services/ }).click();
-  await expect(interior).toBeVisible();
+  await expect(service).toBeVisible();
 
-  await expect(interior.getByText('Tavi', { exact: true })).toBeVisible();
-  await interior.getByRole('button', { name: 'Choose Wood' }).click();
-  await expect(interior.getByText(/4 carried · 2 coins each · 8 coins for all/)).toBeVisible();
-  await interior.getByRole('button', { name: 'Place goods on the counter' }).click();
-  await expect(interior.getByText(/Choose whether to sell one or the full 4-item stack/)).toBeVisible();
-  await interior.getByRole('button', { name: 'Sell all wood' }).click();
-  await expect(interior.locator('[aria-live="polite"]')).toHaveText('Sold 4 wood for 8 coins');
-  await expect(interior.getByText('Coin purse: 8')).toBeVisible();
+  await expect(service.getByText('Tavi', { exact: true })).toBeVisible();
+  await expect(service.locator('[aria-label="Wood market row"]')).toContainText('Owned 4');
+  await service.getByRole('button', { name: 'Sell all wood' }).click();
+  await expect(service.getByText(/Coin purse: 8\b/)).toBeVisible();
 
-  await interior.getByRole('button', { name: 'Return to Elaris Market Hall' }).click();
-  await expect(interior).toBeHidden();
+  await service.getByRole('button', { name: 'Return to Elaris Market Hall' }).click();
+  await expect(service).toBeHidden();
   await expect(page.locator('#elaris-three-canvas')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: 'Talk to Tavi', exact: true })).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Enter Market' })).toBeVisible();
+  // Still standing at the counter: closing the panel moves nobody.
+  await expect(page.getByRole('button', { name: 'Talk to Tavi', exact: true })).toBeVisible();
+
+  await page.keyboard.down('w');
+  try {
+    await expect(page.getByRole('button', { name: 'Talk to Tavi', exact: true })).toBeHidden({ timeout: 10_000 });
+  } finally {
+    await page.keyboard.up('w');
+  }
 });

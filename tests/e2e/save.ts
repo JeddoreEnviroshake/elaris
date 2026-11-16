@@ -26,10 +26,15 @@ export interface SavedState {
 
 /** Finish the app's normal save/release before replacing a browser fixture. */
 export async function releaseSaveWriter(page: Page): Promise<void> {
+  // Stop expensive world drawing while the browser fixture is being replaced.
+  // The journal keeps the simulation running and provides a still backdrop.
+  const journal = page.getByRole('dialog', { name: 'Game menu', exact: true });
+  const open = page.getByRole('button', { name: 'Menu', exact: true });
+  if (!(await journal.isVisible()) && await open.isVisible()) await open.click();
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })));
   await expect.poll(() => page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -45,7 +50,7 @@ export async function releaseSaveWriter(page: Page): Promise<void> {
 export async function readSavedState(page: Page): Promise<SavedState | null> {
   return page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

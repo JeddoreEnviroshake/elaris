@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
@@ -43,7 +43,7 @@ async function loadFixture(page: Page, prepare?: (state: GameState) => void) {
   await releaseSaveWriter(page);
   await page.evaluate(async (next) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
@@ -52,7 +52,7 @@ async function loadFixture(page: Page, prepare?: (state: GameState) => void) {
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Paddock guide', exact: true })).toBeVisible();
   return state;
 }
@@ -84,7 +84,7 @@ test('3D paddock builds, produces with the original Tuftle, collects once and sa
   const working = await saved(page);
   expect(companion(working).id).toBe(initial.onboarding.companionId);
   await page.screenshot({ path: `tmp/opening-paddock-working-${testInfo.project.name}.png` });
-  await page.reload();
+  await reloadApp(page);
   await openMenuTab(page, 'Paddock');
   expect(companion(await saved(page)).housingId).toBe(companion(working).housingId);
   const collect = page.getByRole('button', { name: 'Collect Pen fiber', exact: true });
@@ -99,7 +99,7 @@ test('3D paddock builds, produces with the original Tuftle, collects once and sa
   await expect.poll(async () => (await saved(page)).onboarding.completedMilestoneIds).toContain('return-to-follow');
   await expect(page.getByRole('tabpanel', { name: 'Paddock', exact: true })).toContainText('Ready to travel together');
   await page.screenshot({ path: `tmp/opening-paddock-complete-${testInfo.project.name}.png` });
-  await page.reload();
+  await reloadApp(page);
   await openMenuTab(page, 'Paddock');
   const after = await saved(page);
   expect(after.ownedCreatures).toHaveLength(1);

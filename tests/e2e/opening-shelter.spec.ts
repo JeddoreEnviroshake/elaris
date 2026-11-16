@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
@@ -26,7 +26,7 @@ async function loadBuilder(page: Page) {
   await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
@@ -38,7 +38,7 @@ async function loadBuilder(page: Page) {
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Shelter guide', exact: true })).toBeVisible();
   return site;
 }
@@ -81,7 +81,7 @@ test('3D shelter guide previews grouped costs, undoes floors, and saves a protec
   await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText('You are protected here.');
   await page.screenshot({ path: `tmp/opening-shelter-${testInfo.project.name}.png` });
   const before = await saved(page);
-  await page.reload();
+  await reloadApp(page);
   await openMenuTab(page, 'Shelter');
   await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText('Shelter ready');
   const after = await saved(page);

@@ -2,7 +2,7 @@ import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
 import { createInitialState, createWorkerHousingState } from '../../src/simulation/state';
 import { enclosedEnvironment } from '../unit/helpers/buildings';
-import { openApp, waitForDebugHandles } from './app';
+import { openApp, waitForDebugHandles, reloadApp } from './app';
 
 /**
  * A creature on Work duty should be visible at the facility it staffs.
@@ -45,7 +45,7 @@ async function seedWorkingCreature(page: Page, query = ''): Promise<void> {
   await releaseSaveWriter(page);
   await page.evaluate(async (fixtureState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -62,7 +62,7 @@ async function seedWorkingCreature(page: Page, query = ''): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await waitForDebugHandles(page);
 }
 

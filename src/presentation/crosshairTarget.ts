@@ -16,7 +16,8 @@ export type CrosshairTargetKind =
   | 'facility'
   | 'garden'
   | 'woodlot'
-  | 'door'
+  /** A keeper or an examinable thing inside a town building; id is `${buildingId}:${hotspotId}`. */
+  | 'town-hotspot'
   | 'building'
   /** An unsearched container at a field site; id is `${siteId}#${index}`. */
   | 'site-container';

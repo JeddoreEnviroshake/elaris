@@ -243,34 +243,57 @@ loses state.
 
 ### Town buildings and NPC services
 
-Town services are playable 3D rooms. Stand at a named doorway and use the context action (`E`,
-`Space`, primary click, or the touch action button) to enter; walking across a
-door does not open a menu automatically.
+Town services are walk-in rooms built into the world map — there is no separate
+interior scene and no Enter or Leave button. Walk up to a building and its door
+swings open; walk through the doorway and you are inside, in either view. The
+furnished room, keeper and counter stand inside the building's own walls (authored
+in `src/content/interiors.ts`, which the simulation's collision and the renderer
+both read), and being between those walls counts as being indoors for the storm
+and the raid.
 
 Inside a building:
 
-- Move with the normal keyboard or touch controls.
-- Approach the named NPC and use the context action to talk.
+- Move with the normal keyboard or touch controls; the doorway is the way out.
+- Approach the named NPC and use the context action (`E`, `Space`, a tap on the
+  keeper, or the touch action button) to talk.
 - Choose a dialogue response before opening the NPC's focused service overlay.
 - Every service the NPC offers is listed on that one overlay; there is no staged
   ritual in front of it.
-- Press `Escape` to close dialogue, return from a service, or leave the room.
-  The named **Leave** action at the doorway works with click or touch.
+- Press `Escape` to close dialogue or return from a service. You are left standing
+  at the counter.
 
-Each building has its own low-volume ambient soundscape. Sound fades cleanly
-between the exterior and room, pauses while the app is in the background, and
-respects browser/device audio controls. Reduced-motion mode removes decorative
-room motion and particles without hiding interaction state.
+In the overhead view, the roof and upper walls of the building you are in are cut
+away so the room stays visible; the camera itself never moves. In first person the
+roof is the ceiling. A fallen Elaris building is an empty, roofless shell.
+
+Each building has its own low-volume ambient soundscape, which takes over as you
+step through the doorway and hands back to the world as you step out. Sound pauses
+while the app is in the background and respects browser/device audio controls.
+Reduced-motion mode removes decorative room motion and particles without hiding
+interaction state.
 
 ---
 
 ## Saves
 
+The app opens on a **world menu**. **New Game** creates a named local world;
+**Continue** lists your worlds with ownership, member count, and last-played
+time. Each world has independent progress, recovery snapshots, and writer
+protection. The journal's **Quit to Menu** saves and closes the active world;
+you can then open another world without reloading. Reloading always returns
+to the world menu. **Join Game** explains that online play is not available yet.
+
+On upgrade, the previous single-slot save becomes your first local world,
+named from its area and character level. Its original snapshot is retained
+in the legacy database under `preMigrationBackup`, and is not removed when
+you save, import, or reset a world. New Game and Continue work offline after
+the app has finished its first successful offline download.
+
 Saves are **local-first**, stored in your browser's **IndexedDB**. Cross-device
 cloud sync via Firebase arrives in Milestone 2; until then, **Export / Import** is
 the portability path (and remains a permanent fallback).
 
-Open the status pill (top-left) → **Diagnostics** to reach save management:
+While playing, open **Menu → Admin → App status and diagnostics** to reach save management for the current world:
 
 - **Export save** — downloads a versioned JSON file (uses the native share sheet
   where available, otherwise a normal download).
@@ -296,9 +319,10 @@ and **device**. Consequences:
 
 ### Durability guarantees
 
-- Only one **writer** is active per origin/profile at a time. Opening the game in
-  a second live tab is **read-only** ("Game already open"); a fencing token
-  prevents a stale writer from ever overwriting current data.
+- Only one **writer** is active per world and browser profile. Opening the
+  same world in another live window keeps you at the menu with an explanation;
+  different worlds can be played in separate windows. A fencing token prevents
+  a stale writer from overwriting or resetting current data.
 - Reloading your own game re-acquires the writer immediately (a liveness probe
   distinguishes a genuinely-open second tab from a dead predecessor).
 - Ordinary movement autosaves on a short debounce; the current save rotates into

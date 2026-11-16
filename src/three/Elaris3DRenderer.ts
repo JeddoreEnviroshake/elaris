@@ -25,7 +25,7 @@ import type { ModelAssetKey } from './assetRegistry';
 import { ModelLibrary } from './modelLibrary';
 import { ContactShadows, SceneFinish } from './sceneFinish';
 import { TownEntrance, disposePaintedGround, entranceRoadMaterial, meadowMaterial } from './townEntrance';
-import { QuaterniusArt, VegetationStream, buildStyledSettlement, styledWaterMaterial, updateStyledWater } from './quaterniusArt';
+import { QuaterniusArt, VegetationStream, buildStyledSettlement, settlementDoor, styledWaterMaterial, updateStyledWater } from './quaterniusArt';
 import type {
   BuildPlacementPresentation,
   InteractionTargetPresentation,
@@ -78,7 +78,8 @@ import {
 } from '../scenes/dangerPresentation';
 import { ThreeBattleStage } from './ThreeBattleStage';
 import {CombatEffects,COMBAT_PALETTE} from './combatEffects';
-import { ThreeInteriorStage, type InteriorStageFrame } from './ThreeInteriorStage';
+import { TownRoom, type TownRoomSnapshot } from './townRooms';
+import { townBuildingShell } from '../content/interiors';
 import {
   FIRST_PERSON_EYE_HEIGHT, FIRST_PERSON_FAR, FIRST_PERSON_FOG_FAR, FIRST_PERSON_FOG_NEAR,
   FIRST_PERSON_FOV_DEGREES, FIRST_PERSON_NEAR, firstPersonView,
@@ -100,6 +101,7 @@ import { ResourceGrounding, ROCK_BASE_Y, TREE_BASE_Y } from './resourceGrounding
 import { WoodlandSky } from './woodlandSky';
 import { addGroundedTreeWind, updateTreeWind } from './groundedTreeWind';
 import { FirstPersonHands, firstPersonHandsFrame } from './firstPersonHands';
+import { DurationWindow, type DurationStats } from '../platform/durationWindow';
 
 const WORLD_UNIT_PX = TILE_SIZE;
 
@@ -192,8 +194,14 @@ export interface ThreeRendererSnapshot {
   readonly battleActive: boolean;
   readonly battleRoundAnimating: boolean;
   readonly battleEffectInstances:number;
+  /** True while the player stands inside a walk-in town building. */
   readonly interiorActive: boolean;
   readonly interiorId: string | null;
+  readonly townRooms: readonly TownRoomSnapshot[];
+  /** Synchronous cost of tearing down and rebuilding the scene for one area. */
+  readonly areaRebuild: DurationStats;
+  /** CPU time inside each drawn frame (scene update plus GPU submission), independent of vsync. */
+  readonly frameWork: DurationStats;
 }
 
 interface FeedbackParticle {
@@ -228,6 +236,27 @@ interface FlyingArrow {
   readonly killed: boolean;
   elapsed: number;
 }
+
+/** A walk-in town building: its room, its doorway leaf, and its cutaway. */
+interface TownRoomEntry {
+  readonly room: TownRoom;
+  /** The exterior shell group, exempt from occluder fading while the player is inside. */
+  readonly shell: THREE.Group;
+  /**
+   * Shared by every material of the shell. Its height sits far above the roof
+   * until the player is inside in the overhead view, when it drops to waist
+   * height and the roof and upper walls are cut away.
+   */
+  readonly cut: THREE.Plane;
+  readonly label: THREE.Sprite;
+}
+
+/** Height the overhead cutaway clips a shell to while the player is inside it. */
+const TOWN_CUTAWAY_HEIGHT = 1.3;
+/** A cut plane parked here clips nothing. */
+const TOWN_CUT_OPEN = 1e4;
+/** Town doors open inward; placed doors keep DOOR_OPEN_ANGLE. */
+const TOWN_DOOR_OPEN_ANGLE = Math.PI * 0.52;
 
 interface SceneOccluder {
   readonly object: THREE.Object3D;
@@ -329,7 +358,14 @@ export class Elaris3DRenderer {
   private readonly battleStage = new ThreeBattleStage(this.models);
   private readonly combatEffects = new CombatEffects();
   private lastCombatActionId=Number.NEGATIVE_INFINITY;
-  private readonly interiorStage = new ThreeInteriorStage(this.models);
+  /** Walk-in rooms of this area's town buildings, rebuilt with the world. */
+  private readonly townRooms: TownRoomEntry[] = [];
+  /**
+   * The one light every room shares. It always exists — moved to the building
+   * the player is in and dimmed to nothing outside — so walking through a
+   * doorway never changes the scene's light count or recompiles a shader.
+   */
+  private readonly roomLight = new THREE.PointLight(0xffc98a, 0, 7.5, 2);
   private readonly focusRing: THREE.Mesh;
   private readonly playerRing: THREE.Mesh;
   private targetStatus: THREE.Sprite | null = null;
@@ -339,6 +375,10 @@ export class Elaris3DRenderer {
   private entitySignature = '';
   private lastSyncAt = Number.NEGATIVE_INFINITY;
   private lastFrameAt = performance.now();
+  // Open-world baseline (open-world-plan.md, Phase 0): what a load costs today
+  // and what an ordinary frame costs, readable from Admin → Diagnostics.
+  private readonly areaRebuildTimes = new DurationWindow(30);
+  private readonly frameWorkTimes = new DurationWindow(240);
   private readonly motionTracker=new MotionTracker();
   private lastGatherKind:ResourceNodeState['kind']|null=null;
   private previousPlayerHp=Number.POSITIVE_INFINITY;
@@ -400,7 +440,7 @@ export class Elaris3DRenderer {
   /** Persisted openness (0 closed → 1 open) per door, survives entity rebuilds. */
   private readonly doorOpenness = new Map<string, number>();
   /** Permanent Elaris gates live in worldRoot, so entity rebuilds do not discard them. */
-  private readonly townGatePivots = new Map<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number }>();
+  private readonly townGatePivots = new Map<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number; angle?: number }>();
   private readonly townGateOpenness = new Map<string, number>();
   private playerRig!: PlayerRig;
   /** Ridden creature under the player, rebuilt only when the species changes. */
@@ -413,7 +453,6 @@ export class Elaris3DRenderer {
     yawDegrees: ELARIS_CAMERA_YAW_DEGREES,
     pitchDegrees: ELARIS_CAMERA_PITCH_DEGREES,
   };
-  private previousInteriorPose: { x: number; y: number } | null = null;
   /**
    * Free movement walks at any angle, so the rig turns toward the direction the
    * render pose actually travelled, not the four-way saved facing. `travelAnchor`
@@ -453,6 +492,9 @@ export class Elaris3DRenderer {
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // The overhead cutaway clips a town building's roof and upper walls while
+    // the player is inside it.
+    this.renderer.localClippingEnabled = true;
     this.finish = new SceneFinish(this.renderer, this.scene, this.camera, this.firstPersonHands);
     this.firstPersonCamera.rotation.order = 'YXZ';
     this.renderer.domElement.id = 'elaris-three-canvas';
@@ -473,7 +515,7 @@ export class Elaris3DRenderer {
     this.scene.add(
       this.worldRoot, this.entityRoot, this.raiderRoot, this.workerRoot, this.stormRoot, this.arrowRoot,
       this.feedbackRoot, this.protectionRoot, this.playerRoot, this.battleStage.root,this.combatEffects.root,
-      this.interiorStage.root,
+      this.roomLight,
       this.contactShadows.mesh,
       this.resourceGrounding.root, this.woodlandSky.mesh,
     );
@@ -561,8 +603,11 @@ export class Elaris3DRenderer {
       battleActive: this.battleCameraActive,
       battleRoundAnimating: this.battleStage.roundAnimating,
       battleEffectInstances:this.battleStage.effectInstances,
-      interiorActive: presentation?.interior !== null && presentation?.interior !== undefined,
-      interiorId: presentation?.interior?.definition.id ?? null,
+      interiorActive: this.townRooms.some(({ room }) => room.isPlayerInside),
+      interiorId: this.townRooms.find(({ room }) => room.isPlayerInside)?.room.interior?.id ?? null,
+      townRooms: this.townRooms.map(({ room }) => room.snapshot()),
+      areaRebuild: this.areaRebuildTimes.snapshot(),
+      frameWork: this.frameWorkTimes.snapshot(16.67),
     };
   }
 
@@ -588,7 +633,8 @@ export class Elaris3DRenderer {
     this.disposeObject(this.focusRing);
     this.battleStage.dispose();
     this.combatEffects.dispose();
-    this.interiorStage.dispose();
+    for (const { room } of this.townRooms) room.retire();
+    this.townRooms.length = 0;
     this.disposeObject(this.contactShadows.mesh);
     this.resourceGrounding.dispose();
     this.woodlandSky.dispose();
@@ -765,6 +811,12 @@ export class Elaris3DRenderer {
   }
 
   private rebuildWorld(): void {
+    const startedAt = performance.now();
+    this.rebuildWorldNow();
+    this.areaRebuildTimes.record(performance.now() - startedAt);
+  }
+
+  private rebuildWorldNow(): void {
     this.worldRevision += 1;
     this.areaRevealStartedAt = performance.now();
     this.areaKey = this.state.currentArea.key;
@@ -800,6 +852,8 @@ export class Elaris3DRenderer {
     this.resourceHp.clear();
     this.previousDrops.clear();
     this.occluders.length = 0;
+    for (const { room } of this.townRooms) room.retire();
+    this.townRooms.length = 0;
     this.townGatePivots.clear();
     this.townGateOpenness.clear();
     this.ambientMotes = null;
@@ -1419,46 +1473,156 @@ export class Elaris3DRenderer {
     group.position.set(building.footprint.tileX + building.footprint.tilesWide / 2, 0,
       building.footprint.tileY + building.footprint.tilesHigh / 2);
     this.worldRoot.add(group);
+    const cut = new THREE.Plane(new THREE.Vector3(0, -1, 0), TOWN_CUT_OPEN);
     const revision = this.worldRevision;
+    this.hangTownDoor(group, building, cut);
     const assembly = this.entrance && building.id === 'weaponsmith'
       ? this.entrance.buildForge(group, building, ruined)
       : buildStyledSettlement(this.worldArt!, group, building, ruined);
     void assembly.then((materials) => {
       if (revision !== this.worldRevision || !group.parent) return;
       this.registerOccluder(group, building.footprint.tilesWide * .43, materials, .24, 'world');
+      for (const material of materials) material.clippingPlanes = [cut];
     });
     const label = this.createWorldLabel(ruined ? `${building.displayName} (ruined)` : building.displayName);
     label.position.set(0, building.id === 'church' ? 8 : building.id === 'magic-shop' ? 8.7 : 5.5, 0);
     group.add(label);
+    this.addTownRoom(building, ruined, group, cut, label);
   }
 
+  /** Furnish a walk-in building's room in the world, inside its own walls. */
+  private addTownRoom(building: TownBuildingDefinition, ruined: boolean, shell: THREE.Group,
+    cut: THREE.Plane, label: THREE.Sprite): void {
+    const room = new TownRoom(this.models, building, ruined);
+    this.worldRoot.add(room.root);
+    this.townRooms.push({ room, shell, cut, label });
+  }
+
+  /** Hang the doorway's leaf on a hinge that swings it inward as the player nears. */
+  private hangTownDoor(group: THREE.Group, building: TownBuildingDefinition, cut: THREE.Plane): void {
+    const door = settlementDoor(building);
+    const mount = new THREE.Group();
+    mount.position.set(door.hingeX, 0.01, door.hingeZ);
+    mount.rotation.y = door.rotation;
+    const pivot = new THREE.Group();
+    pivot.name = `town-door:${building.id}`;
+    mount.add(pivot);
+    group.add(mount);
+    const id = `town-door:${building.areaKey}:${building.id}`;
+    // Models arrive centred, so the leaf sits half its width along from the hinge.
+    void this.worldArt?.add(pivot, { key: door.key, x: door.width / 2, y: 0, z: 0, height: door.height, width: door.width }).then((model) => {
+      if (!model) return;
+      model.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        child.castShadow = true;
+        for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.clippingPlanes = [cut];
+      });
+    });
+    this.townGatePivots.set(id, {
+      pivot,
+      cx: group.position.x + door.centreX,
+      cz: group.position.z + door.centreZ,
+      angle: TOWN_DOOR_OPEN_ANGLE,
+    });
+  }
+
+  /**
+   * The open-air arena: a sand oval fenced by posts and rails, with a gap at
+   * its gate. The fence stands on the same ellipse the simulation collides with.
+   */
   private buildArena(building: TownBuildingDefinition, ruined = false): void {
     const { footprint, interiorTheme } = building;
+    const shell = townBuildingShell(building);
     const group = new THREE.Group();
     group.position.set(footprint.tileX + footprint.tilesWide / 2, 0, footprint.tileY + footprint.tilesHigh / 2);
-    const floor = new THREE.Mesh(
-      new THREE.CylinderGeometry(Math.min(footprint.tilesWide, footprint.tilesHigh) * 0.47, Math.min(footprint.tilesWide, footprint.tilesHigh) * 0.47, 0.28, 32),
-      new THREE.MeshStandardMaterial({ color: 0x9a7655, roughness: 1 }),
-    );
-    floor.position.y = 0.08;
+    const radiusX = (shell.right - shell.left) / 2;
+    const radiusZ = (shell.bottom - shell.top) / 2;
+    const floor = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.16, 40),
+      new THREE.MeshStandardMaterial({ color: 0x9a7655, roughness: 1 }));
+    floor.scale.set(radiusX - 0.1, 1, radiusZ - 0.1);
     floor.receiveShadow = true;
     group.add(floor);
-    const floorUv=floor.geometry.getAttribute('uv');
-    for(let i=0;i<floorUv.count;i++) floorUv.setXY(i,floorUv.getX(i)*3,floorUv.getY(i)*3);
+    const floorUv = floor.geometry.getAttribute('uv');
+    for (let i = 0; i < floorUv.count; i++) floorUv.setXY(i, floorUv.getX(i) * 4, floorUv.getY(i) * 3);
     void this.worldArt?.surface(floor, 'entrance.paving', .15);
     const railMaterial = new THREE.MeshStandardMaterial({ color: interiorTheme.exteriorRoof, roughness: 0.9 });
-    for (let i = 0; i < 16; i += 1) {
-      const angle = (i / 16) * Math.PI * 2;
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.35, 0.32), railMaterial);
-      post.position.set(Math.cos(angle) * 4.1, 0.68, Math.sin(angle) * 4.1);
+    const gateAlong = shell.door.along - footprint.tilesWide / 2;
+    // Parametric angle of the gate on the fence ellipse, in [0, 2π).
+    const gateAngle = (Math.atan2(shell.door.side === 'north' ? -1 : 1, gateAlong / radiusX) + Math.PI * 2) % (Math.PI * 2);
+    const gateHalf = 0.95 / Math.max(radiusX, radiusZ);
+    const posts = 28;
+    const point = (angle: number) => new THREE.Vector3(Math.cos(angle) * radiusX, 0, Math.sin(angle) * radiusZ);
+    const inGate = (angle: number) => Math.abs(Math.atan2(Math.sin(angle - gateAngle), Math.cos(angle - gateAngle))) < gateHalf;
+    const fenceAngles: number[] = [];
+    for (let i = 0; i < posts; i += 1) {
+      const angle = (i / posts) * Math.PI * 2;
+      if (!inGate(angle)) fenceAngles.push(angle);
+    }
+    fenceAngles.push(gateAngle - gateHalf, gateAngle + gateHalf);
+    fenceAngles.sort((left, right) => left - right);
+    for (let i = 0; i < fenceAngles.length; i += 1) {
+      const angle = fenceAngles[i]!;
+      const at = point(angle);
+      const gatePost = Math.abs(Math.abs(angle - gateAngle) - gateHalf) < 1e-6;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(gatePost ? .34 : .26, gatePost ? 2.3 : 1.35, gatePost ? .34 : .26), railMaterial);
+      post.position.set(at.x, gatePost ? 1.15 : 0.68, at.z);
       post.castShadow = true;
       void this.worldArt?.surface(post, 'entrance.deck', .2);
       group.add(post);
+      const nextAngle = fenceAngles[(i + 1) % fenceAngles.length]! + (i + 1 === fenceAngles.length ? Math.PI * 2 : 0);
+      const middle = (angle + nextAngle) / 2;
+      if (inGate(middle)) continue;
+      const next = point(nextAngle);
+      const span = next.clone().sub(at);
+      for (const y of [0.55, 1.05]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(span.length(), 0.1, 0.09), railMaterial);
+        rail.position.set((at.x + next.x) / 2, y, (at.z + next.z) / 2);
+        rail.rotation.y = -Math.atan2(span.z, span.x);
+        rail.castShadow = true;
+        group.add(rail);
+      }
     }
     if (ruined) applyRuinAppearance(group);
     group.name = 'town.arena';
     group.userData.visualStyle = 'quaternius';
     this.worldRoot.add(group);
+    const label = this.createWorldLabel(ruined ? `${building.displayName} (ruined)` : building.displayName);
+    label.position.set(0, 3.2, -radiusZ);
+    group.add(label);
+    this.addTownRoom(building, ruined, group, new THREE.Plane(new THREE.Vector3(0, -1, 0), TOWN_CUT_OPEN), label);
+  }
+
+  /**
+   * Walk-in buildings: animate the furnished rooms near the player, cut away
+   * the roof of the one the player is in (overhead view only — in first person
+   * the roof is the ceiling), and move the shared room light into it.
+   */
+  private updateTownRooms(player: { x: number; z: number }, firstPerson: boolean, focusedHotspot: string | null,
+    time: number, deltaSeconds: number, reducedMotion: boolean): TownRoomEntry | null {
+    let inside: TownRoomEntry | null = null;
+    for (const entry of this.townRooms) {
+      const prefix = `${entry.room.building.id}:`;
+      const focus = focusedHotspot?.startsWith(prefix) ? focusedHotspot.slice(prefix.length) : null;
+      entry.room.update({ playerX: player.x, playerZ: player.z, focusedHotspotId: focus, timeMs: time, reducedMotion, firstPerson });
+      const playerInside = entry.room.isPlayerInside;
+      if (playerInside) inside = entry;
+      // First person hides every world label; overhead, a building's own sign
+      // is hidden only while the player is inside it.
+      entry.label.visible = !firstPerson && !playerInside;
+      const cutaway = playerInside && !firstPerson && entry.room.shell.kind === 'room';
+      const current = entry.cut.constant >= TOWN_CUT_OPEN ? 6 : entry.cut.constant;
+      const target = cutaway ? TOWN_CUTAWAY_HEIGHT : 6;
+      const next = reducedMotion ? target : current + (target - current) * (1 - Math.pow(0.0005, deltaSeconds));
+      entry.cut.constant = !cutaway && next > 5.9 ? TOWN_CUT_OPEN : next;
+    }
+    const ambience = inside?.room.interior?.ambience;
+    if (inside && ambience) {
+      this.roomLight.position.copy(inside.room.lightAnchor());
+      this.roomLight.color.setHex(ambience.keyLightColor);
+    }
+    const lightTarget = inside && ambience ? ambience.keyLightIntensity * 2.4 : 0;
+    this.roomLight.intensity += (lightTarget - this.roomLight.intensity) * (reducedMotion ? 1 : 1 - Math.pow(0.002, deltaSeconds));
+    return inside;
   }
 
   private syncEntities(force = false): void {
@@ -1583,7 +1747,41 @@ export class Elaris3DRenderer {
       building.garden?.readyFiber ?? 0, building.woodlot?.readyWood ?? 0,
       cropGrowthStage(building.garden?.progressTicks ?? 0, GARDEN_BED_GROW_TICKS),
       cropGrowthStage(building.woodlot?.progressTicks ?? 0, WOODLOT_GROW_TICKS),
-      building.turret?.ammo ?? 0].join(':');
+      building.turret?.ammo ?? 0, building.level ?? 1].join(':');
+  }
+
+  /**
+   * A levelled facility wears its level: a brass-banded post at one corner of
+   * its first tile with a lit cap, teal at level 2 and gold with a second band
+   * at level 3. Level is part of the visual signature, so this rebuilds.
+   */
+  private addFacilityLevelTrim(root: THREE.Group, building: BuildingState): void {
+    const level = building.level ?? 1;
+    if (level < 2) return;
+    const brass = new THREE.MeshStandardMaterial({ color: 0xc9a24a, roughness: 0.4, metalness: 0.7 });
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.06, 1.05, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3e3226, roughness: 0.9 }),
+    );
+    post.position.set(-0.4, 0.52, -0.4);
+    post.castShadow = true;
+    const trim = new THREE.Group();
+    trim.name = `facility.level-${level}`;
+    trim.add(post);
+    for (let band = 0; band < level - 1; band += 1) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.022, 6, 12), brass);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(-0.4, 0.4 + band * 0.22, -0.4);
+      trim.add(ring);
+    }
+    const capColor = level >= 3 ? 0xffd25e : 0x6fe0cf;
+    const cap = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.11, 0),
+      new THREE.MeshStandardMaterial({ color: capColor, emissive: capColor, emissiveIntensity: 0.9 }),
+    );
+    cap.position.set(-0.4, 1.14, -0.4);
+    trim.add(cap);
+    root.add(trim);
   }
 
   private computeEntitySignature(): string {
@@ -1775,6 +1973,7 @@ export class Elaris3DRenderer {
     }
     root.name = building.id;
     this.entityRoot.add(root);
+    this.addFacilityLevelTrim(root, building);
     const wood = new THREE.MeshStandardMaterial({ color: 0x795334, roughness: 0.92 });
     const straw = new THREE.MeshStandardMaterial({ color: 0xb9a04e, roughness: 1 });
     const stone = new THREE.MeshStandardMaterial({ color: 0x68716f, roughness: 0.98 });
@@ -2142,7 +2341,7 @@ export class Elaris3DRenderer {
   private updateDoorSwings(playerX: number, playerZ: number, deltaSeconds: number, reducedMotion: boolean): void {
     const step = deltaSeconds / doorSwingSeconds(this.firstPersonFrame);
     const update = (
-      pivots: ReadonlyMap<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number }>,
+      pivots: ReadonlyMap<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number; angle?: number }>,
       openness: Map<string, number>,
     ): void => {
       for (const [id, opening] of pivots) {
@@ -2152,8 +2351,9 @@ export class Elaris3DRenderer {
           ? target
           : target > current ? Math.min(target, current + step) : Math.max(target, current - step);
         openness.set(id, next);
-        opening.pivot.rotation.y = next * DOOR_OPEN_ANGLE;
-        if (opening.oppositePivot) opening.oppositePivot.rotation.y = -next * DOOR_OPEN_ANGLE;
+        const angle = opening.angle ?? DOOR_OPEN_ANGLE;
+        opening.pivot.rotation.y = next * angle;
+        if (opening.oppositePivot) opening.oppositePivot.rotation.y = -next * angle;
       }
     };
     update(this.doorPivots, this.doorOpenness);
@@ -2935,6 +3135,14 @@ export class Elaris3DRenderer {
   }
 
   readonly renderFrame = (time: number): void => {
+    const startedAt = performance.now();
+    this.renderFrameNow(time);
+    // renderFrameNow stamps lastFrameAt only once it is past its early returns,
+    // so skipped frames (hidden tab, journal backdrop) never count as cheap work.
+    if (this.lastFrameAt === time) this.frameWorkTimes.record(performance.now() - startedAt);
+  };
+
+  private renderFrameNow(time: number): void {
     if (document.hidden) return;
     const presentation = this.presentationProvider?.() ?? null;
     // Keep the last world image as the journal's backdrop. Simulation continues,
@@ -2951,12 +3159,6 @@ export class Elaris3DRenderer {
     const pose = presentation?.playerPosition ?? this.state.player;
     const player = worldToThree(pose.x, pose.y);
     const reducedMotion = presentation?.prefersReducedMotion ?? false;
-    if (presentation?.interior) {
-      this.renderInteriorFrame(presentation.interior, time, deltaSeconds, reducedMotion);
-      return;
-    }
-    this.interiorStage.hide();
-    this.previousInteriorPose = null;
     const battleSnapshot = captureBattleSnapshot(this.state);
     const battleActive = this.battleStage.update(battleSnapshot, time, reducedMotion);
     if (battleActive && !this.battleCameraActive) this.battleAnchor.set(player.x, 0, player.z);
@@ -3089,6 +3291,8 @@ export class Elaris3DRenderer {
     else this.updateFocusRing(time / 1000, activeTarget);
     if (!battleActive) this.updateAmbientMotion(time, reducedMotion, activeTarget,deltaSeconds);
     if (!battleActive) this.updateDoorSwings(player.x, player.z, deltaSeconds, reducedMotion);
+    const insideRoom = battleActive ? null : this.updateTownRooms(player, firstPerson,
+      activeTarget?.kind === 'town-hotspot' ? activeTarget.id : null, time, deltaSeconds, reducedMotion);
     if (!battleActive) {
       // The raid runs alongside the world, not inside the battle stage: a
       // danger minute is real-time and never becomes a turn-based encounter.
@@ -3105,7 +3309,7 @@ export class Elaris3DRenderer {
       updateStyledWater(time, reducedMotion);
       updateTreeWind(time, reducedMotion);
       // Nothing stands between an eye-level camera and the player.
-      if (!firstPerson) this.updateOccluders(player, deltaSeconds);
+      if (!firstPerson) this.updateOccluders(player, deltaSeconds, insideRoom?.shell ?? null);
       this.updateAtmosphere(time, reducedMotion);
       if (firstPerson) this.firstPersonHands.lightFrom(this.hemisphere, this.sun, this.firstPersonCamera);
       if (firstPerson && this.scene.fog instanceof THREE.Fog) {
@@ -3118,85 +3322,6 @@ export class Elaris3DRenderer {
     this.updateDangerOverlay(time, deltaSeconds, reducedMotion, battleActive);
     if (!battleActive) this.updatePurifierProtection(time);
     this.updateParticles(deltaSeconds);
-    this.finish.render();
-  };
-
-  private renderInteriorFrame(
-    frame: InteriorStageFrame,
-    time: number,
-    deltaSeconds: number,
-    reducedMotion: boolean,
-  ): void {
-    if (this.firstPersonFrame) this.setFirstPersonFrame(false);
-    this.actorRoot.visible = true;
-    this.battleCameraActive = false;
-    this.battleStage.root.visible = false;
-    this.contactShadows.mesh.visible = false;
-    this.worldRoot.visible = false;
-    this.resourceGrounding.root.visible = false;
-    this.entityRoot.visible = false;
-    this.raiderRoot.visible = false;
-    this.workerRoot.visible = false;
-    this.stormRoot.visible = false;
-    this.arrowRoot.visible = false;
-    this.combatEffects.root.visible=false;
-    this.feedbackRoot.visible = false;
-    this.protectionRoot.visible = false;
-    this.playerRoot.visible = true;
-    this.focusRing.visible = false;
-    this.updateTargetStatus(null);
-    this.updatePlacementGhost(null);
-    this.updateSelectionHighlight(null);
-    const portrait = this.container.clientWidth / Math.max(1, this.container.clientHeight) < 0.7;
-    this.interiorStage.show(frame, time, reducedMotion, portrait);
-
-    const enteringInterior = this.previousInteriorPose === null;
-    this.previousInteriorPose = { x: frame.pose.x, y: frame.pose.y };
-    this.playerRoot.position.set(frame.pose.x, PLAYER_Y, frame.pose.y);
-    const facing=this.facingAngleFor(frame.pose.facing);
-    const animationFrame=this.motionTracker.sample(this.playerRig.root,time,frame.pose.x,frame.pose.y,facing);
-    this.playerRoot.rotation.y=reducedMotion||enteringInterior?facing:turnTowards(this.playerRoot.rotation.y,facing,deltaSeconds);
-    this.boatHull.visible = false;
-    this.playerRing.visible = true;
-    this.syncMount(null);
-    this.mountRoot.visible = false;
-    this.actorRoot.position.set(0, 0, 0);
-    this.playerRig.setGatherTool('hands');
-    this.playerRig.animate(time,(animationFrame.speed??0)>.06?'walk':'idle',reducedMotion,animationFrame);
-
-    const cameraConfig = frame.definition.camera;
-    const target = new THREE.Vector3(cameraConfig.target.tileX + 0.5, 0, cameraConfig.target.tileY + 0.5);
-    if (portrait) target.x += 1;
-    // Rooms only pick what to frame; the angle is the same published overworld
-    // orientation, so stepping through a door never swings the view.
-    const interiorOffset = elarisCameraOffset(this.cameraOrientation);
-    const desiredCamera = new THREE.Vector3(
-      target.x + interiorOffset.x,
-      interiorOffset.y,
-      target.z + interiorOffset.z,
-    );
-    const easing = reducedMotion || enteringInterior ? 1 : 1 - Math.pow(0.001, deltaSeconds);
-    this.cameraTarget.lerp(target, easing);
-    this.camera.position.lerp(desiredCamera, easing);
-    this.camera.zoom = THREE.MathUtils.lerp(this.camera.zoom, portrait ? 1.72 : 2, easing);
-    this.camera.updateProjectionMatrix();
-    this.camera.lookAt(this.cameraTarget);
-
-    const ambience = frame.definition.ambience;
-    this.scene.background = new THREE.Color(ambience.ambientColor).multiplyScalar(0.34);
-    this.renderer.toneMappingExposure = frame.definition.buildingId === 'arena' ? 1.42 : 1.24;
-    this.hemisphere.color.setHex(ambience.keyLightColor);
-    this.hemisphere.groundColor.setHex(ambience.ambientColor);
-    this.hemisphere.intensity = Math.max(1.15, ambience.ambientIntensity * 2.1);
-    this.sun.color.setHex(ambience.keyLightColor);
-    this.sun.intensity = ambience.keyLightIntensity;
-    this.sun.position.set(target.x - 6, 11, target.z + 2);
-    this.sun.target.position.copy(target);
-    this.sun.target.updateMatrixWorld();
-    this.fill.color.setHex(0xff8150);
-    this.fill.intensity = 0.88;
-    this.playerLight.intensity = 0.72;
-    this.updateDangerOverlay(time, deltaSeconds, reducedMotion, true);
     this.finish.render();
   }
 
@@ -3339,13 +3464,14 @@ export class Elaris3DRenderer {
     });
   }
 
-  private updateOccluders(player: { x: number; z: number }, deltaSeconds: number): void {
+  private updateOccluders(player: { x: number; z: number }, deltaSeconds: number, exempt: THREE.Object3D | null = null): void {
     const camera = { x: this.camera.position.x, z: this.camera.position.z };
     const easing = 1 - Math.pow(0.001, deltaSeconds);
     const worldPosition = new THREE.Vector3();
     for (const occluder of this.occluders) {
       occluder.object.getWorldPosition(worldPosition);
-      const blocked = isGroundOccluder(worldPosition, occluder.radius, camera, player);
+      // The building the player is inside is cut away instead of faded.
+      const blocked = occluder.object !== exempt && isGroundOccluder(worldPosition, occluder.radius, camera, player);
       const desired = blocked ? occluder.minimumOpacity : 1;
       occluder.opacity += (desired - occluder.opacity) * easing;
       for (let index = 0; index < occluder.materials.length; index += 1) {
@@ -3442,7 +3568,7 @@ export class Elaris3DRenderer {
   private updateDangerOverlay(
     time: number,
     deltaSeconds: number,
-    _reducedMotion: boolean,
+    reducedMotion: boolean,
     battleActive: boolean,
   ): void {
     const timer = survivalSchedule(this.state);
@@ -3450,7 +3576,8 @@ export class Elaris3DRenderer {
     if (timer.phase === 'danger') this.dangerThreat = timer.threat;
     const fadeSeconds = active ? DANGER_FOG_FADE_IN_SECONDS : DANGER_FOG_FADE_OUT_SECONDS;
     this.dangerFogStrength = THREE.MathUtils.clamp(
-      battleActive ? 0 : this.dangerFogStrength + (active ? deltaSeconds : -deltaSeconds) / fadeSeconds,
+      battleActive ? 0 : reducedMotion ? Number(active)
+        : this.dangerFogStrength + (active ? deltaSeconds : -deltaSeconds) / fadeSeconds,
       0,
       1,
     );
@@ -3462,7 +3589,7 @@ export class Elaris3DRenderer {
       this.playerExposed = playerExposedTo(this.state, this.dangerThreat);
     }
     const tintFade = this.playerExposed ? EXPOSURE_TINT_FADE_IN_SECONDS : EXPOSURE_TINT_FADE_OUT_SECONDS;
-    this.exposureStrength = battleActive ? 0 : THREE.MathUtils.clamp(
+    this.exposureStrength = battleActive ? 0 : reducedMotion ? Number(this.playerExposed) : THREE.MathUtils.clamp(
       this.exposureStrength + (this.playerExposed ? deltaSeconds : -deltaSeconds) / tintFade,
       0,
       1,

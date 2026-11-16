@@ -57,6 +57,7 @@ import { creatureWorksiteOperationGate, activeFollowerGatherAssistance } from '.
 import { recordOpeningGatherAssistance } from './onboardingProgress';
 import { isCreatureAway } from './expeditions';
 import { liveSiteBlockingRect, SITE_HALF_TILES } from './sites';
+import { leveledMaxHp } from './facilityLevels';
 
 export interface CommandResult {
   ok: boolean;
@@ -432,7 +433,9 @@ export function structureMaxHp(building: BuildingState, balance?: GameBalanceSta
   const def = buildableById(building.definitionId);
   if (def.footprintKind === 'facility' || def.footprintKind === 'marker') {
     const editable = balance?.structures.facilityHp[building.definitionId as StructureFacilityId];
-    return editable ?? FACILITY_MAX_HP[building.definitionId] ?? null;
+    const base = editable ?? FACILITY_MAX_HP[building.definitionId] ?? null;
+    // Each facility level adds half the base pool again.
+    return base === null ? null : leveledMaxHp(base, building);
   }
   if (def.boundaryClass !== 'wall' || !def.material) return null;
   return balance?.structures.wallHp[def.material] ?? WALL_MAX_HP[def.material];
@@ -703,7 +706,8 @@ function footprintCovers(building: BuildingState, def: BuildableDefinition, key:
   return false;
 }
 
-function updateAreaProgress(state: GameState): void {
+/** Exported for in-place part upgrades, which update progress the way placement does. */
+export function updateAreaProgress(state: GameState): void {
   recordHighestAreaTier(state);
   recordHighestRating(state);
 }

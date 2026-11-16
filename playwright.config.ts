@@ -14,7 +14,7 @@ const PORT = 4173;
  * forty-minute wait.
  */
 const DEV_PORT = 5173;
-const DEV_HANDLES = /(?:three-mode|first-person-polish|first-person-hands|character-models|character-animations|combat-effects|ui-overhaul|town-entrance|world-style|feature5|interior-polish|arcane-storm|creatureWander|workerCreatureAmble|enemyLevels|movement-performance|three-only-saves)\.spec\.ts/;
+const DEV_HANDLES = /(?:danger-sky|three-mode|first-person-polish|first-person-hands|character-models|character-animations|combat-effects|ui-overhaul|town-entrance|world-style|feature5|interior-polish|arcane-storm|creatureWander|workerCreatureAmble|enemyLevels|movement-performance|three-only-saves)\.spec\.ts/;
 
 export default defineConfig({
   testDir: 'tests/e2e',

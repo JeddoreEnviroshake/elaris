@@ -13,6 +13,32 @@ export const APP_URL = '/?localBalance=1&admin=1';
 /** Open the app, optionally with extra query parameters (`render=3d`, …). */
 export async function openApp(page: Page, query = ''): Promise<void> {
   await page.goto(query ? `${APP_URL}&${query}` : APP_URL);
+  await enterWorld(page);
+}
+
+/** Existing gameplay specs explicitly choose a world through the new boot menu. */
+export async function enterWorld(page: Page): Promise<void> {
+  const menu = page.getByRole('main', { name: 'World menu' });
+  await expect(menu).toBeVisible();
+  const resume = menu.getByRole('button', { name: /^Continue / }).first();
+  if (await resume.count()) await resume.click();
+  else {
+    await menu.getByRole('button', { name: 'New Game', exact: true }).click();
+    await menu.getByLabel('World name', { exact: true }).fill('Test world');
+    await menu.getByRole('button', { name: 'Create world', exact: true }).click();
+  }
+  await expect(menu).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
+}
+
+export async function reloadApp(page: Page): Promise<void> {
+  await page.reload();
+  await enterWorld(page);
+}
+
+export async function navigateApp(page: Page, url: string): Promise<void> {
+  await page.goto(url);
+  await enterWorld(page);
 }
 
 /**

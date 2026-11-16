@@ -1,3 +1,4 @@
+import { reloadApp } from './app';
 import type { Locator, Page } from '@playwright/test';
 import { releaseSaveWriter } from './save';
 
@@ -52,7 +53,7 @@ export async function grantBlueprints(page: Page, ...ids: string[]): Promise<voi
     await releaseSaveWriter(page);
     const known = await page.evaluate(async (wanted) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open('elaris:default', 1);
+        const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -72,11 +73,11 @@ export async function grantBlueprints(page: Page, ...ids: string[]): Promise<voi
         transaction.onerror = () => reject(transaction.error);
       });
     }, ids);
-    await page.reload();
+    await reloadApp(page);
     if (ids.every((id) => known.includes(id))) {
       const settled = await page.evaluate(async () => {
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
-          const request = indexedDB.open('elaris:default', 1);
+          const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
           request.onsuccess = () => resolve(request.result);
           request.onerror = () => reject(request.error);
         });

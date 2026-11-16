@@ -1,6 +1,6 @@
 import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { tapWorld } from './interact';
 import { gatherNearestResource } from './gather';
 
@@ -17,7 +17,7 @@ async function seedIronChain(page: Page): Promise<void> {
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -79,7 +79,7 @@ async function seedIronChain(page: Page): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
     });
   });
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Gather' })).toBeVisible();
 }
 

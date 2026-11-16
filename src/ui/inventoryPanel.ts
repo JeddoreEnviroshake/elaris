@@ -30,6 +30,8 @@ export interface InventoryPanelActions {
   onScrapBlueprint?: (instanceId: string) => void;
   /** The panel opened; the scene closes competing panels (craft/build). */
   onOpened: () => void;
+  /** Save this world and return to the device's world list. */
+  onQuitToMenu?: () => void | Promise<void>;
 }
 
 export type MenuTabId = 'bag' | 'craft' | 'blueprints' | 'quests' | 'creatures' | 'character' | 'shelter' | 'paddock' | 'supply-run' | 'garden';
@@ -177,6 +179,10 @@ export class InventoryPanel {
     const motto=document.createElement('span');motto.textContent='A world to wander. A place to belong.';
     const hint=document.createElement('span');hint.className='elaris-menu-key-hint';hint.textContent='Arrow keys · Browse     Esc · Return';
     footer.append(motto,hint);
+    if (this.actions.onQuitToMenu) {
+      const quit = uiButton('Quit to Menu', () => { void this.actions.onQuitToMenu?.(); });
+      hint.replaceWith(quit);
+    }
     this.panel.append(header, this.tabs, this.bagContent,footer);
     this.root.append(this.menuButton,this.backdrop,this.panel);
     parent.appendChild(this.root);

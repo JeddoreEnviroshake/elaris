@@ -13,6 +13,7 @@ import { rollRaiderBlueprint } from './blueprintFinds';
 import { blueprintWaveBonus, effectiveAggroRangePx } from './blueprintHeat';
 import { createRng } from './rng';
 import { currentSiteProgress, ensureSiteProgress, liveAreaSites } from './sites';
+import { turretStats } from './facilityLevels';
 import { snarlfoxDetectionMultiplierBps } from './creatureRoles';
 import { rangedDamageBonus } from './characterProgression';
 import {
@@ -673,13 +674,15 @@ export function turrets(buildings: readonly BuildingState[]): BuildingState[] {
 
 function advanceTurrets(state: GameState): { changed: boolean; bounty: number } {
   const defense = state.gameBalance.defense;
-  const rangePx = defense.turretRangeTiles * TILE_SIZE;
   let changed = false;
   let bounty = 0;
   for (const turret of turrets(state.buildings)) {
     const ammunition = turret.turret;
     if (!ammunition || ammunition.ammo <= 0 || state.tick < ammunition.nextFireTick) continue;
 
+    // Level adjusts this turret's damage, reach and rate of fire.
+    const stats = turretStats(turret, defense);
+    const rangePx = stats.rangeTiles * TILE_SIZE;
     const center = buildingCenter(turret);
     const range = rangePx * rangePx;
     let victim: RaiderState | null = null;
@@ -697,8 +700,8 @@ function advanceTurrets(state: GameState): { changed: boolean; bounty: number } 
     if (!victim) continue;
 
     ammunition.ammo -= 1;
-    ammunition.nextFireTick = state.tick + defense.turretCooldownTicks;
-    bounty += damageRaider(state, victim, defense.turretDamage).bounty;
+    ammunition.nextFireTick = state.tick + stats.cooldownTicks;
+    bounty += damageRaider(state, victim, stats.damage).bounty;
     changed = true;
   }
   return { changed, bounty };
@@ -1201,7 +1204,7 @@ function settleBase(
     if (!ammunition || ammunition.ammo <= 0) continue;
     const shots = Math.min(ammunition.ammo, defense.turretAbsentRoundShots);
     ammunition.ammo -= shots;
-    firepower += shots * defense.turretDamage;
+    firepower += shots * turretStats(turret, defense).damage;
   }
 
   // The absent round is priced against the same danger minute the live path

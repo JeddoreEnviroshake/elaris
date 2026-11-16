@@ -70,12 +70,7 @@ import { areaDisplayName } from '../simulation/elarisFall';
 
 import { elarisPublicWorkbenchContains, elarisPublicWorkbenchFacility, isElarisPublicWorkbenchId } from '../simulation/elarisWorkbench';
 
-import {
-  nearestTownBuildingDoor,
-  positionPlayerInDoorway,
-  positionPlayerOutsideDoor,
-  recoverPlayerOutsideTownDoor,
-} from '../simulation/town';
+import { recoverPlayerFromTownWalls, townBuildingAroundPlayer } from '../simulation/town';
 import { NpcServiceOverlay } from '../ui/npcServiceOverlay';
 import { collectFurnaceOutput, enqueueIronSmelt } from '../simulation/processing';
 import { orderTrainedCreature } from '../simulation/economy';
@@ -121,6 +116,9 @@ import {
 } from '../three/firstPersonView';
 import { FirstPersonHud } from '../ui/firstPersonHud';
 import { CompassStrip, SearchProgressRing } from '../ui/compassStrip';
+import { upgradeFacility } from '../simulation/facilityLevels';
+import { roomUpgradeIds, upgradeBuildingBatch, upgradeBuildingMaterial } from '../simulation/partUpgrades';
+import { scrapTool, temperTool } from '../simulation/economy';
 import { compassMarks, compassPips } from '../presentation/compass';
 import { compassTargets } from '../presentation/siteViews';
 import {
@@ -131,10 +129,11 @@ import { pickCrosshairTarget, type CrosshairCandidate } from '../presentation/cr
 import { creatureDefinition } from '../content/creatures';
 
 import { InteriorSessionController, type GameplayMode } from '../presentation/interiorSession';
-import { interiorDefinitionById, interiorDefinitionForBuilding } from '../content/interiors';
-import { nearestInteriorHotspot, stepInteriorMovement } from '../presentation/interiorMovement';
+import {
+  INTERIOR_INTERACTION_RANGE_TILES, interiorDefinitionById, interiorDefinitionForBuilding, nearestInteriorHotspot,
+  shellThreshold, townBuildingShell, type InteriorHotspot,
+} from '../content/interiors';
 
-import { InteriorTransitionOverlay } from '../ui/interiorTransition';
 import { NpcDialogueController, type DialogueChoiceResult } from '../presentation/npcDialogue';
 import { NpcBarkController } from '../presentation/npcBarks';
 
@@ -183,8 +182,6 @@ interface MovementKeys {
 interface QueuedStepPose {
   x: number;
   y: number;
-  interiorX: number;
-  interiorY: number;
 }
 
 /**
@@ -201,13 +198,28 @@ interface NearbyTargets {
   facility: BuildingState | null;
   bed: BuildingState | null;
   planter: BuildingState | null;
-  door: TownBuildingDefinition | null;
+  hotspot: TownHotspotTarget | null;
+}
+
+/** A keeper, or something to examine, inside the town building the player stands in. */
+interface TownHotspotTarget {
+  readonly building: TownBuildingDefinition;
+  readonly hotspot: InteriorHotspot;
+  /** World pixels. */
+  readonly x: number;
+  readonly y: number;
+}
+
+function townHotspotLabel(hotspot: InteriorHotspot): string {
+  return hotspot.kind === 'service' ? `Talk to ${npcDefinition(hotspot.npcId).name}` : hotspot.label;
 }
 
 /** Facilities with a focused walk-up panel, opened by clicking the structure. */
 const FACILITY_PANEL_DEFINITIONS: ReadonlySet<string> = new Set([
   'field-cache', 'workbench', 'furnace', 'war-table', 'turret',
   'farm-counter', 'small-pen', 'barn', 'stone-yard', 'cart-dock',
+  // Levelled facilities open to show and buy their level.
+  'warehouse', 'air-purifier',
 ]);
 
 const HUD_REFRESH_INTERVAL_MS = 500;
@@ -249,7 +261,6 @@ export class WorldScene extends Phaser.Scene {
   private keys: MovementKeys | null = null;
   private altKeys: MovementKeys | null = null;
   private intent: MoveIntent = NO_MOVE;
-  private interiorIntent: MoveIntent = NO_MOVE;
   private readonly gridMovement = createGridMovementState();
   /** First-person HUD furniture (rail toggle, crosshair, inspect button). */
   private firstPersonHud: FirstPersonHud | null = null;
@@ -263,7 +274,8 @@ export class WorldScene extends Phaser.Scene {
   private firstPersonLookPrimed = false;
   /** What sits under the first-person crosshair this frame, if anything. */
   private crosshairTarget: CrosshairCandidate | null = null;
-  private readonly interiorGridMovement = createGridMovementState();
+  /** The town building the player was last standing inside, for its ambience and greeting. */
+  private townVisitKey: string | null = null;
   /**
    * One tile of travel asked for by a d-pad tap. It is held as intent until the
    * simulation actually starts a tile — it only starts one when the previous
@@ -309,7 +321,6 @@ export class WorldScene extends Phaser.Scene {
 
   private npcServiceOverlay!: NpcServiceOverlay;
 
-  private interiorTransition!: InteriorTransitionOverlay;
   private interiorAudio!: InteriorAudioRouter;
   private npcDialogue!: NpcDialogue;
   private npcBark!: NpcBark;
@@ -364,8 +375,6 @@ export class WorldScene extends Phaser.Scene {
 
   /** Read-only bridge used by the 3D presentation layer. */
   get3DPresentationState(): ThreePresentationState {
-    const pose = this.interiorSession.pose;
-    const buildingId = this.interiorSession.buildingId;
     return {
       playerPosition: this.transitioningArea ? this.state.player : this.renderPlayerPosition,
       journalOpen:this.inventoryPanel?.open??false,
@@ -384,14 +393,6 @@ export class WorldScene extends Phaser.Scene {
       gatherAssistance: this.gatherAssistance && this.time.now - this.gatherAssistance.startedAt < 900
         ? { ...this.gatherAssistance, progress: Math.max(0, (this.time.now - this.gatherAssistance.startedAt) / 900) } : null,
       prefersReducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-      interior: pose && buildingId
-        ? {
-            definition: interiorDefinitionForBuilding(buildingId),
-            pose,
-            focusedHotspotId: this.interiorSession.focusedHotspotId,
-            transition: this.interiorSession.transition,
-          }
-        : null,
     };
   }
 
@@ -405,30 +406,35 @@ export class WorldScene extends Phaser.Scene {
     return this.interiorAudio.getSnapshot();
   }
 
-  /** Dev-only composition entry point for deterministic room screenshot QA. */
+  /**
+   * Dev-only composition entry point for deterministic room screenshot QA:
+   * stands the player just inside the doorway of a building in this area.
+   */
   previewTownInteriorForQa(buildingId: TownBuildingId): void {
     if (!import.meta.env.DEV) throw new Error('interior previews are available only in development builds');
     if (this.interiorSession.isActive) {
-      if (this.interiorSession.mode.kind === 'dialogue') {
-        this.npcDialogue.close();
-        this.npcDialogueController.close();
-        this.interiorSession.resumeInterior();
-      } else if (this.interiorSession.mode.kind === 'service') {
-        this.npcServiceOverlay.close();
-      }
-      this.interiorAudio.leave();
+      this.npcDialogue.close();
+      this.npcDialogueController.close();
+      this.npcServiceOverlay.close();
       this.interiorSession.recoverToWorld();
     }
-    this.enterTownBuilding(townBuildingById(buildingId));
+    const building = townBuildingsInArea(this.state.currentArea.key).find((candidate) => candidate.id === buildingId)
+      ?? townBuildingById(buildingId);
+    const threshold = shellThreshold(townBuildingShell(building));
+    resetGridMovement(this.gridMovement);
+    this.state.player.x = Math.round((building.footprint.tileX + threshold.x) * TILE_SIZE);
+    this.state.player.y = Math.round((building.footprint.tileY + threshold.y) * TILE_SIZE);
+    this.snapRenderPoseToState();
+    this.onCriticalChanged();
   }
 
   init(data: WorldSceneData): void {
     // Interior pose is intentionally transient. A scene restart or loaded save
     // always resumes at the authoritative exterior position.
     this.interiorSession.recoverToWorld();
-    resetGridMovement(this.interiorGridMovement);
+    this.townVisitKey = null;
     this.state = data.state ?? createInitialState(DEFAULT_WORLD_SEED);
-    recoverPlayerOutsideTownDoor(this.state);
+    recoverPlayerFromTownWalls(this.state);
     this.globalBalance = data.globalBalance ?? globalBalanceService;
     if (data.onStateChanged) {
       this.onMoved = () => data.onStateChanged?.('ordinary');
@@ -532,6 +538,9 @@ export class WorldScene extends Phaser.Scene {
         this.inventoryPanel.toggleTab('craft');
       },
       onLoadTurretAmmo: (turretId, amount) => this.performTurretAmmo(loadTurretAmmo(this.state, turretId, amount)),
+      onUpgradeFacility: (buildingId) => this.performBaseUpgrade(upgradeFacility(this.state, buildingId)),
+      onTemperTool: (toolId, axis) => this.performBaseUpgrade(temperTool(this.state, toolId, axis)),
+      onScrapTool: (toolId) => this.performBaseUpgrade(scrapTool(this.state, toolId)),
       onUnloadTurretAmmo: (turretId, amount) => this.performTurretAmmo(unloadTurretAmmo(this.state, turretId, amount)),
     });
     this.buildMode = new BuildModeController(this.state, {
@@ -567,6 +576,13 @@ export class WorldScene extends Phaser.Scene {
       },
       onDeleteConfirm: () => this.deleteSelectedBuilding(),
       onDeletingCancelled: () => this.buildMode.stopDeleting(),
+      onStartUpgrading: () => {
+        this.inventoryPanel.close();
+        this.buildingItemMenu.close();
+        this.buildMode.startDeleting('upgrade');
+      },
+      onUpgradeConfirm: () => this.upgradeSelectedPart(false),
+      onUpgradeRoomConfirm: () => this.upgradeSelectedPart(true),
       onOpened: () => {
         this.inventoryPanel.toggleTab('craft');
       },
@@ -599,6 +615,7 @@ export class WorldScene extends Phaser.Scene {
       onOpened: () => {
         this.buildMenu.close();
       },
+      onQuitToMenu: () => this.systemControls.quitToMenu?.(),
     });
     this.adminPanel = new AdminPanel(parent, this.state, () => {
       this.snapRenderPoseToState();
@@ -682,7 +699,6 @@ export class WorldScene extends Phaser.Scene {
       (abilityId) => this.performCompanionAbilitySelection(abilityId),
     );
     this.encounterPanel.refresh();
-    this.interiorTransition = new InteriorTransitionOverlay(parent);
     this.interiorAudio = new InteriorAudioRouter();
     this.npcDialogue = new NpcDialogue(parent, {
       onChoice: (choiceId) => this.performDialogueChoice(choiceId),
@@ -695,17 +711,9 @@ export class WorldScene extends Phaser.Scene {
       this.onCriticalChanged();
       this.refreshHudNow();
     }, (building) => {
-      if (this.interiorSession.isActive) {
-        this.interiorSession.resumeInterior();
-        if (this.recentNpcPurchase?.npcId === building.npcId) this.showNpcBark(building.npcId, 'afterService');
-        this.refreshHudNow();
-        return;
-      }
-      this.interiorSession.beginExit();
-      this.interiorSession.completeTransition();
-      positionPlayerOutsideDoor(this.state, building);
-      this.snapRenderPoseToState();
-      this.onCriticalChanged();
+      // Closing the service panel leaves the player standing at the counter.
+      this.interiorSession.endConversation();
+      if (this.recentNpcPurchase?.npcId === building.npcId) this.showNpcBark(building.npcId, 'afterService');
       this.refreshHudNow();
     });
     this.showAreaSplash(parent);
@@ -790,7 +798,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private performWaystoneTravel(destinationAreaKey: string): WaystoneTravelResult {
-    if (!this.interiorSession.allowsWorldInteraction) return { ok: false, message: 'Leave the building before using a waystone.' };
+    if (!this.interiorSession.allowsWorldInteraction) return { ok: false, message: 'Finish your conversation before using a waystone.' };
     const previousAreaKey = this.state.currentArea.key;
     const result = travelViaWaystone(this.state, destinationAreaKey);
     this.hud.showFeedback(result.message, result.ok);
@@ -826,19 +834,15 @@ export class WorldScene extends Phaser.Scene {
       this.queuedStep = null;
       return;
     }
-    const localInterior = this.interiorSession.mode.kind === 'interior';
     const inputBlocked = this.state.pendingRespawn || this.state.activeEncounter || this.openingPanel.isOpen || this.adminPanel.open || this.navigator.largeMapOpen;
     this.updateFirstPersonMode(deltaMs, Boolean(inputBlocked));
-    this.interiorIntent = !inputBlocked && localInterior && this.interiorSession.allowsLocalMovement
-      ? this.alignInteriorIntentToPresentation(this.gatherRawInput())
-      : NO_MOVE;
     this.intent = inputBlocked
       ? NO_MOVE
       : this.interiorSession.allowsWorldInteraction
         ? this.gatherInput()
         : NO_MOVE;
     const areaKeyBeforeMovement = this.state.currentArea.key;
-    const movingBefore = this.gridMovement.moving || this.interiorGridMovement.moving;
+    const movingBefore = this.gridMovement.moving;
     const poseBefore = this.queuedStepPose();
     const alpha = this.loop.advance(deltaMs);
     if (this.state.currentArea.key !== areaKeyBeforeMovement) {
@@ -852,7 +856,7 @@ export class WorldScene extends Phaser.Scene {
       this.buildMode.syncPlaced();
       this.onMoved();
     }
-    if (localInterior) this.updateInteriorExploration(deltaMs);
+    this.updateTownVisit();
     this.retireQueuedStep(movingBefore, poseBefore);
     if (this.interiorSession.allowsWorldInteraction
       && (this.state.player.x !== poseBefore.x || this.state.player.y !== poseBefore.y)) this.onMoved();
@@ -886,7 +890,6 @@ export class WorldScene extends Phaser.Scene {
    */
   private updateFirstPersonMode(deltaMs: number, inputBlocked: boolean): void {
     const active = firstPersonView.requested === 'first-person'
-      && this.interiorSession.mode.kind === 'world'
       && !this.transitioningArea
       && !this.buildMode.placing
       && !this.buildMode.deleteMode
@@ -993,12 +996,17 @@ export class WorldScene extends Phaser.Scene {
         label: 'Workbench', reachPx: FACILITY_INTERACTION_RANGE_PX,
       };
     }
-    for (const building of townBuildingsInArea(this.state.currentArea.key)) {
-      yield {
-        kind: 'door', id: building.id,
-        x: (building.door.tileX + 0.5) * TILE_SIZE, y: (building.door.tileY + 0.5) * TILE_SIZE,
-        label: `Enter ${building.displayName}`, reachPx: TILE_SIZE * 2,
-      };
+    // Keepers and things to examine, in the building the player stands in.
+    const building = townBuildingAroundPlayer(this.state);
+    if (building) {
+      for (const hotspot of interiorDefinitionForBuilding(building.id).hotspots) {
+        yield {
+          kind: 'town-hotspot', id: `${building.id}:${hotspot.id}`,
+          x: Math.round((building.footprint.tileX + hotspot.x) * TILE_SIZE),
+          y: Math.round((building.footprint.tileY + hotspot.y) * TILE_SIZE),
+          label: townHotspotLabel(hotspot), reachPx: INTERIOR_INTERACTION_RANGE_TILES * TILE_SIZE,
+        };
+      }
     }
   }
 
@@ -1099,10 +1107,9 @@ export class WorldScene extends Phaser.Scene {
         this.performSiteSearch(target.id.slice(0, split), Number(target.id.slice(split + 1)));
         return;
       }
-      case 'door': {
-        const building = townBuildingById(target.id as TownBuildingId);
-        if (nearestTownBuildingDoor(this.state)?.id === building.id) this.enterTownBuilding(building);
-        else this.hud.showFeedback(`Move closer to the ${building.displayName} door`, false);
+      case 'town-hotspot': {
+        const hotspot = this.townHotspotById(target.id);
+        if (hotspot) this.performTownHotspot(hotspot);
         return;
       }
       default:
@@ -1172,6 +1179,15 @@ export class WorldScene extends Phaser.Scene {
       this.creatureChunks.upsert(creature.id,creature.x,creature.y);
       if (previousChunk !== entityChunkKey(creature.x,creature.y)) this.entityActivationDirty = true;
     }
+  }
+
+  /** Facility levels, tempering and scrapping: save at once, and redraw the levelled mesh. */
+  private performBaseUpgrade(result: { ok: boolean; message: string }): void {
+    this.hud.showFeedback(result.message, result.ok);
+    if (!result.ok) return;
+    this.buildMode.syncPlaced();
+    this.onCriticalChanged();
+    this.refreshHudNow();
   }
 
   private performTurretAmmo(result: CommandResult): void {
@@ -1292,7 +1308,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.stickyTarget?.kind === 'creature'
       && this.state.wildCreatures.some((creature) => creature.id === this.stickyTarget!.id)) return null;
     if (nearestHuntableCreature(this.state, this.playerEngageRangePx())) return null;
-    if (nearestTownBuildingDoor(this.state)) return null;
+    if (this.nearbyTownHotspot()) return null;
     if (nearestUnopenedContainer(this.state)) return null;
     if (this.state.activeSearch || nearestSearchableContainer(this.state)) return null;
     const nearby = this.findNearbyTargets();
@@ -1490,10 +1506,6 @@ export class WorldScene extends Phaser.Scene {
   /** E, Space, and the Gather button confirm an active placement ghost. */
   private performInteractAction(): void {
     if (this.openingPanel.isOpen) return;
-    if (this.interiorSession.mode.kind === 'interior' && this.interiorSession.allowsLocalMovement) {
-      this.performInteriorAction();
-      return;
-    }
     if (!this.interiorSession.allowsWorldInteraction) return;
     if (this.buildMode.placing) {
       this.buildMode.confirm();
@@ -1534,10 +1546,11 @@ export class WorldScene extends Phaser.Scene {
       this.performSiteSearch(tappedCrate.siteId, tappedCrate.index);
       return;
     }
-    const townBuilding = this.townBuildingAtWorld(worldX, worldY);
-    if (townBuilding) {
-      if (nearestTownBuildingDoor(this.state)?.id === townBuilding.id) this.enterTownBuilding(townBuilding);
-      else this.hud.showFeedback(`Move closer to the ${townBuilding.displayName} door`, false);
+    // A tap on a keeper (or the thing to examine) inside the player's
+    // building talks to them; a tap anywhere else in the room is a floor tap.
+    const tappedHotspot = this.townHotspotAtWorld(worldX, worldY);
+    if (tappedHotspot) {
+      this.performTownHotspot(tappedHotspot);
       return;
     }
     const creature = this.creatureAtWorld(worldX, worldY);
@@ -1652,9 +1665,9 @@ export class WorldScene extends Phaser.Scene {
       this.performCreatureAttack();
       return;
     }
-    const door = nearestTownBuildingDoor(this.state);
-    if (!resourceId && door) {
-      this.enterTownBuilding(door);
+    const townHotspot = resourceId ? null : this.nearbyTownHotspot();
+    if (townHotspot) {
+      this.performTownHotspot(townHotspot);
       return;
     }
     // A site crate outranks gathering for the same reason a cache does.
@@ -1767,86 +1780,83 @@ export class WorldScene extends Phaser.Scene {
     this.refreshHudNow();
   }
 
-  private enterTownBuilding(building: TownBuildingDefinition): void {
-    this.intent = NO_MOVE;
-    resetGridMovement(this.interiorGridMovement);
-    // A tile move still in flight would walk the doorway pose straight back off
-    // the door tile, and with it the shelter the doorway represents.
+  /**
+   * Notice the player stepping through a doorway: the room's soundscape takes
+   * over and the keeper greets them; stepping back out restores the world's.
+   * Nothing moves the player — walking in and out is ordinary walking.
+   */
+  private updateTownVisit(): void {
+    const building = townBuildingAroundPlayer(this.state);
+    const key = building ? `${building.areaKey}:${building.id}` : null;
+    if (key === this.townVisitKey) return;
+    this.townVisitKey = key;
+    this.interiorAudio.leave();
+    if (!building) {
+      this.npcBark.hide();
+      return;
+    }
+    this.interiorAudio.enter(interiorDefinitionById(building.interiorId).ambience.soundscape);
+    this.showNpcBark(building.npcId, 'arrival');
+  }
+
+  /** The nearest hotspot in reach inside the building the player stands in. */
+  private nearbyTownHotspot(): TownHotspotTarget | null {
+    const building = townBuildingAroundPlayer(this.state);
+    if (!building) return null;
+    const interior = interiorDefinitionForBuilding(building.id);
+    const hotspot = nearestInteriorHotspot(interior,
+      this.state.player.x / TILE_SIZE - building.footprint.tileX,
+      this.state.player.y / TILE_SIZE - building.footprint.tileY);
+    return hotspot ? this.townHotspotTarget(building, hotspot) : null;
+  }
+
+  private townHotspotTarget(building: TownBuildingDefinition, hotspot: InteriorHotspot): TownHotspotTarget {
+    return {
+      building, hotspot,
+      x: Math.round((building.footprint.tileX + hotspot.x) * TILE_SIZE),
+      y: Math.round((building.footprint.tileY + hotspot.y) * TILE_SIZE),
+    };
+  }
+
+  /** Resolve a `${buildingId}:${hotspotId}` target id in the player's building. */
+  private townHotspotById(id: string): TownHotspotTarget | null {
+    const building = townBuildingAroundPlayer(this.state);
+    if (!building || !id.startsWith(`${building.id}:`)) return null;
+    const hotspotId = id.slice(building.id.length + 1);
+    const hotspot = interiorDefinitionForBuilding(building.id).hotspots.find((candidate) => candidate.id === hotspotId);
+    return hotspot ? this.townHotspotTarget(building, hotspot) : null;
+  }
+
+  /** The hotspot a world tap landed on, inside the building the player stands in. */
+  private townHotspotAtWorld(worldX: number, worldY: number): TownHotspotTarget | null {
+    const building = townBuildingAroundPlayer(this.state);
+    if (!building) return null;
+    const interior = interiorDefinitionForBuilding(building.id);
+    const tapped = nearestInteriorHotspot(interior,
+      worldX / TILE_SIZE - building.footprint.tileX,
+      worldY / TILE_SIZE - building.footprint.tileY, 0.85);
+    return tapped ? this.townHotspotTarget(building, tapped) : null;
+  }
+
+  private performTownHotspot(target: TownHotspotTarget): void {
+    const distance = Math.hypot(target.x - this.state.player.x, target.y - this.state.player.y) / TILE_SIZE;
+    if (distance > INTERIOR_INTERACTION_RANGE_TILES + 0.05) {
+      this.hud.showFeedback(target.hotspot.kind === 'service'
+        ? `Move closer to ${npcDefinition(target.hotspot.npcId).name}`
+        : `Move closer to ${target.hotspot.label.toLowerCase()}`, false);
+      return;
+    }
+    if (target.hotspot.kind === 'examine') {
+      this.hud.showFeedback(target.hotspot.text, true);
+      return;
+    }
+    this.openNpcDialogue(target.building.id, target.hotspot.npcId);
+  }
+
+  private openNpcDialogue(buildingId: TownBuildingId, npcId: NpcId): void {
     resetGridMovement(this.gridMovement);
-    this.npcBark.hide();
-    this.buildMode.cancel();
-    this.buildMenu.close();
-    this.inventoryPanel.close();
-    this.buildingItemMenu.close();
-    const interior = interiorDefinitionById(building.interiorId);
-    // The visit is presentation, but being indoors is not: the storm and the
-    // raid both read the exterior position, so a visitor stands in the doorway
-    // until they leave through it.
-    positionPlayerInDoorway(this.state, building);
-    this.snapRenderPoseToState();
-    this.interiorAudio.enter(interior.ambience.soundscape);
-    this.interiorSession.enter(building.id, {
-      x: interior.playerSpawn.tileX + 0.5,
-      y: interior.playerSpawn.tileY + 0.5,
-      facing: interior.playerSpawn.facing,
-    });
-    this.interiorTransition.enter(
-      () => {
-        this.interiorSession.completeTransition();
-        this.showNpcBark(building.npcId, 'arrival');
-      },
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    );
-    this.updateInteriorExploration(0);
-  }
-
-  private updateInteriorExploration(deltaMs: number): void {
-    const buildingId = this.interiorSession.buildingId;
-    const pose = this.interiorSession.pose;
-    if (!buildingId || !pose) return;
-    const interior = interiorDefinitionForBuilding(buildingId);
-    if (this.interiorSession.mode.kind === 'interior' && this.interiorSession.allowsLocalMovement && deltaMs > 0) {
-      this.interiorSession.updatePose(stepInteriorMovement(
-        interior,
-        pose,
-        this.interiorIntent,
-        deltaMs,
-        this.interiorGridMovement,
-      ));
-    }
-    const updatedPose = this.interiorSession.pose;
-    if (!updatedPose) return;
-    if (this.interiorSession.mode.kind === 'interior' && this.interiorSession.allowsLocalMovement) {
-      this.interiorSession.focusHotspot(nearestInteriorHotspot(interior, updatedPose)?.id ?? null);
-    }
-
-  }
-
-  private performInteriorAction(): void {
-    const buildingId = this.interiorSession.buildingId;
-    const pose = this.interiorSession.pose;
-    if (!buildingId || !pose) return;
-    const interior = interiorDefinitionForBuilding(buildingId);
-    const hotspot = nearestInteriorHotspot(interior, pose);
-    if (!hotspot) {
-      this.hud.showFeedback(`Move closer to an interaction point in ${interior.displayName}`, false);
-      return;
-    }
-    if (hotspot.kind === 'exit') {
-      this.leavePlayableInterior();
-      return;
-    }
-    if (hotspot.kind === 'examine') {
-      this.hud.showFeedback(hotspot.text, true);
-      return;
-    }
-    const building = townBuildingsInArea(this.state.currentArea.key).find((candidate) => candidate.id === buildingId);
-    if (!building) return;
-    this.openNpcDialogue(hotspot.npcId);
-  }
-
-  private openNpcDialogue(npcId: NpcId): void {
-    this.interiorSession.beginDialogue(npcId);
+    this.intent = NO_MOVE;
+    this.interiorSession.beginDialogue(buildingId, npcId);
     const recentPurchaseService = this.recentNpcPurchase?.npcId === npcId
       ? this.recentNpcPurchase.service
       : undefined;
@@ -1883,6 +1893,7 @@ export class WorldScene extends Phaser.Scene {
     this.npcDialogueController.close();
     this.interiorSession.openService(result.npcId);
     const interior = interiorDefinitionForBuilding(building.id);
+    this.npcBark.hide();
     this.npcServiceOverlay.open(building, {
       closeLabel: `Back to ${interior.displayName}`,
       closeAriaLabel: `Return to ${interior.displayName}`,
@@ -1894,43 +1905,13 @@ export class WorldScene extends Phaser.Scene {
     if (this.interiorSession.mode.kind !== 'dialogue') return;
     this.npcDialogue.close();
     this.npcDialogueController.close();
-    this.interiorSession.resumeInterior();
+    this.interiorSession.endConversation();
     this.refreshHudNow();
   }
 
   private showNpcBark(npcId: NpcId, kind: 'arrival' | 'nearby' | 'afterService'): void {
     const bark = this.npcBarkController.request(npcId, kind, performance.now());
     if (bark) this.npcBark.show(bark);
-  }
-
-  private leavePlayableInterior(): void {
-    resetGridMovement(this.interiorGridMovement);
-    const buildingId = this.interiorSession.buildingId;
-    const building = townBuildingsInArea(this.state.currentArea.key).find((candidate) => candidate.id === buildingId);
-    if (!building) {
-      this.interiorAudio.leave();
-      this.interiorSession.recoverToWorld();
-      return;
-    }
-    this.interiorAudio.leave();
-    this.interiorSession.beginExit();
-    this.npcBark.hide();
-    this.interiorTransition.exit(() => {
-      this.interiorSession.completeTransition();
-      positionPlayerOutsideDoor(this.state, building);
-      this.snapRenderPoseToState();
-      this.onCriticalChanged();
-      this.refreshHudNow();
-    }, window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  }
-
-  private townBuildingAtWorld(worldX: number, worldY: number): TownBuildingDefinition | null {
-    return townBuildingsInArea(this.state.currentArea.key).find(({ footprint }) =>
-      worldX >= footprint.tileX * TILE_SIZE
-      && worldX < (footprint.tileX + footprint.tilesWide) * TILE_SIZE
-      && worldY >= footprint.tileY * TILE_SIZE
-      && worldY < (footprint.tileY + footprint.tilesHigh) * TILE_SIZE,
-    ) ?? null;
   }
 
   /** Nearest-creature encounter kept for the 3D presentation harness. */
@@ -2247,6 +2228,23 @@ export class WorldScene extends Phaser.Scene {
    * Demolish whatever the Delete-mode cursor is lighting, then re-anchor the
    * cursor so a row of walls comes down with repeated Delete presses.
    */
+  /** Upgrade the part the Upgrade-mode cursor lights, or every wall and door of its room. */
+  private upgradeSelectedPart(wholeRoom: boolean): void {
+    const target = this.buildMode.deleteTarget;
+    if (!target) return;
+    const result = wholeRoom
+      ? upgradeBuildingBatch(this.state, roomUpgradeIds(this.state, target))
+      : upgradeBuildingMaterial(this.state, target.id);
+    this.hud.showFeedback(result.message, result.ok);
+    if (result.ok) {
+      this.buildMode.syncPlaced();
+      this.onCriticalChanged();
+      this.refreshHudNow();
+    }
+    // Re-read the lit part: its material and price just changed.
+    this.buildMode.refreshDeleteSelection();
+  }
+
   private deleteSelectedBuilding(): boolean {
     const target = this.buildMode.deleteTarget;
     if (!target) return false;
@@ -2361,7 +2359,7 @@ export class WorldScene extends Phaser.Scene {
       ),
       bed: nearestGardenBed(this.state, INTERACTION_RANGE_PX, buildings),
       planter: nearestWoodlotPlanter(this.state, INTERACTION_RANGE_PX, buildings),
-      door: nearestTownBuildingDoor(this.state),
+      hotspot: this.nearbyTownHotspot(),
     };
     this.interactionQueryTimes.record(globalThis.performance.now() - startedAt);
     return targets;
@@ -2383,19 +2381,7 @@ export class WorldScene extends Phaser.Scene {
   private updateTargetIndicators(): void {
     if (this.interiorSession.mode.kind !== 'world') {
       this.presentationTarget = null;
-      if (this.interiorSession.mode.kind === 'interior') {
-        const buildingId = this.interiorSession.buildingId;
-        const interior = buildingId ? interiorDefinitionForBuilding(buildingId) : null;
-        const hotspot = interior?.hotspots.find(({ id }) => id === this.interiorSession.focusedHotspotId) ?? null;
-        const label = hotspot?.kind === 'service'
-          ? `Talk to ${npcDefinition(hotspot.npcId).name}`
-          : hotspot?.kind === 'exit'
-            ? hotspot.label
-            : hotspot?.label ?? null;
-        this.hud.setContextActionOverride(label, hotspot?.label ?? `Explore ${interior?.displayName ?? 'the interior'}`);
-      } else {
-        this.hud.setContextActionOverride(null);
-      }
+      this.hud.setContextActionOverride(null);
       return;
     }
     const opening = nearbyOpeningTuftle(this.state);
@@ -2411,17 +2397,17 @@ export class WorldScene extends Phaser.Scene {
     const facility = nearby.facility;
     const bed = nearby.bed;
     const planter = nearby.planter;
-    const door = nearby.door;
-    const siteAction = door ? null : this.siteContextAction();
+    const townHotspot = nearby.hotspot;
+    const siteAction = townHotspot ? null : this.siteContextAction();
     this.hud.setContextActionOverride(
-      door ? `Enter ${door.displayName}` : siteAction?.label ?? null,
-      door ? `${door.displayName} · E / Space` : siteAction?.hint ?? '',
+      townHotspot ? townHotspotLabel(townHotspot.hotspot) : siteAction?.label ?? null,
+      townHotspot ? `${townHotspot.building.displayName} · E / Space` : siteAction?.hint ?? '',
     );
-    this.presentationTarget = door
+    this.presentationTarget = townHotspot
       ? {
-          kind: 'door', id: door.id,
-          x: (door.door.tileX + 0.5) * TILE_SIZE, y: (door.door.tileY + 0.5) * TILE_SIZE,
-          label: `Enter ${door.displayName}`,
+          kind: 'town-hotspot', id: `${townHotspot.building.id}:${townHotspot.hotspot.id}`,
+          x: townHotspot.x, y: townHotspot.y,
+          label: townHotspotLabel(townHotspot.hotspot),
         }
       : target
       ? {
@@ -2458,7 +2444,7 @@ export class WorldScene extends Phaser.Scene {
     // The snare button appears at taming range, which is shorter than any
     // attack reach, so the lock's own in-range flag cannot stand in for it.
     const snarable = locked?.kind === 'creature' && locked.distancePx <= TAMING_RANGE_PX;
-    const key = `${door?.id ?? ''}|${target?.id ?? ''}|${target?.hp ?? ''}|${drop?.id ?? ''}|${creature?.id ?? ''}|${facility?.id ?? ''}`
+    const key = `${townHotspot?.hotspot.id ?? ''}|${target?.id ?? ''}|${target?.hp ?? ''}|${drop?.id ?? ''}|${creature?.id ?? ''}|${facility?.id ?? ''}`
       + `|${locked?.id ?? ''}|${locked?.inRange ?? ''}|${snarable}`;
     if (key === this.lastTargetKey) return;
     this.lastTargetKey = key;
@@ -2511,11 +2497,8 @@ export class WorldScene extends Phaser.Scene {
     if (!this.queuedStep) return;
     const accepted = !movingBefore
       && (this.gridMovement.moving
-        || this.interiorGridMovement.moving
         || this.state.player.x !== poseBefore.x
-        || this.state.player.y !== poseBefore.y
-        || (this.interiorSession.pose?.x ?? 0) !== poseBefore.interiorX
-        || (this.interiorSession.pose?.y ?? 0) !== poseBefore.interiorY);
+        || this.state.player.y !== poseBefore.y);
     if (accepted || performance.now() >= this.queuedStep.expiresAt) this.queuedStep = null;
   }
 
@@ -2523,8 +2506,6 @@ export class WorldScene extends Phaser.Scene {
     return {
       x: this.state.player.x,
       y: this.state.player.y,
-      interiorX: this.interiorSession.pose?.x ?? 0,
-      interiorY: this.interiorSession.pose?.y ?? 0,
     };
   }
 
@@ -2570,13 +2551,6 @@ export class WorldScene extends Phaser.Scene {
     // stick is rotated onto the ground plane by that same yaw.
     const yaw = cameraOrientationFromTenths(this.state.gameBalance.camera).yawDegrees;
     return screenToCameraWorldIntent(intent, yaw);
-  }
-
-  private alignInteriorIntentToPresentation(intent: MoveIntent): MoveIntent {
-    if (!this.interiorSession.buildingId) return intent;
-    // Interiors are shot from the overworld orientation, so the stick rotates
-    // by exactly the same yaw indoors as it does outside.
-    return this.alignIntentToPresentation(intent);
   }
 
   /** Paint travel feedback before reconciling the destination area. */
@@ -2726,7 +2700,6 @@ export class WorldScene extends Phaser.Scene {
         this.npcServiceOverlay.close();
         return;
       }
-      this.leavePlayableInterior();
       return;
     }
     this.buildMenu.close();
@@ -2750,7 +2723,7 @@ export class WorldScene extends Phaser.Scene {
     this.gardenGuide.destroy();
     this.interiorAudio.dispose();
     this.interiorSession.recoverToWorld();
-    resetGridMovement(this.interiorGridMovement);
+    this.townVisitKey = null;
     if (this.transitionFrameA !== null) cancelAnimationFrame(this.transitionFrameA);
     if (this.transitionFrameB !== null) cancelAnimationFrame(this.transitionFrameB);
     if (this.transitionFinishTimer !== null) clearTimeout(this.transitionFinishTimer);
@@ -2789,7 +2762,6 @@ export class WorldScene extends Phaser.Scene {
     this.respawnPanel.destroy();
     this.encounterPanel.destroy();
     this.npcServiceOverlay.destroy();
-    this.interiorTransition.destroy();
     this.npcDialogue.destroy();
     this.npcBark.destroy();
     this.adminPanel.destroy();

@@ -130,7 +130,7 @@
 [data-coin-score] {font:600 12px var(--elaris-font-display)!important;min-height:30px!important;letter-spacing:.04em}
 [aria-label="Active quests"] {padding:2px 0!important;border-color:#bca77755!important;font-size:11px!important;line-height:1.5!important}
 [aria-label="Active quests"] strong {font-family:var(--elaris-font-display);color:#e6d0a1!important;font-size:13px}
-[data-hud-status-stack] {top:calc(var(--ui-safe-top) + 18px)!important;right:calc(var(--ui-safe-right) + 18px)!important;gap:6px!important;width:204px!important}
+[data-hud-status-stack] {--hud-stack-gap:6px;top:calc(var(--ui-safe-top) + 18px)!important;right:calc(var(--ui-safe-right) + 18px)!important;gap:var(--hud-stack-gap)!important;width:204px!important}
 [data-survival-timer] {border:1px solid #baa16b66!important;background:linear-gradient(135deg,#263f30f2,#112b23f2)!important;border-radius:8px!important;font:600 10px/1.5 var(--elaris-font-body)!important;letter-spacing:.07em;padding:9px 12px!important;box-shadow:inset 0 1px #f3deab11,0 4px 12px #051b1533}
 [data-player-xp] {border-radius:8px!important;border:1px solid #b39d6d55!important;background:#152f25ed!important;box-shadow:0 4px 12px #051b1533!important;min-height:34px!important;font-size:11px!important}
 [data-player-xp-fill] {background:linear-gradient(90deg,#739e79,#d9c181)!important;border-radius:2px}
@@ -223,7 +223,7 @@
   .elaris-inventory-grid {grid-template-columns:repeat(5,minmax(0,1fr))!important}.elaris-inventory-slot{aspect-ratio:1!important;min-height:95px!important}
   [data-world-journal]{top:calc(var(--ui-safe-top) + 9px)!important;left:calc(var(--ui-safe-left) + 9px)!important;gap:6px!important}[data-world-map-frame]{width:80px!important;padding:5px!important}[data-world-map-frame] canvas{width:80px!important;height:80px!important}
   [aria-label="Open large map"]{left:59px!important;top:43px!important}[aria-label="Active quests"]{width:96px!important;max-height:86px!important;overflow-y:auto!important;font-size:10px!important}
-  [data-hud-status-stack]{top:calc(var(--ui-safe-top) + 9px)!important;right:calc(var(--ui-safe-right) + 98px)!important;max-width:190px!important;gap:5px!important}[data-survival-timer]{font-size:10px!important;padding:5px 8px!important}
+  [data-hud-status-stack]{--hud-stack-gap:5px;top:calc(var(--ui-safe-top) + 9px)!important;right:calc(var(--ui-safe-right) + 98px)!important;max-width:190px!important;gap:var(--hud-stack-gap)!important}[data-survival-timer]{font-size:10px!important;padding:5px 8px!important}
   [data-rail-button][aria-label=Menu]{bottom:174px!important}[data-rail-button][aria-label=Admin]{bottom:238px!important}[aria-label=Hotbar] button{width:44px!important;min-height:44px!important}
 }
 @media(prefers-contrast:more){.elaris-panel,.elaris-button,.elaris-surface,.elaris-inventory-slot{border-color:#f2dba5!important;border-width:2px!important}.elaris-menu-nav [role=tab][aria-selected=true]{outline:2px solid #f2dba5;outline-offset:-3px}.elaris-menu-nav-copy small,.elaris-menu-subtitle{color:#e3e8d2!important}}

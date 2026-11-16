@@ -28,6 +28,8 @@ export interface SaveControllerOptions {
   onSaved?: () => void;
   /** Fired once per load when capped offline settlement produced anything. */
   onOfflineSettled?: (summary: OfflineSummary) => void;
+  /** Continue must never replace an unreadable world with a new game. */
+  requireExistingSave?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export class SaveController {
   private readonly onStatus: ((status: SaveStatus, detail?: string) => void) | undefined;
   private readonly onSaved: (() => void) | undefined;
   private readonly onOfflineSettled: ((summary: OfflineSummary) => void) | undefined;
+  private readonly requireExistingSave: boolean;
   /** Never moves backward, even if the local wall clock does. */
   private lastProcessedAt: number;
 
@@ -65,6 +68,7 @@ export class SaveController {
     this.onStatus = options.onStatus;
     this.onSaved = options.onSaved;
     this.onOfflineSettled = options.onOfflineSettled;
+    this.requireExistingSave = options.requireExistingSave ?? false;
     this.lastProcessedAt = this.clock.now();
     this.repo = new IndexedDbSaveRepository({
       ...options.repository,
@@ -77,6 +81,7 @@ export class SaveController {
     const acquired = await this.repo.acquireWriter();
 
     const loaded = await this.repo.load();
+    if (!loaded && this.requireExistingSave) throw new Error('This world’s save could not be read. It has been kept unchanged for recovery.');
     this.loadedExistingSave = loaded !== null;
     if (loaded) {
       applyLoadedState(this.state, loaded.save.state);
@@ -118,7 +123,8 @@ export class SaveController {
 
   /** Durably persist immediately (used for critical, irreversible mutations). */
   async saveCritical(): Promise<void> {
-    if (this.status !== 'writer') return;
+    // A transient storage failure may be retried, but a lost lease may not.
+    if (!this.repo.isWriter()) return;
     this.clearDirtyTimer();
     await this.enqueue(() => this.persist('critical'));
   }
@@ -142,6 +148,8 @@ export class SaveController {
   async flushAndRelease(): Promise<void> {
     await this.flush();
     await this.repo.releaseWriter();
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
   }
 
   async exportToFile(): Promise<void> {
@@ -235,6 +243,7 @@ export class SaveController {
     const snapshotMs = monotonicNow() - startedAt;
     try {
       await this.repo.save(portable, kind);
+      if (this.status === 'error') this.setStatus('writer');
     } finally {
       const totalMs = monotonicNow() - startedAt;
       this.saveDurations.record(totalMs);

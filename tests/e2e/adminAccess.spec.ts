@@ -1,7 +1,8 @@
+import { navigateApp } from './app';
 import { expect, test } from '@playwright/test';
 
 test('offers Admin at the top of the Menu by default', async ({ page }) => {
-  await page.goto('/?localBalance=1');
+  await navigateApp(page, '/?localBalance=1');
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Admin', exact: true })).toBeHidden();
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
@@ -17,18 +18,18 @@ test('offers Admin at the top of the Menu by default', async ({ page }) => {
 });
 
 test('shows the Admin menu once asked for, and remembers it', async ({ page }) => {
-  await page.goto('/?localBalance=1&admin=1');
+  await navigateApp(page, '/?localBalance=1&admin=1');
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Admin' })).toBeVisible();
 
-  await page.goto('/?localBalance=1');
+  await navigateApp(page, '/?localBalance=1');
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Admin' })).toBeVisible();
 
-  await page.goto('/?localBalance=1&admin=0');
+  await navigateApp(page, '/?localBalance=1&admin=0');
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Admin' })).toHaveCount(0);
-  await page.goto('/?localBalance=1');
+  await navigateApp(page, '/?localBalance=1');
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Admin' })).toHaveCount(0);
 });

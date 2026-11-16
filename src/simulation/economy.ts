@@ -24,6 +24,11 @@ import { creditCoins, spendCoins } from './coins';
 import { recordFarmOrder, recordResourceSale, recordUpgrade } from './questTracking';
 import { resourceStacksForAmount } from './inventoryStacks';
 import { assignCreatureHousing, availableHousing, releaseCreature } from './workerHousing';
+import { TEMPER_COSTS, TOOL_SCRAP_IRON } from '../content/economy';
+import { workbenchMaxTemperRank } from './facilityLevels';
+import { FACILITY_INTERACTION_RANGE_PX, nearestUsableFacility, tryAddResource } from './gameplayCommands';
+import { BAG_ITEM_LABELS } from '../config/balance';
+import type { BuildingState } from './state';
 
 export function sellResource(state: GameState, resource: ResourceId, amount: number): CommandResult {
   if (!Number.isSafeInteger(amount) || amount <= 0) return { ok: false, message: 'Choose a positive whole amount' };
@@ -112,6 +117,12 @@ export function upgradeTool(state: GameState, toolId: string, axis: ToolUpgradeA
     `${toolDefinition(tool.definitionId).displayName} ${axis} upgraded to rank ${toolUpgradeRank(tool, axis) + 1}`,
   );
   if (!transaction.ok) return transaction;
+  applyToolRank(state, tool, axis);
+  return transaction;
+}
+
+/** Raise one axis a rank. Shared by Mara's coin upgrade and bench tempering. */
+function applyToolRank(state: GameState, tool: ToolInstance, axis: ToolUpgradeAxis): void {
   if (axis === 'power') tool.powerRank += 1;
   else if (axis === 'speed') tool.speedRank += 1;
   else {
@@ -121,7 +132,93 @@ export function upgradeTool(state: GameState, toolId: string, axis: ToolUpgradeA
     tool.durability += tool.maxDurability - oldMax;
   }
   recordUpgrade(state, axis, toolUpgradeRank(tool, axis));
-  return transaction;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tempering and scrapping at your own Workbench                               */
+/* -------------------------------------------------------------------------- */
+
+/** The player's own usable Workbench in reach, if any. The town bench does not temper. */
+export function nearestOwnWorkbench(state: GameState): BuildingState | null {
+  return nearestUsableFacility(
+    state,
+    FACILITY_INTERACTION_RANGE_PX,
+    state.buildings.filter((building) => building.definitionId === 'workbench'),
+  );
+}
+
+/** Salvage cost of the next temper on an axis, or null at rank 4. */
+export function temperCost(tool: ToolInstance, axis: ToolUpgradeAxis): Readonly<Partial<Record<ResourceId, number>>> | null {
+  const rank = toolUpgradeRank(tool, axis);
+  return rank >= WORLD_BLACKSMITH_MAX_RANK ? null : TEMPER_COSTS[rank]!;
+}
+
+export function temperToolBlockedReason(state: GameState, toolId: string, axis: ToolUpgradeAxis): string | null {
+  const tool = state.tools.find((candidate) => candidate.instanceId === toolId);
+  if (!tool) return 'Tool not found';
+  const cost = temperCost(tool, axis);
+  if (!cost) return `${axis} is already rank ${WORLD_BLACKSMITH_MAX_RANK}`;
+  const bench = nearestOwnWorkbench(state);
+  if (!bench) return 'Stand at your own Workbench';
+  const target = toolUpgradeRank(tool, axis) + 1;
+  const cap = workbenchMaxTemperRank(bench);
+  if (target > cap) return `Rank ${target} needs a level ${target >= 4 ? 3 : 2} Workbench`;
+  for (const [resource, amount] of Object.entries(cost) as Array<[ResourceId, number]>) {
+    const short = amount - state.inventory[resource];
+    if (short > 0) return `Need ${short} more ${BAG_ITEM_LABELS[resource]}`;
+  }
+  return null;
+}
+
+/** Buy the next rank on an axis with salvage, at a Workbench whose level allows it. */
+export function temperTool(state: GameState, toolId: string, axis: ToolUpgradeAxis): CommandResult {
+  const blocked = temperToolBlockedReason(state, toolId, axis);
+  if (blocked) return { ok: false, message: blocked };
+  const tool = state.tools.find((candidate) => candidate.instanceId === toolId)!;
+  for (const [resource, amount] of Object.entries(temperCost(tool, axis)!) as Array<[ResourceId, number]>) {
+    state.inventory[resource] -= amount;
+  }
+  applyToolRank(state, tool, axis);
+  return { ok: true, message: `Tempered ${toolDefinition(tool.definitionId).displayName} ${axis} to rank ${toolUpgradeRank(tool, axis)}` };
+}
+
+/** Scrap Iron a tool would break down into now, or null for a tool that cannot be scrapped. */
+export function toolScrapValue(tool: ToolInstance): number | null {
+  const id = tool.definitionId;
+  const base = id.startsWith('ancient-') ? TOOL_SCRAP_IRON.ancient
+    : id.startsWith('masterwork-') ? TOOL_SCRAP_IRON.masterwork
+      : id.startsWith('reinforced-') ? TOOL_SCRAP_IRON.reinforced
+        : toolDefinition(id).tier === 'iron' ? TOOL_SCRAP_IRON.iron
+          : toolDefinition(id).tier === 'stone' ? TOOL_SCRAP_IRON.stone
+            : null;
+  if (base === null || tool.maxDurability <= 0) return null;
+  return Math.floor((base * tool.durability) / tool.maxDurability);
+}
+
+export function scrapToolBlockedReason(state: GameState, toolId: string): string | null {
+  const tool = state.tools.find((candidate) => candidate.instanceId === toolId);
+  if (!tool) return 'Tool not found';
+  if (toolScrapValue(tool) === null) return 'Wooden tools cannot be scrapped';
+  if (!nearestOwnWorkbench(state)) return 'Stand at your own Workbench';
+  return null;
+}
+
+/** Destroy a tool for Scrap Iron. A worn tool returns less; one with nothing left returns nothing. */
+export function scrapTool(state: GameState, toolId: string): CommandResult {
+  const blocked = scrapToolBlockedReason(state, toolId);
+  if (blocked) return { ok: false, message: blocked };
+  const index = state.tools.findIndex((candidate) => candidate.instanceId === toolId);
+  const tool = state.tools[index]!;
+  const value = toolScrapValue(tool)!;
+  // Check room before destroying anything: the tool's own slot frees up first.
+  state.tools.splice(index, 1);
+  if (value > 0 && !tryAddResource(state, 'scrap-iron', value)) {
+    state.tools.splice(index, 0, tool);
+    return { ok: false, message: 'No room in the bag for the scrap' };
+  }
+  if (state.equippedToolId === tool.instanceId) state.equippedToolId = null;
+  const name = toolDefinition(tool.definitionId).displayName;
+  return { ok: true, message: value > 0 ? `Scrapped ${name} for ${value} Scrap Iron` : `Scrapped ${name}; nothing usable left in it` };
 }
 
 export function effectiveToolDamage(tool: ToolInstance): number;

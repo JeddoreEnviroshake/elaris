@@ -12,7 +12,7 @@ const frame = (overrides: Partial<FirstPersonHandsFrame> = {}): FirstPersonHands
   reducedMotion: false, ...overrides,
 });
 const presentation = (overrides: Partial<ThreePresentationState> = {}): ThreePresentationState => ({
-  placement: null, selection: null, target: null, gathering: false, prefersReducedMotion: false, interior: null, ...overrides,
+  placement: null, selection: null, target: null, gathering: false, prefersReducedMotion: false, ...overrides,
 });
 function equip(definitionId: ToolDefinitionId) {
   const state = createInitialState(42);

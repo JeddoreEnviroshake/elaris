@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { releaseSaveWriter } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { createOpeningChapter } from '../../src/content/onboarding';
@@ -34,7 +34,7 @@ async function seed(page: Page, fixture: GameState): Promise<void> {
   await releaseSaveWriter(page);
   await page.evaluate(async (state: GameState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
@@ -44,14 +44,14 @@ async function seed(page: Page, fixture: GameState): Promise<void> {
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, fixture);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
 }
 
 async function savedSite(page: Page, siteId: string): Promise<{ salvage: number; searched: number[] } | null> {
   return page.evaluate(async ({ siteId, salvageIds }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     return new Promise<{ salvage: number; searched: number[] } | null>((resolve, reject) => {

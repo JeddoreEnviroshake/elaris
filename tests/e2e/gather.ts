@@ -1,6 +1,6 @@
 import { releaseSaveWriter } from './save';
 import { expect, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { DEFAULT_WORLD_SEED } from '../../src/config/platform';
 import { starterGroveAnchor } from '../../src/simulation/worldGeneration';
 
@@ -22,7 +22,7 @@ export async function openAppInStarterGrove(page: Page): Promise<void> {
   await releaseSaveWriter(page);
   await page.evaluate(async (grove) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -41,7 +41,7 @@ export async function openAppInStarterGrove(page: Page): Promise<void> {
       transaction.onerror = () => reject(transaction.error);
     });
   }, starterGroveAnchor(DEFAULT_WORLD_SEED));
-  await page.reload();
+  await reloadApp(page);
   await expect(page.locator('[data-action-button]')).toBeVisible();
 }
 

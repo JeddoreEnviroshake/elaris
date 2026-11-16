@@ -29,6 +29,8 @@ const EMPTY_ENVELOPE: PersistenceEnvelope = { revision: 0, leaseEpoch: 0, fenceC
 
 export interface RepositoryOptions {
   profileId?: string;
+  /** Omit only when reading the pre-world-menu legacy slot. */
+  worldId?: string;
   clock?: Clock;
   ttlMs?: number;
   /** Called when another client acquires the writer lease we thought we held. */
@@ -48,6 +50,7 @@ export interface RepositoryOptions {
  */
 export class IndexedDbSaveRepository implements SaveRepository {
   private readonly profileId: string;
+  private readonly databaseName: string;
   private readonly clock: Clock;
   private readonly ttlMs: number;
   private readonly clientId: string;
@@ -63,13 +66,14 @@ export class IndexedDbSaveRepository implements SaveRepository {
 
   constructor(options: RepositoryOptions = {}) {
     this.profileId = options.profileId ?? 'default';
+    this.databaseName = worldDatabaseName(this.profileId, options.worldId);
     this.clock = options.clock ?? systemClock;
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.clientId = generateClientId();
     this.onWriterConflict = options.onWriterConflict;
     this.onNeedReload = options.onNeedReload;
 
-    const channelName = `elaris-writer:${this.profileId}`;
+    const channelName = `elaris-writer:${options.worldId === undefined ? this.profileId : this.databaseName}`;
     this.channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(channelName) : null;
     if (this.channel) {
       this.channel.onmessage = (e: MessageEvent) => this.onChannelMessage(e.data);
@@ -78,7 +82,7 @@ export class IndexedDbSaveRepository implements SaveRepository {
 
   async open(): Promise<void> {
     if (this.db) return;
-    const dbName = `elaris:${this.profileId}`;
+    const dbName = this.databaseName;
     const onNeedReload = this.onNeedReload;
     this.db = await openDB<ElarisDb>(dbName, 1, {
       upgrade(db) {
@@ -132,6 +136,14 @@ export class IndexedDbSaveRepository implements SaveRepository {
     const tx = db.transaction(['lease', 'env'], 'readwrite');
     const leaseStore = tx.objectStore('lease');
     const envStore = tx.objectStore('env');
+    const currentLease = await leaseStore.get(LEASE_KEY);
+    // Another opener may have won while our liveness probe was in flight.
+    // Only the exact holder we probed may be replaced before its TTL expires.
+    if (currentLease && currentLease.holderId !== this.clientId && now < currentLease.expiresAt
+      && (currentLease.holderId !== existing?.holderId || currentLease.fenceToken !== existing.fenceToken)) {
+      await tx.done;
+      return { granted: false, fenceToken: currentLease.fenceToken, epoch: currentLease.epoch, reason: 'Game already open in another window' };
+    }
     const env = (await envStore.get(ENV_KEY)) ?? { ...EMPTY_ENVELOPE };
     env.fenceCounter += 1;
     env.leaseEpoch += 1;
@@ -284,7 +296,13 @@ export class IndexedDbSaveRepository implements SaveRepository {
   async reset(): Promise<void> {
     const db = this.requireDb();
     if (this.myToken === null) throw new NotWriterError();
-    const tx = db.transaction(['snapshots', 'env'], 'readwrite');
+    const tx = db.transaction(['snapshots', 'env', 'lease'], 'readwrite');
+    const lease = await tx.objectStore('lease').get(LEASE_KEY);
+    if (!lease || lease.holderId !== this.clientId || lease.fenceToken !== this.myToken) {
+      await tx.done;
+      this.loseWriter();
+      throw new StaleWriterError();
+    }
     const snapshots = tx.objectStore('snapshots');
     await snapshots.delete('current');
     await snapshots.delete('lastKnownGood');
@@ -372,6 +390,11 @@ export class IndexedDbSaveRepository implements SaveRepository {
     if (!this.db) throw new Error('SaveRepository not open()ed');
     return this.db;
   }
+}
+
+/** Each world gets its own snapshots, envelope, lease and notification channel. */
+export function worldDatabaseName(profileId = 'default', worldId?: string): string {
+  return worldId === undefined ? `elaris:${profileId}` : `elaris:${profileId}:world:${encodeURIComponent(worldId)}`;
 }
 
 interface ChannelMessage {

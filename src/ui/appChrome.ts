@@ -78,7 +78,7 @@ export class AppChrome {
     this.getDiagnostics = fn;
   }
 
-  setSaveActions(actions: SaveActions): void {
+  setSaveActions(actions: SaveActions | null): void {
     this.saveActions = actions;
   }
 

@@ -10,6 +10,8 @@ import type { BuildingState, GameState } from '../simulation/state';
 import type { EnvironmentKind } from '../simulation/state';
 import { buildableById } from '../content/buildingParts';
 import { demolitionRefund } from '../simulation/gameplayCommands';
+import { partUpgradeBatchCost, partUpgradeBlockedReason, partUpgradeCost, roomUpgradeIds, upgradeTarget } from '../simulation/partUpgrades';
+import { canAffordCost } from './costs';
 import { AREA_TIERS } from '../config/areaGates';
 import { RAIL_BOTTOMS, div, railButton, uiButton, wireDisclosure } from './controls';
 import { stockedCostText } from './costs';
@@ -33,6 +35,12 @@ export interface BuildMenuActions {
   onDeleteConfirm: () => void;
   /** Delete mode was left; the scene drops the red cursor. */
   onDeletingCancelled: () => void;
+  /** Upgrade Mode was entered; the scene lights the nearest upgradable part. */
+  onStartUpgrading?: () => void;
+  /** The Upgrade button was pressed; the scene upgrades the lit part one material. */
+  onUpgradeConfirm?: () => void;
+  /** "Upgrade room" was pressed; the scene upgrades every wall and door of the lit room. */
+  onUpgradeRoomConfirm?: () => void;
   /** The palette opened; the scene brings the Craft tab that hosts it forward. */
   onOpened: () => void;
 }
@@ -42,7 +50,7 @@ export interface BuildSectionHost {
   mountBuildSection: (section: HTMLElement, onCraftTabOpened: () => void) => void;
 }
 
-export type BuildMenuMode = 'closed' | 'palette' | 'placing' | 'deleting';
+export type BuildMenuMode = 'closed' | 'palette' | 'placing' | 'deleting' | 'upgrading';
 
 /**
  * Palette grouping is presentation only: players shop by where a part goes,
@@ -163,6 +171,9 @@ export class BuildMenu {
   private readonly markerKind: HTMLSelectElement;
   private readonly deleteModeButton: HTMLButtonElement;
   private readonly deleteButton: HTMLButtonElement;
+  private readonly upgradeModeButton: HTMLButtonElement;
+  private readonly upgradeButton: HTMLButtonElement;
+  private readonly upgradeRoomButton: HTMLButtonElement;
   private currentMode: BuildMenuMode = 'closed';
   private placingId: BuildableId | null = null;
   private embedded = false;
@@ -213,7 +224,15 @@ export class BuildMenu {
       display: 'block', width: '100%', marginTop: '10px', background: '#8b3434',
       color: '#fff1f1', fontWeight: '700',
     } satisfies Partial<CSSStyleDeclaration>);
-    this.palette.append(heading, this.points, this.deleteModeButton, this.empty);
+    // Upgrading in place is the third half of building: same cursor, same grammar.
+    this.upgradeModeButton = uiButton('Upgrade Mode', () => this.enterUpgradeMode());
+    this.upgradeModeButton.dataset['upgradeMode'] = '';
+    this.upgradeModeButton.title = 'Pick a placed floor, wall or door with the d-pad and raise it one material';
+    Object.assign(this.upgradeModeButton.style, {
+      display: 'block', width: '100%', marginTop: '6px', background: '#2f6b5a',
+      color: '#effff8', fontWeight: '700',
+    } satisfies Partial<CSSStyleDeclaration>);
+    this.palette.append(heading, this.points, this.deleteModeButton, this.upgradeModeButton, this.empty);
     const palettable = BUILDABLES.filter((candidate) => candidate.availableInPalette !== false);
     for (const category of CATEGORY_ORDER) {
       const members = palettable.filter((candidate) => paletteCategory(candidate) === category);
@@ -349,10 +368,22 @@ export class BuildMenu {
       display: 'none', fontWeight: '700', fontSize: '14px',
       background: '#8b3434', color: '#fff1f1',
     } satisfies Partial<CSSStyleDeclaration>);
+    this.upgradeButton = uiButton('Upgrade', () => this.actions.onUpgradeConfirm?.());
+    this.upgradeButton.dataset['upgradeStructure'] = '';
+    thumbButton(this.upgradeButton, 72, '34px', '18px');
+    Object.assign(this.upgradeButton.style, {
+      display: 'none', fontWeight: '700', fontSize: '13px', background: '#2f6b5a', color: '#effff8',
+    } satisfies Partial<CSSStyleDeclaration>);
+    this.upgradeRoomButton = uiButton('Room', () => this.actions.onUpgradeRoomConfirm?.());
+    this.upgradeRoomButton.dataset['upgradeRoom'] = '';
+    this.upgradeRoomButton.setAttribute('aria-label', 'Upgrade room');
+    this.upgradeRoomButton.title = 'Upgrade every wall and door of this room';
+    thumbButton(this.upgradeRoomButton, 58, '42px', '100px');
+    Object.assign(this.upgradeRoomButton.style, { display: 'none', fontSize: '12px', fontWeight: '700' } satisfies Partial<CSSStyleDeclaration>);
     thumbButton(this.rotateButton, 58, '42px', '100px');
     thumbButton(cancel, 58, '120px', '18px');
     thumbButton(this.undoButton, 58, '120px', '100px');
-    this.buttonCluster.append(this.undoButton, this.rotateButton, cancel, this.placeButton, this.deleteButton);
+    this.buttonCluster.append(this.undoButton, this.rotateButton, cancel, this.placeButton, this.deleteButton, this.upgradeButton, this.upgradeRoomButton);
 
     this.root.append(this.buildButton, this.palette, this.actionBar, this.buttonCluster);
     parent.appendChild(this.root);
@@ -380,7 +411,10 @@ export class BuildMenu {
   /** Tell the scene to drop whatever the previous mode had out in the world. */
   private leaveActiveMode(): void {
     if (this.currentMode === 'placing') this.actions.onPlacingCancelled();
-    else if (this.currentMode === 'deleting') this.actions.onDeletingCancelled();
+    // Upgrade Mode shares the Delete cursor, so leaving either drops it the same way.
+    else if (this.currentMode === 'deleting' || this.currentMode === 'upgrading') this.actions.onDeletingCancelled();
+    this.upgradeButton.style.display = 'none';
+    this.upgradeRoomButton.style.display = 'none';
   }
 
   private openEmbeddedPalette(): void {
@@ -448,8 +482,68 @@ export class BuildMenu {
     this.actions.onStartDeleting();
   }
 
+  /**
+   * Upgrade Mode: Delete mode's furniture with a different commit. The d-pad
+   * hops between parts that have a next material, the readout names the part
+   * and its price as carried over required, and the thumb Upgrade button is
+   * the only thing that spends. "Room" upgrades every wall and door around
+   * the enclosure the lit part belongs to, all or nothing.
+   */
+  enterUpgradeMode(): void {
+    this.shapeSelect.style.display = 'none';
+    this.leaveActiveMode();
+    this.currentMode = 'upgrading';
+    this.placingId = null;
+    if (!this.embedded) this.palette.style.display = 'none';
+    this.buildButton.setAttribute('aria-expanded', 'false');
+    this.actionBar.style.display = 'flex';
+    this.buttonCluster.style.display = 'block';
+    this.quickRow.style.display = 'none';
+    this.markerKind.style.display = 'none';
+    this.rotateButton.style.display = 'none';
+    this.undoButton.style.display = 'none';
+    this.placeButton.style.display = 'none';
+    this.deleteButton.style.display = 'none';
+    this.upgradeButton.style.display = 'block';
+    this.upgradeRoomButton.style.display = 'block';
+    this.actions.onStartUpgrading?.();
+  }
+
+  /** Name the lit part, what it becomes and what that costs; price the room too. */
+  private setUpgradeTarget(building: BuildingState | null): void {
+    if (!building) {
+      this.upgradeButton.disabled = true;
+      this.upgradeRoomButton.disabled = true;
+      this.placingTitle.textContent = 'Nothing to upgrade nearby';
+      this.hint.textContent = 'Floors, walls, doors, fences and gates below metal can be upgraded';
+      this.hint.style.color = '#ffd18a';
+      return;
+    }
+    const def = buildableById(building.definitionId);
+    const target = upgradeTarget(def);
+    const cost = partUpgradeCost(def);
+    const blocked = partUpgradeBlockedReason(this.state, building);
+    this.upgradeButton.disabled = blocked !== null;
+    this.placingTitle.textContent = target && cost
+      ? `${def.displayName} → ${target.displayName} · ${stockedCostText(this.state, cost)}`
+      : def.displayName;
+    const room = roomUpgradeIds(this.state, building);
+    const roomCost = room.length > 1 ? partUpgradeBatchCost(this.state, room) : null;
+    this.upgradeRoomButton.disabled = roomCost === null || !canAffordCost(this.state, roomCost);
+    this.upgradeRoomButton.title = roomCost
+      ? `Upgrade ${room.length} walls and doors · ${stockedCostText(this.state, roomCost)}`
+      : 'Light a wall or door of a closed room to upgrade the whole room';
+    this.hint.textContent = blocked
+      ?? (roomCost ? `Upgrade this part · Room: ${room.length} parts · ${stockedCostText(this.state, roomCost)}` : 'D-pad picks the next part · Upgrade raises it one material');
+    this.hint.style.color = blocked ? '#ffd18a' : '#e8f0ea';
+  }
+
   /** Name the lit structure and what demolishing it hands back. */
   setDeleteTarget(building: BuildingState | null): void {
+    if (this.currentMode === 'upgrading') {
+      this.setUpgradeTarget(building);
+      return;
+    }
     if (this.currentMode !== 'deleting') return;
     this.deleteButton.disabled = building === null;
     if (!building) {
@@ -585,9 +679,11 @@ export class BuildMenu {
     this.shapeSelect.value = 'single';
     // Swapping parts mid-placement must keep its undo history, so only a
     // standing delete cursor is torn down here.
-    if (this.currentMode === 'deleting') this.actions.onDeletingCancelled();
+    if (this.currentMode === 'deleting' || this.currentMode === 'upgrading') this.actions.onDeletingCancelled();
     this.currentMode = 'placing';
     this.deleteButton.style.display = 'none';
+    this.upgradeButton.style.display = 'none';
+    this.upgradeRoomButton.style.display = 'none';
     this.placeButton.style.display = 'block';
     this.undoButton.style.display = 'block';
     if (!this.embedded) this.palette.style.display = 'none';

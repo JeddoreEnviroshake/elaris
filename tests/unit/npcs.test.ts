@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { TILE_SIZE } from '../../src/config/platform';
 import { NPC_DEFINITIONS } from '../../src/content/npcs';
-import { TOWN_BUILDINGS, outsideDoorTile, townBuildingDoorTiles } from '../../src/content/townBuildings';
+import { TOWN_BUILDINGS } from '../../src/content/townBuildings';
+import { shellThreshold, townBuildingShell } from '../../src/content/interiors';
 import { enterWorldArea } from '../../src/simulation/areas';
 import { createInitialState } from '../../src/simulation/state';
-import { isSolidTownTile, positionPlayerOutsideDoor, townBuildingAtPlayerDoor } from '../../src/simulation/town';
+import { townBuildingAroundPlayer } from '../../src/simulation/town';
 import { NpcServiceOverlay } from '../../src/ui/npcServiceOverlay';
 
 describe('town services', () => {
@@ -69,35 +70,36 @@ describe('town services', () => {
     interior.destroy();
   });
 
-  it('detects door entry only in each building’s authored settlement', () => {
+  it('finds the player inside a building only in that building’s own settlement', () => {
     const state = createInitialState(123);
     const market = TOWN_BUILDINGS.find((building) => building.id === 'market')!;
-    state.player.x = (market.door.tileX + 0.5) * TILE_SIZE;
-    state.player.y = (market.door.tileY + 0.5) * TILE_SIZE;
-    expect(townBuildingAtPlayerDoor(state)?.id).toBe('market');
-    const secondDoorTile = townBuildingDoorTiles(market)[1]!;
-    state.player.x = (secondDoorTile.tileX + 0.5) * TILE_SIZE;
-    state.player.y = (secondDoorTile.tileY + 0.5) * TILE_SIZE;
-    expect(townBuildingAtPlayerDoor(state)?.id).toBe('market');
-    expect(isSolidTownTile(secondDoorTile.tileX, secondDoorTile.tileY)).toBe(false);
-    expect(isSolidTownTile(secondDoorTile.tileX + 1, secondDoorTile.tileY)).toBe(true);
+    const inside = (building: typeof market): void => {
+      const threshold = shellThreshold(townBuildingShell(building));
+      state.player.x = Math.round((building.footprint.tileX + threshold.x) * TILE_SIZE);
+      state.player.y = Math.round((building.footprint.tileY + threshold.y) * TILE_SIZE);
+    };
+    inside(market);
+    expect(townBuildingAroundPlayer(state)?.id).toBe('market');
+    // The same spot in another area is open field.
     expect(enterWorldArea(state, 1, 0)).toBe(true);
-    expect(townBuildingAtPlayerDoor(state)).toBeNull();
+    inside(market);
+    expect(townBuildingAroundPlayer(state)).toBeNull();
 
     const farm = TOWN_BUILDINGS.find((building) => building.id === 'farm')!;
-    state.player.x = (farm.door.tileX + 0.5) * TILE_SIZE;
-    state.player.y = (farm.door.tileY + 0.5) * TILE_SIZE;
+    inside(farm);
     expect(state.currentArea.name).toBe('Verdant Reach');
-    expect(townBuildingAtPlayerDoor(state)?.id).toBe('farm');
+    expect(townBuildingAroundPlayer(state)?.id).toBe('farm');
   });
 
-  it('opens the themed interior, wires Market transactions, and leaves outside the door', () => {
+  it('opens the themed service, wires Market transactions, and leaves the player at the counter', () => {
     const state = createInitialState(456);
     state.inventory.wood = 3;
     let changed = 0;
+    let closedFor: string | null = null;
     const market = TOWN_BUILDINGS.find((building) => building.id === 'market')!;
+    const before = { x: state.player.x, y: state.player.y };
     const interior = new NpcServiceOverlay(document.body, state, () => { changed += 1; }, (building) => {
-      positionPlayerOutsideDoor(state, building);
+      closedFor = building.id;
     });
     interior.open(market);
     const dialog = document.querySelector('[role="dialog"]');
@@ -110,10 +112,9 @@ describe('town services', () => {
     expect(state.coins).toBe(6);
     expect(changed).toBe(1);
     interior.close();
-    const outside = outsideDoorTile(market);
-    expect(state.player.x).toBe((outside.tileX + 0.5) * TILE_SIZE);
-    expect(state.player.y).toBe((outside.tileY + 0.5) * TILE_SIZE);
-    expect(townBuildingAtPlayerDoor(state)).toBeNull();
+    // Walk-in shops: closing the panel moves nobody.
+    expect(closedFor).toBe('market');
+    expect(state.player).toMatchObject(before);
     interior.destroy();
   });
 });

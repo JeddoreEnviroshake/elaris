@@ -1,9 +1,9 @@
 import {
   FURNACE_OUTPUT_CAPACITY,
-  FURNACE_QUEUE_CAPACITY,
   IRON_SMELT_INPUTS,
   IRON_SMELT_WORK_MS,
 } from '../config/balance';
+import { furnaceQueueCapacity, furnaceWorkMs } from './facilityLevels';
 import { PLACEABLES } from '../config/areaGates';
 import { buildableById } from '../content/buildingParts';
 import { evaluateFacilityGate } from './environmentProgress';
@@ -51,8 +51,9 @@ export function enqueueIronSmelt(state: GameState, furnaceId: string, quantity =
   const locked = unlockBlockedReason(state, IRON_SMELT_REQUIREMENT);
   if (locked) return { ok: false, message: locked };
   const queue = furnace.furnace!.queue;
-  if (queue.length + quantity > FURNACE_QUEUE_CAPACITY) {
-    return { ok: false, message: `Furnace queue full (${queue.length}/${FURNACE_QUEUE_CAPACITY})` };
+  const capacity = furnaceQueueCapacity(furnace);
+  if (queue.length + quantity > capacity) {
+    return { ok: false, message: `Furnace queue full (${queue.length}/${capacity})` };
   }
   for (const [resource, perBatch] of Object.entries(IRON_SMELT_INPUTS) as Array<[ResourceId, number]>) {
     const required = perBatch * quantity;
@@ -67,7 +68,9 @@ export function enqueueIronSmelt(state: GameState, furnaceId: string, quantity =
   for (let i = 0; i < quantity; i += 1) {
     queue.push({
       recipe: 'iron-ingot',
-      remainingWorkMs: IRON_SMELT_WORK_MS,
+      // Stamped at enqueue from the furnace's level, so the offline settle and
+      // the live tick (both advanceFurnaces) see the same work for each item.
+      remainingWorkMs: furnaceWorkMs(furnace, IRON_SMELT_WORK_MS),
       reservedInputs: { ...IRON_SMELT_INPUTS },
       completedOutput: 0,
       blocked: false,

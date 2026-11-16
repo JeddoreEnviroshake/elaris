@@ -21,8 +21,8 @@ import { siteViewsForArea } from '../presentation/siteViews';
 import { drawSiteMarker } from './mapMarkers';
 
 const MAP_SIZE = 112;
-/** Outer width of the mini map panel: canvas + 5px padding + the 2px elaris-panel border. */
-const PANEL_WIDTH = MAP_SIZE + 14;
+/** Outer width of the woodland mini map: canvas + 8px padding + 1px border. */
+const PANEL_WIDTH = MAP_SIZE + 18;
 
 /**
  * Convert source-pixel world coordinates into the tile coordinates players use

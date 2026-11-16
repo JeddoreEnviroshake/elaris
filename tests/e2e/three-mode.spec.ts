@@ -1,6 +1,6 @@
 import { releaseSaveWriter } from './save';
 import { expect, test } from '@playwright/test';
-import { openApp, waitForDebugHandles } from './app';
+import { openApp, waitForDebugHandles, reloadApp } from './app';
 import { openAdmin, openBuildPalette, grantBlueprints } from './menu';
 import { createInitialState } from '../../src/simulation/state';
 import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
@@ -26,14 +26,14 @@ test('3D roads stay clear and bridges cover the road only over water after a sav
     const globals = globalThis as unknown as { __controller: { prepareCriticalSave: () => void }; __game: { scene: { getScene: (key: string) => { state: GameState } } } };
     Object.assign(globals.__game.scene.getScene('world').state, fixture);
     globals.__controller.prepareCriticalSave();
-    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open('elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('snapshots', 'readwrite'); const store = tx.objectStore('snapshots');
       store.put({ meta: { saveVersion: 88, contentVersion: 66, worldGenVersion: 12, appVersion: 'test', savedAt: Date.now() }, state: fixture }, 'current');
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, state);
-  await page.reload(); await waitForDebugHandles(page);
+  await reloadApp(page); await waitForDebugHandles(page);
   const result = await page.evaluate(() => {
     type Matrix = { elements: number[]; clone: () => Matrix };
     type Mesh = { count: number; getMatrixAt: (index: number, matrix: Matrix) => void };
@@ -253,87 +253,75 @@ test('3D presentation opens and animates the deterministic battle arena', async 
   ).__renderer3d.getSnapshot().battleRoundAnimating)).toBe(true);
 });
 
-test('3D presentation enters the playable Weaponsmith forge explicitly', async ({ page }) => {
+type WalkInDebug = {
+  __game: { scene: { getScene: (key: string) => {
+    state: {
+      player: { x: number; y: number };
+      inventory: { wood: number };
+      tools: Array<{ instanceId: string; definitionId: string; durability: number; maxDurability: number; powerRank: number; speedRank: number; durabilityRank: number }>;
+    };
+    snapRenderPoseToState: () => void;
+    getGameplayMode: () => { kind: string };
+  } } };
+  __renderer3d: { getSnapshot: () => { interiorActive: boolean; interiorId: string | null } };
+};
+
+/** Stand on a building's doorstep, and report which way is "in" on screen. */
+async function standOnDoorstep(page: import('@playwright/test').Page, buildingId: string): Promise<'w' | 's'> {
+  return page.evaluate(async (id) => {
+    const interiors = await import('/src/content/interiors.ts' as string);
+    const town = await import('/src/content/townBuildings.ts' as string);
+    const building = town.townBuildingsInArea('0,0').find((candidate: { id: string }) => candidate.id === id);
+    const shell = interiors.townBuildingShell(building);
+    const step = interiors.shellDoorstep(shell);
+    const scene = (globalThis as unknown as WalkInDebug).__game.scene.getScene('world');
+    scene.state.player.x = Math.round((building.footprint.tileX + step.x) * 16);
+    scene.state.player.y = Math.round((building.footprint.tileY + step.y) * 16);
+    scene.snapRenderPoseToState();
+    return shell.door.side === 'south' ? 'w' : 's';
+  }, buildingId);
+}
+
+const snapshot = (page: import('@playwright/test').Page) => page.evaluate(() =>
+  (globalThis as unknown as WalkInDebug).__renderer3d.getSnapshot());
+
+test('3D presentation walks straight into the Weaponsmith forge and out again', async ({ page }) => {
   test.setTimeout(90_000);
   await openApp(page, 'render=3d');
   await waitForDebugHandles(page);
   await page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => {
-        state: {
-          player: { x: number; y: number };
-          inventory: { wood: number };
-          tools: Array<{ instanceId: string; definitionId: 'wooden-axe'; durability: number; maxDurability: number; powerRank: number; speedRank: number; durabilityRank: number }>;
-        };
-        snapRenderPoseToState: () => void;
-      } } };
-    }).__game;
-    const scene = game.scene.getScene('world');
-    scene.state.player.x = 75.5 * 16;
-    scene.state.player.y = 80.5 * 16;
+    const scene = (globalThis as unknown as WalkInDebug).__game.scene.getScene('world');
     scene.state.inventory.wood = 10;
     scene.state.tools = [{
       instanceId: 'tool-forge-e2e', definitionId: 'wooden-axe', durability: 24, maxDurability: 48,
       powerRank: 0, speedRank: 0, durabilityRank: 0,
     }];
-    scene.snapRenderPoseToState();
   });
+  const inward = await standOnDoorstep(page, 'weaponsmith');
+  expect((await snapshot(page)).interiorActive).toBe(false);
 
-  const enterWeaponsmith = page.getByRole('button', { name: 'Enter Weaponsmith' });
-  await expect(enterWeaponsmith).toBeVisible();
-  await enterWeaponsmith.click();
-  await expect.poll(() => page.evaluate(() => (
-    globalThis as unknown as { __renderer3d: { getSnapshot: () => { interiorActive: boolean; interiorId: string | null } } }
-  ).__renderer3d.getSnapshot())).toMatchObject({ interiorActive: true, interiorId: 'weaponsmith-forge' });
-  await expect(page.getByRole('button', { name: 'Leave the Weaponsmith' })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => { getGameplayMode: () => { kind: string } } } };
-    }).__game;
-    return game.scene.getScene('world').getGameplayMode().kind;
-  })).toBe('interior');
+  // No Enter button and no scene change: the doorway is just walked through.
+  await expect(page.getByRole('button', { name: 'Enter Weaponsmith' })).toHaveCount(0);
+  await page.keyboard.down(inward);
+  try {
+    await expect.poll(() => snapshot(page), { timeout: 15_000 })
+      .toMatchObject({ interiorActive: true, interiorId: 'weaponsmith-forge' });
+  } finally {
+    await page.keyboard.up(inward);
+  }
+  await expect.poll(() => page.evaluate(() =>
+    (globalThis as unknown as WalkInDebug).__game.scene.getScene('world').getGameplayMode().kind)).toBe('world');
 
-  await page.keyboard.down('d');
-  try {
-    await expect.poll(() => page.evaluate(() => {
-      const game = (globalThis as unknown as {
-        __game: { scene: { getScene: (key: string) => { get3DPresentationState: () => { interior: { pose: { x: number } } | null } } } };
-      }).__game;
-      return game.scene.getScene('world').get3DPresentationState().interior?.pose.x ?? 0;
-    }), {timeout:15_000}).toBeGreaterThan(7.25);
-  } finally {
-    await page.keyboard.up('d');
-  }
-  await expect.poll(() => page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => { getGameplayMode: () => { kind: string } } } };
-    }).__game;
-    return game.scene.getScene('world').getGameplayMode().kind;
-  })).toBe('interior');
-  await page.keyboard.down('w');
-  try {
-    await expect.poll(() => page.evaluate(() => {
-      const game = (globalThis as unknown as {
-        __game: { scene: { getScene: (key: string) => { get3DPresentationState: () => { interior: { pose: { y: number } } | null } } } };
-      }).__game;
-      return game.scene.getScene('world').get3DPresentationState().interior?.pose.y ?? 99;
-    }), {timeout:15_000}).toBeLessThan(5.9);
-  } finally {
-    await page.keyboard.up('w');
-  }
-  // Slow combined runs can let a held key travel past the interaction radius
-  // between polling samples. Nudge back into Mara's authored service hotspot.
-  for (let attempt = 0; attempt < 16; attempt += 1) {
-    const pose = await page.evaluate(() => {
-      const game = (globalThis as unknown as {
-        __game: { scene: { getScene: (key: string) => { get3DPresentationState: () => { interior: { pose: { x: number; y: number } } | null } } } };
-      }).__game;
-      return game.scene.getScene('world').get3DPresentationState().interior!.pose;
-    });
-    const key = pose.x > 8 ? 'a' : pose.x < 7 ? 'd' : pose.y > 6 ? 'w' : pose.y < 5 ? 's' : null;
-    if (!key) break;
+  // Walk up to Mara's counter.
+  const target = { x: 75.6 * 16, y: 77.4 * 16 };
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (await page.getByRole('button', { name: 'Talk to Mara' }).isVisible()) break;
+    const pose = await page.evaluate(() => (globalThis as unknown as WalkInDebug).__game.scene.getScene('world').state.player);
+    const dx = target.x - pose.x;
+    const dy = target.y - pose.y;
+    const key = Math.abs(dy) >= Math.abs(dx) ? dy < 0 ? 'w' : 's' : dx < 0 ? 'a' : 'd';
     await page.keyboard.down(key);
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(120);
     await page.keyboard.up(key);
   }
   await expect(page.getByRole('button', { name: 'Talk to Mara' })).toBeVisible();
@@ -349,69 +337,48 @@ test('3D presentation enters the playable Weaponsmith forge explicitly', async (
   await expect(service).toBeVisible();
   await service.getByRole('button', { name: 'Repair Wooden Axe' }).click();
   await expect(service.locator('[aria-live="polite"]')).toHaveText(/Repaired \d+ durability to full/);
-  await expect.poll(() => page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => { state: { tools: Array<{instanceId: string; durability: number}> } } } };
-    }).__game;
-    return game.scene.getScene('world').state.tools.find((tool) => tool.instanceId === 'tool-forge-e2e')?.durability;
-  })).toBe(48);
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as WalkInDebug).__game.scene.getScene('world')
+    .state.tools.find((tool) => tool.instanceId === 'tool-forge-e2e')?.durability)).toBe(48);
   await service.getByRole('button', { name: "Return to Mara's Forge" }).click();
   await expect(service).toBeHidden();
+  // Closing the panel leaves the player standing at the counter, indoors.
+  expect((await snapshot(page)).interiorActive).toBe(true);
 
-  const beforeTouchMove = await page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => { get3DPresentationState: () => { interior: { pose: { x: number; y: number } } | null } } } };
-    }).__game;
-    return game.scene.getScene('world').get3DPresentationState().interior!.pose;
-  });
-  await page.mouse.move(68, 650);
-  await page.mouse.down();
-  await page.mouse.move(112, 650, { steps: 6 });
-  await page.waitForTimeout(450);
-  await page.mouse.up();
-  await expect.poll(() => page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => { get3DPresentationState: () => { interior: { pose: { x: number; y: number } } | null } } } };
-    }).__game;
-    return game.scene.getScene('world').get3DPresentationState().interior!.pose.x;
-  })).toBeGreaterThan(beforeTouchMove.x);
+  const outward = inward === 'w' ? 's' : 'w';
+  await page.keyboard.down(outward);
+  try {
+    await expect.poll(async () => (await snapshot(page)).interiorActive, { timeout: 15_000 }).toBe(false);
+  } finally {
+    await page.keyboard.up(outward);
+  }
 });
 
-test('3D presentation opens every remaining Elaris interior as a playable room', async ({ page }) => {
+test('3D presentation walks into and out of every other Elaris building', async ({ page }) => {
+  test.setTimeout(120_000);
   await openApp(page, 'render=3d');
   await waitForDebugHandles(page);
   const rooms = [
-    { building: 'Church', interiorId: 'elaris-church', x: 64.5, y: 80.5, leave: 'Leave the Church' },
-    { building: 'Armoury', interiorId: 'elaris-armoury', x: 94.5, y: 80.5, leave: 'Leave the Armoury' },
-    { building: 'Market', interiorId: 'elaris-market', x: 79.5, y: 85.5, leave: 'Leave the Market' },
-    { building: 'Tavern', interiorId: 'elaris-tavern', x: 90.5, y: 85.5, leave: 'Leave the Tavern' },
-    { building: 'Arena', interiorId: 'elaris-arena', x: 72.5, y: 93.5, leave: 'Leave the Arena' },
+    { id: 'church', interiorId: 'elaris-church' },
+    { id: 'armoury', interiorId: 'elaris-armoury' },
+    { id: 'market', interiorId: 'elaris-market' },
+    { id: 'tavern', interiorId: 'elaris-tavern' },
+    { id: 'arena', interiorId: 'elaris-arena' },
   ] as const;
 
   for (const room of rooms) {
-    await page.evaluate(({ x, y }) => {
-      const game = (globalThis as unknown as {
-        __game: { scene: { getScene: (key: string) => {
-          state: { player: { x: number; y: number } };
-          snapRenderPoseToState: () => void;
-        } } };
-      }).__game;
-      const scene = game.scene.getScene('world');
-      scene.state.player.x = x * 16;
-      scene.state.player.y = y * 16;
-      scene.snapRenderPoseToState();
-    }, room);
-    const enter = page.getByRole('button', { name: `Enter ${room.building}` });
-    await expect(enter).toBeVisible();
-    await enter.click();
-    await expect.poll(() => page.evaluate(() => (
-      globalThis as unknown as { __renderer3d: { getSnapshot: () => { interiorId: string | null } } }
-    ).__renderer3d.getSnapshot().interiorId)).toBe(room.interiorId);
-    const leave = page.getByRole('button', { name: room.leave });
-    await expect(leave).toBeVisible();
-    await leave.click();
-    await expect.poll(() => page.evaluate(() => (
-      globalThis as unknown as { __renderer3d: { getSnapshot: () => { interiorActive: boolean } } }
-    ).__renderer3d.getSnapshot().interiorActive)).toBe(false);
+    const inward = await standOnDoorstep(page, room.id);
+    await page.keyboard.down(inward);
+    try {
+      await expect.poll(async () => (await snapshot(page)).interiorId, { timeout: 15_000 }).toBe(room.interiorId);
+    } finally {
+      await page.keyboard.up(inward);
+    }
+    const outward = inward === 'w' ? 's' : 'w';
+    await page.keyboard.down(outward);
+    try {
+      await expect.poll(async () => (await snapshot(page)).interiorActive, { timeout: 15_000 }).toBe(false);
+    } finally {
+      await page.keyboard.up(outward);
+    }
   }
 });

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readySupplyRun } from '../helpers/openingJourney';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { inventoryCapacity } from '../../src/simulation/characterProgression';
@@ -24,7 +24,7 @@ async function loadFixture(page: Page, fullBag = false) {
   await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('snapshots', 'readwrite'); const store = tx.objectStore('snapshots'); const request = store.get('current');
@@ -32,7 +32,7 @@ async function loadFixture(page: Page, fullBag = false) {
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Supply run guide', exact: true })).toBeVisible();
   return state;
 }
@@ -59,7 +59,7 @@ test('3D supply run walks to the cart, practises guard, retreats and saves one d
   for (let turn = 0; turn < 2; turn++) { await expect(rest).toBeEnabled(); await rest.click(); }
   const before = await saved(page);
   expect(before.activeEncounter!.companionCreatureId).toBe(initial.onboarding.companionId);
-  await page.reload();
+  await reloadApp(page);
   await expect(arena).toBeVisible();
   expect((await saved(page)).activeEncounter!.round).toBeGreaterThanOrEqual(before.activeEncounter!.round);
   for (let turn = 0; turn < 9 && (await saved(page)).onboarding.supplyRun!.guardedDamage === 0; turn++) { await expect(rest).toBeEnabled(); await rest.click(); }
@@ -78,7 +78,7 @@ test('3D supply run walks to the cart, practises guard, retreats and saves one d
   await expect(page.getByLabel('Supply run route', { exact: true })).toContainText('public workbench at X 84, Y 83');
   await expect(page.getByRole('button', { name: 'Discovery collected', exact: true })).toBeDisabled();
   await page.screenshot({ path: `tmp/supply-run-discovery-${testInfo.project.name}.png` });
-  await page.reload(); await openMenuTab(page, 'Supply Run');
+  await reloadApp(page); await openMenuTab(page, 'Supply Run');
   expect((await saved(page)).carriedBlueprints).toEqual(recovered.carriedBlueprints);
   expect((await saved(page)).onboarding.supplyRun!.guardedDamage).toBe(recovered.onboarding.supplyRun!.guardedDamage);
   expect(errors).toEqual([]);
@@ -91,7 +91,7 @@ test('3D supply discovery waits through a full bag and reload until a real space
   await expect.poll(async () => (await saved(page)).onboarding.supplyRun!.suppliesRecovered).toBe(true);
   expect((await saved(page)).onboarding.supplyRun!.blueprintClaimed).toBe(false);
   expect((await saved(page)).carriedBlueprints).toHaveLength(0);
-  await page.reload(); await openMenuTab(page, 'Supply Run');
+  await reloadApp(page); await openMenuTab(page, 'Supply Run');
   await expect(page.getByRole('tabpanel', { name: 'Supply Run', exact: true })).toContainText('waiting safely');
   await openMenuTab(page, 'Bag');
   await page.getByRole('button', { name: /^Wood stack,/ }).first().click();

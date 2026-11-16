@@ -14,6 +14,6 @@ test('Garden Bed stays hidden until discovered, then shows its materials', async
   const blueprint = blueprintTile(page, 'Garden Bed');
   await expect(blueprint).toHaveAccessibleName(/known, made at/);
   await blueprint.click();
-  await expect(page.getByLabel('Blueprints', { exact: true })).toContainText('0/4 wood + 0/2 fiber');
+  await expect(page.getByRole('tabpanel', { name: 'Blueprints', exact: true })).toContainText('0/4 wood + 0/2 fiber');
   await expect(page.getByRole('button', { name: /^Unlock / })).toHaveCount(0);
 });

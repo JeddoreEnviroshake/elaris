@@ -1,3 +1,4 @@
+import { reloadApp } from './app';
 import { expect, test, type Page } from '@playwright/test';
 import { openAppInStarterGrove } from './gather';
 import { readSavedState } from './save';
@@ -85,7 +86,7 @@ test('first person turns with a drag and walks along the look direction', async 
 
   // The view mode is a per-device preference that survives a reload, and the
   // toggle puts the overhead view back.
-  await page.reload();
+  await reloadApp(page);
   await expect(page.locator('[data-first-person-crosshair]')).toBeVisible();
   await page.getByRole('button', { name: 'First person' }).click();
   await expect(page.locator('[data-first-person-crosshair]')).toBeHidden();

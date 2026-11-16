@@ -1,6 +1,6 @@
 import { releaseSaveWriter } from './save';
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { tapCanvasCenter } from './interact';
 
 /**
@@ -19,7 +19,7 @@ test('clicking an in-range workbench opens its recipe panel', async ({ page }) =
   await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -55,7 +55,7 @@ test('clicking an in-range workbench opens its recipe panel', async ({ page }) =
       transaction.onerror = () => reject(transaction.error);
     });
   });
-  await page.reload();
+  await reloadApp(page);
 
   await page.getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('tab', { name: 'Craft', exact: true }).click();
@@ -76,6 +76,6 @@ test('clicking an in-range workbench opens its recipe panel', async ({ page }) =
   await ironAxe.click();
   // A quest finished by this craft now announces itself on its own banner, so
   // the shared status line keeps the craft confirmation.
-  await expect(page.locator('[role="status"][aria-live="polite"]'))
-    .toHaveText('Crafted and equipped Iron Axe');
+  await expect(page.getByRole('status').filter({ hasText: 'Crafted and equipped Iron Axe' }))
+    .toBeVisible();
 });

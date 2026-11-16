@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createInitialState, createWorkerHousingState } from '../../src/simulation/state';
 import { enclosedEnvironment } from '../unit/helpers/buildings';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { tapWorld } from './interact';
 import { releaseSaveWriter, expectSavedState } from './save';
 
@@ -29,7 +29,7 @@ test('orders, houses, works, and collects a Tuftle through the 3D facility flow'
   await releaseSaveWriter(page);
   await page.evaluate(async (fixtureState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -46,7 +46,7 @@ test('orders, houses, works, and collects a Tuftle through the 3D facility flow'
       transaction.onerror = () => reject(transaction.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
 
   await tapWorld(page, { x: 81 * 16, y: 80.5 * 16 }, state.player);

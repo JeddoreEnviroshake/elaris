@@ -6,6 +6,6 @@ import { buildInfo } from '../platform/buildInfo';
  * change in a way that affects saved references.
  */
 export const WORLD_GEN_VERSION = 13;
-export const CONTENT_VERSION = 68;
-export const SAVE_SCHEMA_VERSION = 90;
+export const CONTENT_VERSION = 69;
+export const SAVE_SCHEMA_VERSION = 91;
 export const APP_VERSION = buildInfo.commit;

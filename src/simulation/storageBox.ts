@@ -1,4 +1,5 @@
-import { RESOURCE_STACK_SIZE, STORAGE_BOX_SLOTS, WAREHOUSE_SLOTS } from '../config/balance';
+import { RESOURCE_STACK_SIZE } from '../config/balance';
+import { storageSlotsForLevel } from './facilityLevels';
 import type {
   BuildingState, CarriedBlueprint, InventoryStackState, InventoryState, ResourceId, ToolInstance,
 } from './state';
@@ -27,8 +28,9 @@ export function isStorageContainer(box: BuildingState): boolean {
   return box.definitionId === 'field-cache' || box.definitionId === 'warehouse';
 }
 
+/** Slots at this container's level: 6/9/12 for a Storage Box, 24/32/40 for a Warehouse. */
 export function storageContainerSlots(box: BuildingState): number {
-  return box.definitionId === 'warehouse' ? WAREHOUSE_SLOTS : STORAGE_BOX_SLOTS;
+  return storageSlotsForLevel(box);
 }
 
 /** Normalize legacy cache data in place and return its complete inventory model. */

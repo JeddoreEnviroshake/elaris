@@ -18,6 +18,7 @@ import { hasElarisFallen } from './elarisFall';
 import { isElarisTownSafeZone, isPlayerInsideTownBuilding } from './town';
 import { isWithinPermanentPurifierWorldPosition } from '../content/townDefences';
 import { reconcileResourceStacks } from './inventoryStacks';
+import { purifierRadiusTiles } from './facilityLevels';
 import type {
   AreaSnapshot,
   BuildingState,
@@ -487,8 +488,10 @@ export function airPurifierProtectedCells(buildings: readonly BuildingState[]): 
       continue;
     }
 
-    for (let dy = -OUTDOOR_PURIFIER_RADIUS_TILES; dy <= OUTDOOR_PURIFIER_RADIUS_TILES; dy += 1) {
-      for (let dx = -OUTDOOR_PURIFIER_RADIUS_TILES; dx <= OUTDOOR_PURIFIER_RADIUS_TILES; dx += 1) {
+    // Level 1 is OUTDOOR_PURIFIER_RADIUS_TILES; higher levels reach further.
+    const radius = Math.max(OUTDOOR_PURIFIER_RADIUS_TILES, purifierRadiusTiles(purifier));
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
         const tileX = purifier.tileX + dx;
         const tileY = purifier.tileY + dy;
         if (tileX < 0 || tileY < 0 || tileX >= WORLD_TILES || tileY >= WORLD_TILES) continue;

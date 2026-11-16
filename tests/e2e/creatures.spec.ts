@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openApp } from './app';
+import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter } from './save';
 import { createInitialState, type GameState, type SpeciesId } from '../../src/simulation/state';
@@ -29,7 +29,7 @@ async function seedEncounter(page: Page, species: SpeciesId, companion = false, 
   await releaseSaveWriter(page);
   await page.evaluate(async (fixture: GameState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('elaris:default', 1);
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
     await new Promise<void>((resolve, reject) => {
@@ -39,7 +39,7 @@ async function seedEncounter(page: Page, species: SpeciesId, companion = false, 
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   }, state);
-  await page.reload();
+  await reloadApp(page);
   await page.getByRole('button', { name: 'Throw snare at creature' }).click();
   await expect(page.getByRole('dialog', { name: 'Wild creature encounter' })).toBeVisible();
 }
@@ -81,7 +81,7 @@ test('tames a weakened Tuftle, assigns Follow and Battle Companion, and restores
   await expect(page.getByRole('button', { name: 'Clear Battle Companion' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: /Select Tuftle, Tuftle, currently follow/ })).toBeVisible();
   await releaseSaveWriter(page);
-  await page.reload();
+  await reloadApp(page);
   await openMenuTab(page, 'Creatures');
   await expect(page.getByRole('button', { name: /Select Tuftle, Tuftle, currently follow/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Clear Battle Companion' })).toHaveAttribute('aria-pressed', 'true');

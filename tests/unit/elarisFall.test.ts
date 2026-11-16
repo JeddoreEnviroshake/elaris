@@ -13,19 +13,21 @@ import {
 import { createInitialState } from '../../src/simulation/state';
 import {
   isElarisTownSafeZone,
-  nearestTownBuildingDoor,
   resolveTownMovement,
-  townBuildingAtPlayerDoor,
+  townBuildingAroundPlayer,
 } from '../../src/simulation/town';
+import { shellThreshold, townBuildingShell } from '../../src/content/interiors';
 import { isPlayerEnclosed, isPlayerSheltered, respawnDestinations } from '../../src/simulation/survivalCycle';
 import type { GameState } from '../../src/simulation/state';
 
 const center = (tile: number): number => (tile + 0.5) * TILE_SIZE;
 
-function placeAtDoor(state: GameState, areaKey: string, id: string): void {
+/** Stand just inside a building's doorway, where a visitor who walked in arrives. */
+function placeInside(state: GameState, areaKey: string, id: string): void {
   const building = townBuildingsInArea(areaKey).find((candidate) => candidate.id === id)!;
-  state.player.x = center(building.door.tileX);
-  state.player.y = center(building.door.tileY);
+  const threshold = shellThreshold(townBuildingShell(building));
+  state.player.x = Math.round((building.footprint.tileX + threshold.x) * TILE_SIZE);
+  state.player.y = Math.round((building.footprint.tileY + threshold.y) * TILE_SIZE);
 }
 
 function stateAtLevel(level: number): GameState {
@@ -73,17 +75,16 @@ describe('the fall of Elaris', () => {
     expect(resolveTownMovement(fallen, from.x, from.y, to.x, to.y).x).toBe(to.x);
   });
 
-  it('closes every Elaris door and leaves the field copies open', () => {
+  it('empties every Elaris building and leaves the field copies kept', () => {
     const standing = stateAtLevel(ELARIS_LAST_SAFE_LEVEL);
-    placeAtDoor(standing, '0,0', 'arena');
-    expect(townBuildingAtPlayerDoor(standing)?.id).toBe('arena');
-    expect(nearestTownBuildingDoor(standing)?.id).toBe('arena');
+    placeInside(standing, '0,0', 'arena');
+    expect(townBuildingAroundPlayer(standing)?.id).toBe('arena');
     expect(ruinedTownBuildings(standing)).toEqual([]);
 
+    // A ruin's walls still stand around the visitor, but nobody keeps it.
     const fallen = stateAtLevel(ELARIS_LAST_SAFE_LEVEL + 1);
-    placeAtDoor(fallen, '0,0', 'arena');
-    expect(townBuildingAtPlayerDoor(fallen)).toBeNull();
-    expect(nearestTownBuildingDoor(fallen)).toBeNull();
+    placeInside(fallen, '0,0', 'arena');
+    expect(townBuildingAroundPlayer(fallen)).toBeNull();
     expect(servingTownBuildings(fallen)).toEqual([]);
     expect(ruinedTownBuildings(fallen).map((building) => building.id).sort()).toEqual(
       ['arena', 'armoury', 'church', 'market', 'tavern', 'weaponsmith'],
@@ -91,8 +92,8 @@ describe('the fall of Elaris', () => {
 
     // The arena the player must travel to instead.
     expect(enterWorldArea(fallen, -2, -2)).toBe(true);
-    placeAtDoor(fallen, '-2,-2', 'arena');
-    expect(townBuildingAtPlayerDoor(fallen)?.id).toBe('arena');
+    placeInside(fallen, '-2,-2', 'arena');
+    expect(townBuildingAroundPlayer(fallen)?.id).toBe('arena');
     expect(servingTownBuildings(fallen).map((building) => building.id)).toEqual(['arena']);
   });
 

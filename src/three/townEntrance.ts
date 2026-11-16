@@ -8,6 +8,8 @@ import type { ModelAssetKey } from './assetRegistry';
 import { ModelLibrary, type ModelPlacement } from './modelLibrary';
 import { isInsideBufferedFootprint, type EnvironmentFootprint } from './environmentComposition';
 import { addRoofUnderside } from './buildingUndersides';
+import { townBuildingShell } from '../content/interiors';
+import { settlementModules } from './quaterniusArt';
 
 // The legacy hash's last XOR returns a signed 32-bit value. Normalize locally
 // without changing existing world generation or save compatibility.
@@ -257,10 +259,16 @@ export class TownEntrance {
     this.root.add(beam);
   }
 
-  /** Quaternius modular shell fitted inside the original 7x6 forge footprint. */
+  /**
+   * Quaternius modular forge on the shared walk-in shell: the walls stand on
+   * the same lines the simulation collides with, and the doorway is the one
+   * the player walks through. The leaf itself is hung by the renderer so it
+   * can swing.
+   */
   async buildForge(group: THREE.Group, building: TownBuildingDefinition, ruined: boolean): Promise<THREE.Material[]> {
     if (ruined) group.scale.y = .62;
-    const width = 6.1, depth = 4.6, wallHeight = 2.4;
+    const shell = townBuildingShell(building);
+    const width = shell.right - shell.left, depth = shell.bottom - shell.top, wallHeight = 2.4;
     const jobs: Promise<THREE.Group>[] = [];
     const modules = new Map<string, {key:ModelAssetKey;height:number|undefined;fit:{width:number;depth?:number}|undefined;placements:ModelPlacement[]}>();
     const add = (key: ModelAssetKey,x:number,y:number,z:number,height?:number,rotation=0,fit?:{width:number;depth?:number}) => {
@@ -268,31 +276,28 @@ export class TownEntrance {
       const batch = modules.get(id) ?? {key,height,fit,placements:[]};
       batch.placements.push({x,y,z,rotation}); modules.set(id,batch);
     };
-    for (const side of [-1,1]) {
-      for (let i=0;i<4;i++) {
-        const x = -width / 2 + (i+.5)*width/4;
-        const key: ModelAssetKey = side === 1 && i === 2 ? 'entrance.wall-door'
-          : i === 0 || i === 3 ? 'entrance.wall-window' : 'entrance.wall';
-        add(key,x,0,side*depth/2,wallHeight,side===1?0:Math.PI,{width:width/4});
-        if (key==='entrance.wall-window') add('entrance.shutters',x,.78,side*(depth/2+.12),1.12,side===1?0:Math.PI);
-      }
-      for(let i=0;i<3;i++) add('entrance.wall',side*width/2,0,-depth/2+(i+.5)*depth/3,wallHeight,
-        side===1?Math.PI/2:-Math.PI/2,{width:depth/3});
+    for (const piece of settlementModules(building)) {
+      if (piece.key === 'entrance.roof' || piece.key === 'town.lantern') continue;
+      add(piece.key, piece.x, piece.y, piece.z, piece.height, piece.rotation ?? 0,
+        piece.width === undefined ? undefined : {width: piece.width});
     }
-    add('entrance.door',width/8,.015,depth/2+.04,1.64);
-    add('entrance.roof',0,wallHeight-.05,0,2.1,0,{width:width+.65,depth:depth+.7});
-    const lining = addRoofUnderside(group, width + .63, depth + .68, wallHeight - .06);
-    add('entrance.chimney',1.9,2.65,-.75,2.8);
+    let lining: THREE.Group | null = null;
+    if (!ruined) {
+      add('entrance.roof',0,wallHeight-.05,0,2.1,0,{width:width+.65,depth:depth+.7});
+      lining = addRoofUnderside(group, width + .63, depth + .68, wallHeight - .06);
+      add('entrance.chimney',1.9,2.65,-.75,2.8);
+    }
     add('entrance.vine',-width/2-.08,.3,.55,1.7,-Math.PI/2);
-    add('entrance.crate',-2.5,0,2.48,.52);
-    add('entrance.crate',-2.45,.52,2.48,.4,.25);
+    add('entrance.crate',-2.5,0,depth/2+.33,.52);
+    add('entrance.crate',-2.45,.52,depth/2+.33,.4,.25);
     add('entrance.wagon',-1.45,0,-depth/2-.7,.95,Math.PI/2);
-    add('survival.workbench-anvil',-1.45,0,depth/2+.15,.9,-.15);
     add('town.blade-sign',-1.8,1.65,depth/2+.22,1,Math.PI/2);
-    add('town.lantern',width/8+.72,1.62,depth/2+.25,.6);
+    const doorAlong = shell.door.along - shell.tilesWide / 2;
+    add('town.lantern',doorAlong+1.05,1.62,depth/2+.25,.6);
+    // The foundation's top is flush with the room floor.
     const foundation = new THREE.Mesh(new THREE.BoxGeometry(width+.14,.18,depth+.14),
       new THREE.MeshStandardMaterial({color:0x68675a,roughness:1}));
-    foundation.position.y=-.02; foundation.receiveShadow=true; group.add(foundation);
+    foundation.position.y=-.07; foundation.receiveShadow=true; group.add(foundation);
     // A shallow forge opening with emissive coals adds depth without a shadow light.
     const recess = new THREE.Mesh(new THREE.BoxGeometry(.85,.78,.12), new THREE.MeshStandardMaterial({color:0x231d18,roughness:1}));
     recess.position.set(-1.6,.7,depth/2+.13); group.add(recess);
@@ -316,7 +321,7 @@ export class TownEntrance {
     }
     const models = await Promise.allSettled(jobs);
     const materials = new Set<THREE.Material>();
-    lining.traverse(child => { if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) materials.add(child.material); });
+    lining?.traverse(child => { if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) materials.add(child.material); });
     for (const result of models) {
       if(result.status==='rejected') { console.warn('[3d] Unable to load forge module', result.reason); continue; }
       result.value.traverse(child=>{

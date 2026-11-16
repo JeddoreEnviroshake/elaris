@@ -31,7 +31,7 @@ import {
   tamingChanceBonusBps,
   xpToNextLevel,
 } from '../simulation/characterProgression';
-import type { AttributeId, BasicResourceId, BuildingDefinitionId, BuildingState, CompanionAbilityId, CreatureRole, GameState, GroundDropState, ResourceId, ResourceNodeState, ToolDefinitionId, WildCreatureState } from '../simulation/state';
+import type { AttributeId, BasicResourceId, BuildingDefinitionId, BuildingState, CompanionAbilityId, CreatureRole, GameState, GroundDropState, ResourceId, ResourceNodeState, ToolDefinitionId, ToolInstance, WildCreatureState } from '../simulation/state';
 import { buildableById, type ResourceAmounts } from '../content/buildingParts';
 import { canAffordCost, stockedCostText, useCostLabel } from './costs';
 import { RAIL_BOTTOMS, div, paletteCard, paletteSection, railButton, uiButton, wireDisclosure } from './controls';
@@ -49,6 +49,10 @@ import { availableHousing, housingBinCapacity, housingBinCount, housingCapacityF
 import { cartDockStorageCandidates } from '../simulation/cartDocks';
 import { inventorySlotEntries, storageBoxSlotEntries, type SlotEntry } from './inventorySlots';
 import { storageContainerSlots, usedStorageBoxSlots } from '../simulation/storageBox';
+import { facilityLevel, facilityUpgradeBlockedReason, facilityUpgradeCost, furnaceQueueCapacity } from '../simulation/facilityLevels';
+import { FACILITY_LEVEL_EFFECTS, MAX_FACILITY_LEVEL, isLeveledFacilityId } from '../content/facilityLevels';
+import { scrapToolBlockedReason, temperCost, temperToolBlockedReason, toolScrapValue, toolUpgradeRank } from '../simulation/economy';
+import type { ToolUpgradeAxis } from '../content/economy';
 import { logisticsRouteLabel, logisticsStorageCandidates, logisticsWorkerCandidates } from '../simulation/logistics';
 import { setUiIcon } from './icons';
 import {characterPortrait} from './portraits';
@@ -89,6 +93,8 @@ const FACILITY_RECIPES: Partial<Record<BuildingDefinitionId, readonly ToolDefini
   // Defence facilities expose no tool recipes; they own their own panel modes.
   'war-table': [],
   turret: [],
+  // Opens only to show and buy its level.
+  'air-purifier': [],
 };
 
 /** Arrows moved per Load/Unload press, so a full turret takes a few taps. */
@@ -235,6 +241,12 @@ export interface GameplayHudActions {
   onSpendAttribute: (attribute: AttributeId) => void;
   onApplyAttributes?: (allocation: Readonly<Partial<Record<AttributeId, number>>>) => void;
   onLoadTurretAmmo?: (turretId: string, amount: number) => void;
+  /** Raise a facility one level with salvage. */
+  onUpgradeFacility?: (buildingId: string) => void;
+  /** Temper one axis of a tool at your own Workbench. */
+  onTemperTool?: (toolId: string, axis: ToolUpgradeAxis) => void;
+  /** Break a tool down for Scrap Iron at your own Workbench (already confirmed). */
+  onScrapTool?: (toolId: string) => void;
   onUnloadTurretAmmo?: (turretId: string, amount: number) => void;
   /** Pay out a finished quest; returns false when the credit was refused. */
   onClaimQuestReward: (questId: string) => boolean;
@@ -286,6 +298,10 @@ export class GameplayHud {
   private actionHeld = false;
   private contextActionOverride: { label: string; hint: string } | null = null;
   private readonly facilityPanel: HTMLDivElement;
+  /** Level line and Upgrade button, plus the Workbench's Temper section. */
+  private readonly facilityLevelSection: HTMLDivElement;
+  /** The tool whose Scrap button is waiting for its confirming second press. */
+  private scrapConfirmToolId: string | null = null;
   private readonly facilityHeading: HTMLElement;
   private readonly facilityRecipes: HTMLDivElement;
   private readonly facilityStorage: HTMLDivElement;
@@ -1020,8 +1036,10 @@ export class GameplayHud {
       this.facilityLoadAmmoButton,
       this.facilityUnloadAmmoButton,
     );
+    this.facilityLevelSection = div({ display: 'none' });
+    this.facilityLevelSection.dataset.facilityLevel = '';
     this.facilityPanel.append(
-      facilityHeader, this.facilityRecipes, this.facilityStorage, this.facilityFurnace,
+      facilityHeader, this.facilityLevelSection, this.facilityRecipes, this.facilityStorage, this.facilityFurnace,
       this.facilityFarm, this.facilityHousing, this.facilityWorker, this.facilityDefence,
     );
 
@@ -1337,7 +1355,7 @@ export class GameplayHud {
     // Collapsed to nothing, including the flex gap it would otherwise still
     // claim, so a hidden bar costs no space at all.
     bar.style.maxHeight = hidden ? '0px' : '34px';
-    bar.style.marginTop = hidden ? '-7px' : '0px';
+    bar.style.marginTop = hidden ? 'calc(-1 * var(--hud-stack-gap, 7px))' : '0px';
     bar.style.paddingTop = hidden ? '0px' : '5px';
     bar.style.paddingBottom = hidden ? '0px' : '5px';
     bar.style.borderWidth = hidden ? '0px' : '1px';
@@ -1514,6 +1532,7 @@ export class GameplayHud {
   openFacility(building: BuildingState): void {
     if (!FACILITY_RECIPES[building.definitionId]) return;
     this.currentFacility = building;
+    this.scrapConfirmToolId = null;
     this.facilityHeading.textContent = buildableById(building.definitionId).displayName;
     this.menu?.close();
     this.facilityPanel.style.display = 'block';
@@ -1532,6 +1551,7 @@ export class GameplayHud {
   }
 
   private refreshFacilityPanel(): void {
+    this.refreshFacilityLevel();
     this.refreshFacilityRecipes();
     const cache = this.currentFacility && (this.currentFacility.definitionId === 'field-cache' || this.currentFacility.definitionId === 'warehouse')
       ? this.currentFacility : null;
@@ -1545,7 +1565,8 @@ export class GameplayHud {
       ? this.currentFacility : null;
     const logisticsHub = this.currentFacility?.definitionId === 'logistics-hub' ? this.currentFacility : null;
     const defence = turret ?? warTable;
-    this.facilityRecipes.style.display = cache || furnace || farmCounter || housing || workerFacility || logisticsHub || defence ? 'none' : 'block';
+    const purifier = this.currentFacility?.definitionId === 'air-purifier';
+    this.facilityRecipes.style.display = cache || furnace || farmCounter || housing || workerFacility || logisticsHub || defence || purifier ? 'none' : 'block';
     this.facilityStorage.style.display = cache ? 'block' : 'none';
     this.facilityFurnace.style.display = furnace ? 'block' : 'none';
     this.facilityDefence.style.display = defence ? 'block' : 'none';
@@ -1938,12 +1959,12 @@ export class GameplayHud {
       : active?.blocked
         ? `Output full · ${completed} ready · collect to resume`
         : active
-          ? `${completed} ready · ${active.remainingWorkMs} ms remaining · queue ${queue.length}/4`
+          ? `${completed} ready · ${active.remainingWorkMs} ms remaining · queue ${queue.length}/${furnace ? furnaceQueueCapacity(furnace) : 4}`
           : completed > 0 ? `${completed} iron ingot ready` : 'Queue empty';
     // Priced like a recipe card: the inputs were invisible before, so a full
     // bag of nothing looked like a furnace that simply refused to work.
     smeltButton.textContent = `Smelt iron ingot (${this.costLabel(IRON_SMELT_INPUTS)})`;
-    smeltButton.disabled = !furnace || queue.length >= 4 || !this.canAfford(IRON_SMELT_INPUTS);
+    smeltButton.disabled = !furnace || queue.length >= furnaceQueueCapacity(furnace) || !this.canAfford(IRON_SMELT_INPUTS);
     collectButton.disabled = !furnace || completed <= 0;
   }
 
@@ -2467,6 +2488,89 @@ export class GameplayHud {
         this.resourceFlashTimer = null;
       }, 170);
     }, 950);
+  }
+
+  /**
+   * Level line and Upgrade button for a levelled facility; at your own
+   * Workbench, also the Temper section (each tool by axis, priced in salvage)
+   * and Scrap, which needs a second press to confirm.
+   */
+  private refreshFacilityLevel(): void {
+    const building = this.currentFacility;
+    if (!building || !isLeveledFacilityId(building.definitionId)) {
+      this.facilityLevelSection.style.display = 'none';
+      return;
+    }
+    const level = facilityLevel(building);
+    const effects = FACILITY_LEVEL_EFFECTS[building.definitionId];
+    const status = div({ fontSize: '12px', lineHeight: '1.5', opacity: '0.9', marginTop: '6px' });
+    status.dataset.facilityLevelStatus = String(level);
+    status.textContent = `Level ${level}/${MAX_FACILITY_LEVEL} · ${effects[level - 1]}`;
+    const children: HTMLElement[] = [status];
+    const cost = facilityUpgradeCost(building);
+    if (cost) {
+      const blocked = facilityUpgradeBlockedReason(this.state, building);
+      const button = uiButton(`Upgrade to level ${level + 1} (${this.costLabel(cost)})`, () => this.actions.onUpgradeFacility?.(building.id));
+      button.dataset.facilityUpgrade = '';
+      button.disabled = blocked !== null;
+      button.title = blocked ?? effects[level]!;
+      const next = div({ fontSize: '11px', opacity: '0.72', marginTop: '3px' });
+      next.textContent = `Next: ${effects[level]}`;
+      children.push(paletteCard(button), next);
+    }
+    // Tempering is offered at the player's own bench only; the town bench has no level.
+    if (building.definitionId === 'workbench' && this.state.buildings.includes(building)) {
+      children.push(paletteSection('Temper tools'));
+      if (this.state.tools.length === 0) {
+        const empty = div({ fontSize: '12px', opacity: '0.72' });
+        empty.textContent = 'Carry a tool to temper it here.';
+        children.push(empty);
+      }
+      for (const tool of this.state.tools) children.push(this.temperRow(tool));
+    }
+    this.facilityLevelSection.replaceChildren(...children);
+    this.facilityLevelSection.style.display = 'block';
+  }
+
+  private temperRow(tool: ToolInstance): HTMLElement {
+    const row = div({ marginTop: '8px', padding: '7px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)' });
+    row.dataset.temperTool = tool.instanceId;
+    const name = document.createElement('strong');
+    name.textContent = toolDefinition(tool.definitionId).displayName;
+    const axes = div({ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '6px', marginTop: '6px' });
+    for (const [axis, label] of [['power', 'Power'], ['speed', 'Speed'], ['durability', 'Durability']] as const) {
+      const rank = toolUpgradeRank(tool, axis);
+      const cost = temperCost(tool, axis);
+      const button = uiButton(cost ? `${label} ${rank}→${rank + 1} · ${this.costLabel(cost)}` : `${label} ${rank} · max`, () => {
+        this.actions.onTemperTool?.(tool.instanceId, axis);
+      });
+      button.dataset.temperAxis = axis;
+      const blocked = temperToolBlockedReason(this.state, tool.instanceId, axis);
+      button.disabled = blocked !== null;
+      if (blocked) button.title = blocked;
+      Object.assign(button.style, { fontSize: '11px', padding: '6px 4px', minWidth: '0' });
+      axes.appendChild(button);
+    }
+    row.append(name, axes);
+    const value = toolScrapValue(tool);
+    if (value !== null) {
+      const confirming = this.scrapConfirmToolId === tool.instanceId;
+      const scrap = uiButton(confirming ? `Confirm: destroy for ${value} Scrap Iron` : `Scrap · +${value} Scrap Iron`, () => {
+        if (this.scrapConfirmToolId !== tool.instanceId) {
+          this.scrapConfirmToolId = tool.instanceId;
+          this.refreshFacilityLevel();
+          return;
+        }
+        this.scrapConfirmToolId = null;
+        this.actions.onScrapTool?.(tool.instanceId);
+      });
+      scrap.dataset.scrapTool = confirming ? 'confirm' : '';
+      const blocked = scrapToolBlockedReason(this.state, tool.instanceId);
+      scrap.disabled = blocked !== null;
+      Object.assign(scrap.style, { marginTop: '6px', fontSize: '11px', width: '100%' });
+      row.appendChild(scrap);
+    }
+    return row;
   }
 
   /** "12/1 wood + 0/1 stone" for the current bag; see ui/costs.ts. */
