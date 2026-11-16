@@ -20,6 +20,7 @@ export const RAIL_BOTTOMS = {
   admin: 'calc(env(safe-area-inset-bottom) + 362px)',
   creatures: 'calc(env(safe-area-inset-bottom) + 426px)',
   stats: 'calc(env(safe-area-inset-bottom) + 490px)',
+  view: 'calc(env(safe-area-inset-bottom) + 554px)',
 } as const;
 
 export function div(style: Partial<CSSStyleDeclaration>): HTMLDivElement {

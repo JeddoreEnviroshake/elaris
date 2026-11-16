@@ -111,6 +111,7 @@ export function screenToCameraWorldIntent(intent: MoveIntent, yawDegrees: number
   const cameraZ = Math.cos(yaw);
 
   return {
+    ...intent,
     x: cameraZ * intent.x + cameraX * intent.y,
     y: -cameraX * intent.x + cameraZ * intent.y,
     slow: intent.slow,

@@ -14,7 +14,6 @@ import { installArtTheme } from './ui/artTheme';
 import { installTypingGuard } from './ui/typingGuard';
 import { Elaris3DRenderer } from './three/Elaris3DRenderer';
 import { cameraOrientationFromTenths, type ElarisCameraOrientation } from './three/cameraControls';
-import { PresentationModeController, type PresentationMode } from './three/presentationMode';
 import type { BattleRoundPresentation } from './three/battleState';
 
 /**
@@ -77,18 +76,18 @@ if (!globalApply.ok) console.warn('[global-balance]', globalApply.message);
 else await controller.saveCritical();
 
 const game = new Phaser.Game({
-  type: Phaser.AUTO,
+  type: Phaser.HEADLESS,
   parent: 'game',
-  backgroundColor: '#0f1512',
-  pixelArt: true,
-  roundPixels: true,
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: '100%',
     height: '100%',
   },
-  render: { antialias: false },
+  // The fixed-step accumulator already handles timing and interpolation.
+  // Phaser's startup/focus smoothing clamps the first 120 frames to 60 Hz,
+  // making gameplay run in slow motion on displays rendering below 60 FPS.
+  fps: { smoothStep: false },
   scene: [],
 });
 const threeHost = document.getElementById('three-game');
@@ -97,14 +96,9 @@ const renderer3d = new Elaris3DRenderer(threeHost, state);
 // The camera angle is a published global value, so the loaded balance decides
 // how the world is framed before the first frame rather than the default tilt.
 renderer3d.setCameraOrientation(cameraOrientationFromTenths(state.gameBalance.camera));
-// The presentation toggle lives in the Admin menu, so the controller mounts no
-// top-right button of its own.
-const presentationMode = new PresentationModeController(appEl, game, renderer3d, { mountButton: false });
+// Three.js is the only renderer; Phaser retains timing, keyboard and scene lifecycle.
+document.documentElement.dataset.presentation = '3d';
 const systemControls = {
-  presentation: {
-    get: () => presentationMode.current,
-    set: (mode: PresentationMode) => presentationMode.setMode(mode),
-  },
   camera: {
     // Preview only: the published balance is what every client actually loads.
     set: (orientation: ElarisCameraOrientation) => renderer3d.setCameraOrientation(orientation),
@@ -121,13 +115,18 @@ game.scene.add('world', WorldScene, true, {
   onStateChanged,
   onTransitionStarted: () => controller.prepareCriticalSave(),
   globalBalance: globalBalanceService,
-  is3DPresentation: () => presentationMode.current === '3d',
   onBattleRound: (round: BattleRoundPresentation) => renderer3d.playBattleRound(round),
   system: systemControls,
 });
 renderer3d.setPresentationProvider(() => {
   const scene = game.scene.getScene('world') as WorldScene | null;
   return scene?.scene.isActive() ? scene.get3DPresentationState() : null;
+});
+// Present the pose produced by this frame's simulation, on the same clock.
+game.events.on(Phaser.Core.Events.POST_STEP, renderer3d.renderFrame);
+game.events.once(Phaser.Core.Events.DESTROY, () => {
+  game.events.off(Phaser.Core.Events.POST_STEP, renderer3d.renderFrame);
+  renderer3d.dispose();
 });
 renderer3d.setWorldPointerHandler((worldX, worldY, intent, clientX, clientY) => {
   const scene = game.scene.getScene('world') as WorldScene | null;
@@ -163,7 +162,6 @@ window.screen?.orientation?.addEventListener?.('change', refreshScaleSettled);
 // --- app chrome wiring ---
 chrome.setDiagnosticsProvider(() => {
   const scene = game.scene.getScene('world') as WorldScene | null;
-  const cam = scene?.cameras.main;
   const worldPerformance = scene?.getPerformanceSnapshot();
   const savePerformance = controller.getPerformanceSnapshot();
   const frames = worldPerformance?.frameTimes;
@@ -173,11 +171,8 @@ chrome.setDiagnosticsProvider(() => {
   const threePerformance = renderer3d.getSnapshot();
   return {
     Viewport: `${Math.round(game.scale.gameSize.width)}×${Math.round(game.scale.gameSize.height)}`,
-    Zoom: cam ? `${cam.zoom}×` : '—',
-    Presentation: presentationMode.current.toUpperCase(),
-    Renderer: presentationMode.current === '3d'
-      ? 'Three.js WebGL'
-      : game.renderer.type === Phaser.WEBGL ? 'Phaser WebGL' : 'Phaser Canvas',
+    Presentation: '3D',
+    Renderer: 'Three.js WebGL',
     '3D scene': `${threePerformance.visibleModels} models · ${threePerformance.drawCalls} draws · ${threePerformance.triangles} tris`,
     FPS: frames?.meanMs ? `${(1000 / frames.meanMs).toFixed(1)} avg` : '—',
     'Frame time': frames?.p50Ms != null
@@ -186,9 +181,6 @@ chrome.setDiagnosticsProvider(() => {
     'Long frames': frames ? `${frames.longCount}/${frames.count} over 33ms` : '—',
     'Area transition': worldPerformance?.areaTransitions.count
       ? `p50 ${formatMs(worldPerformance.areaTransitions.p50Ms)} · p95 ${formatMs(worldPerformance.areaTransitions.p95Ms)}`
-      : '—',
-    Terrain: worldPerformance
-      ? `${worldPerformance.terrainChunks.visible}/${worldPerformance.terrainChunks.total} chunks visible`
       : '—',
     Entities: entities ? `${entities.active}/${entities.total} active` : '—',
     'Entity mix': entities
@@ -227,7 +219,6 @@ function restartWorld(): void {
     onStateChanged,
     onTransitionStarted: () => controller.prepareCriticalSave(),
     globalBalance: globalBalanceService,
-    is3DPresentation: () => presentationMode.current === '3d',
     onBattleRound: (round: BattleRoundPresentation) => renderer3d.playBattleRound(round),
     system: systemControls,
   });
@@ -264,10 +255,8 @@ if (import.meta.env.DEV) {
     __game: Phaser.Game;
     __controller: SaveController;
     __renderer3d: Elaris3DRenderer;
-    __presentationMode: PresentationModeController;
   };
   g.__game = game;
   g.__controller = controller;
   g.__renderer3d = renderer3d;
-  g.__presentationMode = presentationMode;
 }

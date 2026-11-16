@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
 import { createInitialState, createWorkerHousingState } from '../../src/simulation/state';
 import { enclosedEnvironment } from '../unit/helpers/buildings';
@@ -7,18 +8,17 @@ import { openApp, waitForDebugHandles } from './app';
  * A creature on Work duty should be visible at the facility it staffs.
  *
  * The unit suite proves the wander path; only the real page can show that the
- * scene actually draws a sprite for it, keeps it near the pen, and keeps it
+ * scene actually draws a 3D model for it, keeps it near the pen, and keeps it
  * walking. Read from the live scene rather than a snapshot: the path is
  * presentation state and never reaches IndexedDB at all.
  */
 
 const PEN = { tileX: 82, tileY: 78 };
 
-async function workerSprite(page: Page): Promise<{ x: number; y: number } | null> {
+async function workerPose(page: Page): Promise<{ x: number; y: number } | null> {
   return page.evaluate(() => {
-    const scene = (globalThis as any).__game.scene.getScene('world');
-    const sprite = scene.workerCreatureSprites.get('worker-e2e');
-    return sprite ? { x: sprite.x, y: sprite.y } : null;
+    const sprite = (globalThis as any).__renderer3d.workerRigs.get('worker-e2e')?.root;
+    return sprite ? { x: sprite.position.x * 16, y: sprite.position.z * 16 } : null;
   });
 }
 
@@ -42,6 +42,7 @@ async function seedWorkingCreature(page: Page, query = ''): Promise<void> {
   }];
   state.nextEntityId = 100;
 
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixtureState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -71,18 +72,18 @@ test('a creature set to Work ambles around its worksite', async ({ page }) => {
   await seedWorkingCreature(page);
 
   // The worker is drawn, and it is drawn at the pen rather than anywhere else.
-  const first = await workerSprite(page);
+  const first = await workerPose(page);
   expect(first).not.toBeNull();
   const center = PEN_CENTER;
   expect(Math.hypot(first!.x - center.x, first!.y - center.y)).toBeLessThan(4 * 16);
 
   // And it is moving on its own, with the player standing still.
   await expect.poll(async () => {
-    const pose = await workerSprite(page);
+    const pose = await workerPose(page);
     return pose ? Math.hypot(pose.x - first!.x, pose.y - first!.y) : 0;
   }, { timeout: 15_000, intervals: [250] }).toBeGreaterThan(6);
 
-  const roaming = await workerSprite(page);
+  const roaming = await workerPose(page);
   expect(Math.hypot(roaming!.x - center.x, roaming!.y - center.y)).toBeLessThan(4 * 16);
 
   // Resting drops the worker from the world again.
@@ -91,7 +92,7 @@ test('a creature set to Work ambles around its worksite', async ({ page }) => {
     scene.state.ownedCreatures[0].role = 'rest';
     scene.state.ownedCreatures[0].worksiteId = null;
   });
-  await expect.poll(async () => await workerSprite(page), { timeout: 5_000, intervals: [250] }).toBeNull();
+  await expect.poll(async () => await workerPose(page), { timeout: 5_000, intervals: [250] }).toBeNull();
 });
 
 /** Worker rig position in world tiles, which is what the 3D scene works in. */

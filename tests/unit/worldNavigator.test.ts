@@ -5,11 +5,13 @@ import { enterWorldArea } from '../../src/simulation/areas';
 import { REGIONAL_IDENTITIES } from '../../src/content/regions';
 import { ELARIS_SANCTUARY_TILE } from '../../src/simulation/survivalCycle';
 import { TILE_SIZE } from '../../src/config/platform';
+import * as landscape from '../../src/simulation/landscape';
 
 beforeEach(() => {
   const context = {
     beginPath: vi.fn(),
     clearRect: vi.fn(),
+    drawImage: vi.fn(),
     fillRect: vi.fn(),
     lineTo: vi.fn(),
     moveTo: vi.fn(),
@@ -41,6 +43,30 @@ describe('worldCoordinates', () => {
 });
 
 describe('quest disclosure', () => {
+  it('reuses terrain while markers move and invalidates it for landscaping and travel', () => {
+    const state = createInitialState(123);
+    const terrain = vi.spyOn(landscape, 'terrainAtWithBuildings');
+    const navigator = new WorldNavigator(document.body, state);
+    expect(terrain).toHaveBeenCalledTimes(6400);
+    state.player.x += TILE_SIZE;
+    navigator.refresh(true);
+    expect(terrain).toHaveBeenCalledTimes(6400);
+
+    state.buildings.push({ id: 'water', definitionId: 'water', tileX: 40, tileY: 40 });
+    navigator.refresh(true);
+    expect(terrain).toHaveBeenCalledTimes(12800);
+    state.currentArea.landClearingTiles = ['42,42'];
+    navigator.refresh(true);
+    expect(terrain).toHaveBeenCalledTimes(19200);
+    state.currentArea.landClearingTiles.push('44,44');
+    navigator.refresh(true);
+    expect(terrain).toHaveBeenCalledTimes(25600);
+    enterWorldArea(state, 1, 0);
+    navigator.refresh(true);
+    expect(terrain).toHaveBeenCalledTimes(32000);
+    navigator.destroy();
+  });
+
   it('shows only the active quest below the mini map and collapses to a translucent label', () => {
     const state = createInitialState(123);
     state.onboarding.status = 'legacy';
@@ -129,6 +155,7 @@ describe('quest disclosure', () => {
     const recorder = {
       beginPath: vi.fn(),
       clearRect: vi.fn(),
+      drawImage: vi.fn(),
       fillRect: vi.fn((...rect: number[]) => { fills.push({ color: recorder.fillStyle, rect }); }),
       lineTo: vi.fn(),
       moveTo: vi.fn(),

@@ -9,7 +9,7 @@ let canvasContextSpy: ReturnType<typeof vi.spyOn>;
 beforeAll(() => {
   canvasContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
     fillStyle: '', font: '', textAlign: 'center', textBaseline: 'middle',
-    roundRect: () => {}, fill: () => {}, fillText: () => {},
+    beginPath: () => {}, roundRect: () => {}, fill: () => {}, stroke: () => {}, fillRect: () => {}, fillText: () => {},
   } as unknown as CanvasRenderingContext2D));
 });
 

@@ -64,7 +64,7 @@ import {
 } from '../simulation/survivalCycle';
 import { activeStormStrikes, stormImpactRadiusPx } from '../simulation/arcaneStorm';
 import { workerCreaturePlacements, workerCreaturePose } from '../presentation/workerCreatures';
-import { followerCreaturePlacements, followerAssistanceLift, type GatherAssistancePresentation } from '../presentation/followerCreatures';
+import { easeFollowerToward, followerCreaturePlacements, followerAssistanceLift, type GatherAssistancePresentation } from '../presentation/followerCreatures';
 import {
   applyArcaneStrikeFrame,
   arcaneStrikeFrame,
@@ -81,6 +81,10 @@ import { ThreeBattleStage } from './ThreeBattleStage';
 import {CombatEffects,COMBAT_PALETTE} from './combatEffects';
 import { ThreeInteriorStage, type InteriorStageFrame } from './ThreeInteriorStage';
 import {
+  FIRST_PERSON_EYE_HEIGHT, FIRST_PERSON_FAR, FIRST_PERSON_FOG_FAR, FIRST_PERSON_FOG_NEAR,
+  FIRST_PERSON_FOV_DEGREES, FIRST_PERSON_NEAR, firstPersonView,
+} from './firstPersonView';
+import {
   composeHeroEnvironment,
   isGroundOccluder,
   type EnvironmentPlacement,
@@ -91,6 +95,12 @@ import {
   cameraRevealCue,
   creatureTraceStyle,
 } from './wowPresentation';
+import { siteViewsForArea, type SiteView } from '../presentation/siteViews';
+import { doorSwingSeconds, doorSwingTarget } from './doorPresentation';
+import { ResourceGrounding, ROCK_BASE_Y, TREE_BASE_Y } from './resourceGrounding';
+import { WoodlandSky } from './woodlandSky';
+import { addGroundedTreeWind, updateTreeWind } from './groundedTreeWind';
+import { FirstPersonHands, firstPersonHandsFrame } from './firstPersonHands';
 
 const WORLD_UNIT_PX = TILE_SIZE;
 
@@ -116,16 +126,14 @@ function gardenGrowth(building: BuildingState): number {
   return cropGrowthStage(building.garden?.progressTicks ?? 0, GARDEN_BED_GROW_TICKS) / CROP_GROWTH_STAGES;
 }
 
-/** Door swing tuning (three units = tiles): open radius, swing time, open angle. */
-const DOOR_OPEN_RADIUS = 1.35;
-const DOOR_SWING_SECONDS = 0.18;
+/** Doors and gates share the same hinge angle in both views. */
 const DOOR_OPEN_ANGLE = -Math.PI / 2;
 const PLAYER_Y = 0.04;
 
 /**
  * Raider tuning (three units = tiles). Positions come from the fixed-step sim
  * in whole pixels, so the rig chases its tick position instead of snapping to
- * it — the same smoothing the 2D sprites get for free from their frame rate.
+ * it.
  */
 /**
  * Short creatures share a minimum level-label height; taller silhouettes get
@@ -164,6 +172,8 @@ export interface ThreeRendererSnapshot {
   readonly placementTileX: number | null;
   readonly placementTileY: number | null;
   readonly targetKind: InteractionTargetPresentation['kind'] | null;
+  /** Whether the last overworld frame was drawn through the first-person camera. */
+  readonly firstPerson: boolean;
   readonly effectParticles: number;
   readonly combatEffectInstances:number;
   /** Raid wave currently rigged, and arrows still in the air over it. */
@@ -274,9 +284,23 @@ export function worldToThree(x: number, y: number): { x: number; z: number } {
 export class Elaris3DRenderer {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-12, 12, 12, -12, 0.1, 160);
+  /**
+   * First person's camera. It sits at the render pose and turns only when the
+   * look drag (or Q/E) turns it: no lerp, bob, roll or FOV change, ever.
+   */
+  private readonly firstPersonCamera = new THREE.PerspectiveCamera(
+    FIRST_PERSON_FOV_DEGREES, 1, FIRST_PERSON_NEAR, FIRST_PERSON_FAR,
+  );
+  /** Whether the last overworld frame was drawn in first person. */
+  private firstPersonFrame = false;
+  /** The pointer currently dragging the first-person look, if any. */
+  private lookPointer: { id: number; x: number; y: number } | null = null;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly finish: SceneFinish;
   private readonly contactShadows = new ContactShadows();
+  private readonly resourceGrounding = new ResourceGrounding();
+  private readonly woodlandSky = new WoodlandSky();
+  private readonly firstPersonHands = new FirstPersonHands();
   private readonly models = new ModelLibrary();
   private entrance: TownEntrance | null = null;
   private worldArt: QuaterniusArt | null = null;
@@ -310,8 +334,6 @@ export class Elaris3DRenderer {
   private readonly playerRing: THREE.Mesh;
   private targetStatus: THREE.Sprite | null = null;
   private readonly resizeObserver: ResizeObserver;
-  private animationFrame: number | null = null;
-  private enabled = false;
   private worldRevision = 0;
   private areaKey = '';
   private entitySignature = '';
@@ -333,6 +355,9 @@ export class Elaris3DRenderer {
   private readonly occluders: SceneOccluder[] = [];
   private ambientMotes: AmbientMotes | null = null;
   private landmarkBeacon: LandmarkBeacon | null = null;
+  /** Each field-site container's closed and searched meshes, keyed `${siteId}#${index}`. */
+  private readonly siteCrates = new Map<string, { closed: THREE.Object3D; searched: THREE.Object3D }>();
+  private siteCrateSignature = '';
   private readonly protectionMaterials: ProtectionMaterial[] = [];
   private readonly lastCreatureTraceAt = new Map<string, number>();
   private areaRevealStartedAt = performance.now();
@@ -354,6 +379,10 @@ export class Elaris3DRenderer {
   private readonly workerRoot = new THREE.Group();
   private readonly workerRigs = new Map<string, CreatureRig>();
   private readonly followerRigs = new Map<string, CreatureRig>();
+  /** When a still-following creature last lost its formation slot; its rig waits briefly instead of popping out. */
+  private readonly followerSlotLostAt = new Map<string, number>();
+  /** The direction the party trails behind, turned gradually so a sharp turn swings the followers round instead of teleporting them. */
+  private followerFormationAngle: number | null = null;
   // Strike markers live beside the raiders for the same reason: they are
   // short-lived, they move with the simulation rather than the map, and they
   // must survive the entity rebuild that an area change performs.
@@ -364,11 +393,11 @@ export class Elaris3DRenderer {
   private readonly arrows: FlyingArrow[] = [];
   private readonly arrowTracker = new ArrowShotTracker();
   /** Hinged leaf pivots for placed doors, plus each door's tile-space center. */
-  private readonly doorPivots = new Map<string, { pivot: THREE.Object3D; cx: number; cz: number }>();
+  private readonly doorPivots = new Map<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number }>();
   /** Persisted openness (0 closed → 1 open) per door, survives entity rebuilds. */
   private readonly doorOpenness = new Map<string, number>();
   /** Permanent Elaris gates live in worldRoot, so entity rebuilds do not discard them. */
-  private readonly townGatePivots = new Map<string, { pivot: THREE.Object3D; cx: number; cz: number }>();
+  private readonly townGatePivots = new Map<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number }>();
   private readonly townGateOpenness = new Map<string, number>();
   private playerRig!: PlayerRig;
   /** Ridden creature under the player, rebuilt only when the species changes. */
@@ -382,6 +411,16 @@ export class Elaris3DRenderer {
     pitchDegrees: ELARIS_CAMERA_PITCH_DEGREES,
   };
   private previousInteriorPose: { x: number; y: number } | null = null;
+  /**
+   * Free movement walks at any angle, so the rig turns toward the direction the
+   * render pose actually travelled, not the four-way saved facing. `travelAnchor`
+   * only advances once the pose has moved a visible distance, so a slow walk
+   * still accumulates a heading and sub-pixel jitter never spins the rig.
+   */
+  private travelAngle = 0;
+  private travelAnchor: { x: number; z: number } | null = null;
+  private travelFacing: GameState['player']['facing'] | null = null;
+  private travelMovedAt = Number.NEGATIVE_INFINITY;
   private readonly battleAnchor = new THREE.Vector3();
   private readonly hemisphere = new THREE.HemisphereLight(0xdaf2e1, 0x35422e, 2.2);
   private readonly sun = new THREE.DirectionalLight(0xfff0cf, 3.6);
@@ -411,7 +450,8 @@ export class Elaris3DRenderer {
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.finish = new SceneFinish(this.renderer, this.scene, this.camera);
+    this.finish = new SceneFinish(this.renderer, this.scene, this.camera, this.firstPersonHands);
+    this.firstPersonCamera.rotation.order = 'YXZ';
     this.renderer.domElement.id = 'elaris-three-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Elaris 3D world');
     this.container.appendChild(this.renderer.domElement);
@@ -432,6 +472,7 @@ export class Elaris3DRenderer {
       this.feedbackRoot, this.protectionRoot, this.playerRoot, this.battleStage.root,this.combatEffects.root,
       this.interiorStage.root,
       this.contactShadows.mesh,
+      this.resourceGrounding.root, this.woodlandSky.mesh,
     );
     this.playerRoot.add(this.actorRoot);
     this.playerRoot.add(this.boatHull);
@@ -467,14 +508,8 @@ export class Elaris3DRenderer {
     this.resize();
     this.rebuildWorld();
     this.buildPlayer();
-    this.animationFrame = requestAnimationFrame(this.renderFrame);
   }
 
-  setEnabled(enabled: boolean): void {
-    this.enabled = enabled;
-    this.container.style.display = enabled ? 'block' : 'none';
-    if (enabled) this.resize();
-  }
 
   setPresentationProvider(provider: () => ThreePresentationState | null): void {
     this.presentationProvider = provider;
@@ -511,6 +546,7 @@ export class Elaris3DRenderer {
       placementTileX: presentation?.placement?.tileX ?? null,
       placementTileY: presentation?.placement?.tileY ?? null,
       targetKind: presentation?.target?.kind ?? null,
+      firstPerson: this.firstPersonFrame,
       effectParticles: this.particles.length,
       combatEffectInstances:this.combatEffects.instanceCount,
       raiderRigs: this.raiderVisuals.size,
@@ -528,8 +564,6 @@ export class Elaris3DRenderer {
   }
 
   dispose(): void {
-    if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
-    this.animationFrame = null;
     this.resizeObserver.disconnect();
     window.removeEventListener('pointerdown', this.onWorldPointerDown);
     window.removeEventListener('pointermove', this.onWorldPointerMove);
@@ -553,6 +587,9 @@ export class Elaris3DRenderer {
     this.combatEffects.dispose();
     this.interiorStage.dispose();
     this.disposeObject(this.contactShadows.mesh);
+    this.resourceGrounding.dispose();
+    this.woodlandSky.dispose();
+    this.firstPersonHands.dispose();
     this.finish.dispose();
     disposePaintedGround();
     this.models.dispose();
@@ -593,18 +630,33 @@ export class Elaris3DRenderer {
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(pointer, this.camera);
+    raycaster.setFromCamera(pointer, this.activeCamera());
     const hit = new THREE.Vector3();
     if (!raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) return null;
     return { worldX: hit.x * TILE_SIZE, worldY: hit.z * TILE_SIZE };
   }
 
-  private isPhaserWorldCanvas(target: EventTarget | null): boolean {
-    return target instanceof HTMLCanvasElement && target === document.querySelector('#game canvas');
+  private isWorldCanvas(target: EventTarget | null): boolean {
+    return target instanceof HTMLCanvasElement && target === this.renderer.domElement;
+  }
+
+  /** The camera the world is drawn through this frame. */
+  private activeCamera(): THREE.Camera {
+    return this.firstPersonFrame ? this.firstPersonCamera : this.camera;
   }
 
   private readonly onWorldPointerDown = (event: PointerEvent): void => {
-    if (!this.enabled || event.button !== 0 || !this.isPhaserWorldCanvas(event.target)) return;
+    if (event.button !== 0 || !this.isWorldCanvas(event.target)) return;
+    if (firstPersonView.active) {
+      // In first person the canvas is a look pad: drags turn, taps do nothing.
+      // HUD buttons and the movement pad sit above it and keep their pointers.
+      this.cancelHeldPointer();
+      if (this.lookPointer) return;
+      this.lookPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      try { this.renderer.domElement.setPointerCapture(event.pointerId); } catch { /* capture is optional */ }
+      event.preventDefault();
+      return;
+    }
     this.cancelHeldPointer();
     const hit = this.raycastGround(event.clientX, event.clientY);
     if (!hit) return;
@@ -632,9 +684,20 @@ export class Elaris3DRenderer {
   };
 
   private readonly onWorldPointerMove = (event: PointerEvent): void => {
+    const look = this.lookPointer;
+    if (look && look.id === event.pointerId) {
+      // Applied straight from the finger: no smoothing, no inertia.
+      if (firstPersonView.active) {
+        firstPersonView.look.turn(event.clientX - look.x, event.clientY - look.y, firstPersonView.sensitivity);
+      }
+      look.x = event.clientX;
+      look.y = event.clientY;
+      return;
+    }
+    if (firstPersonView.active) return;
     const held = this.heldPointer;
     if (!held || held.id !== event.pointerId) {
-      if (!this.enabled || !this.isPhaserWorldCanvas(event.target) || this.presentationProvider?.()?.placement == null) return;
+      if (!this.isWorldCanvas(event.target) || this.presentationProvider?.()?.placement == null) return;
       const hover = this.raycastGround(event.clientX, event.clientY);
       if (hover) this.worldPointerHandler?.(hover.worldX, hover.worldY, 'hover', event.clientX, event.clientY);
       return;
@@ -648,6 +711,10 @@ export class Elaris3DRenderer {
   };
 
   private readonly onWorldPointerUp = (event: PointerEvent): void => {
+    if (this.lookPointer?.id === event.pointerId) {
+      this.lookPointer = null;
+      return;
+    }
     const held = this.heldPointer;
     if (!held || held.id !== event.pointerId) return;
     window.clearTimeout(held.timer);
@@ -659,7 +726,8 @@ export class Elaris3DRenderer {
     if (!held.opened) this.worldPointerHandler?.(held.worldX, held.worldY, 'tap', event.clientX, event.clientY);
   };
 
-  private readonly cancelHeldPointer = (): void => {
+  private readonly cancelHeldPointer = (event?: PointerEvent): void => {
+    if (event && this.lookPointer?.id === event.pointerId) this.lookPointer = null;
     if (this.heldPointer) {
       window.clearTimeout(this.heldPointer.timer);
       if (this.heldPointer.painting) {
@@ -692,6 +760,9 @@ export class Elaris3DRenderer {
     this.camera.top = viewHeight / 2;
     this.camera.bottom = -viewHeight / 2;
     this.camera.updateProjectionMatrix();
+    this.firstPersonCamera.aspect = aspect;
+    this.firstPersonHands.resize(width, height);
+    this.firstPersonCamera.updateProjectionMatrix();
   }
 
   private rebuildWorld(): void {
@@ -723,6 +794,8 @@ export class Elaris3DRenderer {
     this.raiderVisuals.clear();
     this.workerRigs.clear();
     this.followerRigs.clear();
+    this.followerSlotLostAt.clear();
+    this.followerFormationAngle = null;
     this.arrows.length = 0;
     this.arrowTracker.reset();
     this.resourceHp.clear();
@@ -732,6 +805,8 @@ export class Elaris3DRenderer {
     this.townGateOpenness.clear();
     this.ambientMotes = null;
     this.landmarkBeacon = null;
+    this.siteCrates.clear();
+    this.siteCrateSignature = '';
     this.protectionMaterials.length = 0;
     this.lastCreatureTraceAt.clear();
     this.modelCount = 0;
@@ -753,7 +828,13 @@ export class Elaris3DRenderer {
     this.worldRoot.add(ground);
 
     const settlementBuildings = townBuildingsInArea(this.state.currentArea.key);
-    this.vegetation = new VegetationStream(this.models, this.state, settlementBuildings.map((building) => building.footprint));
+    // Field sites keep their 7×7 patch clear of decorative planting, as towns do.
+    const siteFootprints = siteViewsForArea(this.state).map((view) => ({
+      tileX: view.anchorTileX - 3, tileY: view.anchorTileY - 3, tilesWide: 7, tilesHigh: 7,
+    }));
+    this.vegetation = new VegetationStream(this.models, this.state, [
+      ...settlementBuildings.map((building) => building.footprint), ...siteFootprints,
+    ]);
     this.worldRoot.add(this.vegetation.root);
     this.vegetation.update(this.state.player.x / TILE_SIZE, this.state.player.y / TILE_SIZE);
     const fallen = hasElarisFallen(this.state);
@@ -779,6 +860,7 @@ export class Elaris3DRenderer {
     }
     this.buildTownPaths();
     this.buildRegionalLandmark();
+    this.buildFieldSites();
     this.buildLandscapeTerrain();
     this.syncEntities(true);
   }
@@ -1022,6 +1104,111 @@ export class Elaris3DRenderer {
     this.addLandmarkBeacon(group, new THREE.Color(definition.landmark.color).getHex(), 10.5);
   }
 
+  /**
+   * Field sites, from procedural geometry like the regional landmarks: a broken
+   * ring of low walls, one crate or strongbox per container (each with a closed
+   * and a searched form), and a tall banner in the kind's colour so the ruin
+   * reads from a distance in first person. The walls are decoration only.
+   * Built with the area and kept in `worldRoot`, so the first-person entity
+   * radius never culls them; fog is the only limit, as for landmarks.
+   */
+  private buildFieldSites(): void {
+    for (const view of siteViewsForArea(this.state)) this.buildFieldSite(view);
+    this.syncFieldSiteCrates(true);
+  }
+
+  private buildFieldSite(view: SiteView): void {
+    const group = new THREE.Group();
+    group.name = `site.${view.id}`;
+    const centerX = view.anchorTileX + 0.5;
+    const centerZ = view.anchorTileY + 0.5;
+    group.position.set(centerX, 0, centerZ);
+    const color = new THREE.Color(view.color).getHex();
+    const stone = new THREE.MeshStandardMaterial({ color: 0x7c776b, roughness: 0.96 });
+    // Ten wall stubs on a ring, three knocked out; which ones depends on the site id.
+    let gapSeed = 0;
+    for (let index = 0; index < view.id.length; index += 1) gapSeed = (gapSeed * 31 + view.id.charCodeAt(index)) >>> 0;
+    const gaps = new Set([gapSeed % 10, (gapSeed >>> 4) % 10, ((gapSeed >>> 8) % 10 + 5) % 10]);
+    for (let segment = 0; segment < 10; segment += 1) {
+      if (gaps.has(segment)) continue;
+      const angle = segment / 10 * Math.PI * 2;
+      const height = 0.45 + ((gapSeed >>> segment) % 4) * 0.14;
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(1.75, height, 0.32), stone);
+      wall.position.set(Math.cos(angle) * 3.3, height / 2, Math.sin(angle) * 3.3);
+      wall.rotation.y = -angle + Math.PI / 2;
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      group.add(wall);
+    }
+    // The banner: a pole tall enough to clear the treeline, a flag and a lit cap.
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.08, 6.2, 6),
+      new THREE.MeshStandardMaterial({ color: 0x4a3825, roughness: 0.9 }),
+    );
+    pole.position.set(0.9, 3.1, -0.9);
+    pole.castShadow = true;
+    const flag = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.25, 0.72),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.8, side: THREE.DoubleSide }),
+    );
+    flag.position.set(0.9 + 0.64, 5.7, -0.9);
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 10, 8),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1 }),
+    );
+    cap.position.set(0.9, 6.3, -0.9);
+    group.add(pole, flag, cap);
+
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 0.92 });
+    const woodDark = new THREE.MeshStandardMaterial({ color: 0x4a3221, roughness: 1 });
+    const iron = new THREE.MeshStandardMaterial({ color: 0x59626b, roughness: 0.55, metalness: 0.45 });
+    const trim = new THREE.MeshStandardMaterial({ color: 0xd8b354, roughness: 0.45, metalness: 0.6, emissive: 0x3a2c08, emissiveIntensity: 0.4 });
+    for (const container of view.containers) {
+      const at = new THREE.Vector3(container.x / TILE_SIZE - centerX, 0, container.y / TILE_SIZE - centerZ);
+      const size = container.strongbox ? { w: 0.95, h: 0.62, d: 0.66 } : { w: 0.68, h: 0.6, d: 0.68 };
+      const body = container.strongbox ? iron : wood;
+      const closed = new THREE.Group();
+      closed.name = 'site.container.closed';
+      const box = new THREE.Mesh(new THREE.BoxGeometry(size.w, size.h, size.d), body);
+      box.position.y = size.h / 2;
+      box.castShadow = true;
+      const band = new THREE.Mesh(new THREE.BoxGeometry(size.w + 0.03, 0.08, size.d + 0.03), container.strongbox ? trim : woodDark);
+      band.position.y = size.h * 0.72;
+      closed.add(box, band);
+      const searched = new THREE.Group();
+      searched.name = 'site.container.searched';
+      // Open and emptied: a shallow broken tray with its lid knocked aside.
+      const tray = new THREE.Mesh(new THREE.BoxGeometry(size.w, size.h * 0.45, size.d), woodDark);
+      tray.position.y = size.h * 0.225;
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(size.w, 0.07, size.d), container.strongbox ? iron : wood);
+      lid.position.set(size.w * 0.7, 0.04, size.d * 0.25);
+      lid.rotation.y = 0.5;
+      searched.add(tray, lid);
+      closed.position.copy(at);
+      searched.position.copy(at);
+      group.add(closed, searched);
+      this.siteCrates.set(`${view.id}#${container.index}`, { closed, searched });
+    }
+    this.worldRoot.add(group);
+  }
+
+  /** Swap each crate between its closed and searched form when the record changes. */
+  private syncFieldSiteCrates(force = false): void {
+    if (this.siteCrates.size === 0) return;
+    const views = siteViewsForArea(this.state);
+    const signature = views.map((view) => `${view.id}:${view.containers.map((c) => (c.searched ? 1 : 0)).join('')}`).join('|');
+    if (!force && signature === this.siteCrateSignature) return;
+    this.siteCrateSignature = signature;
+    for (const view of views) {
+      for (const container of view.containers) {
+        const meshes = this.siteCrates.get(`${view.id}#${container.index}`);
+        if (!meshes) continue;
+        meshes.closed.visible = !container.searched;
+        meshes.searched.visible = container.searched;
+      }
+    }
+  }
+
   /** Elaris' clean-air sanctuary remains visible through trees and encroaching fog. */
   private buildSanctuaryBeacon(): void {
     const root = new THREE.Group();
@@ -1084,7 +1271,7 @@ export class Elaris3DRenderer {
   /** Permanent, indestructible perimeter and clean-air fixtures for Elaris. */
   private buildTownDefences(fallen = false): void {
     TOWN_PERIMETER_SEGMENTS.forEach((segment, index) => {
-      // Breaches in a fallen perimeter, matching the 2D scene piece for piece.
+      // Deterministic breaches in a fallen perimeter.
       if (fallen && index % 3 === 0) return;
       const dx = segment.end.x - segment.start.x;
       const dz = segment.end.y - segment.start.y;
@@ -1105,21 +1292,18 @@ export class Elaris3DRenderer {
         return;
       }
 
-      // Anchor the gate at one end instead of its center. Rotating this pivot
-      // produces the same inward quarter-turn used by player-built doors.
+      // Each panel hinges at the outer edge, clearing the full opening.
       const root = new THREE.Group();
       root.name = `town.fence-gate.${index}`;
-      root.position.set(segment.start.x, 0, segment.start.y);
+      root.position.set((segment.start.x + segment.end.x) / 2, 0, (segment.start.y + segment.end.y) / 2);
       root.rotation.y = rotationY;
       this.worldRoot.add(root);
-      const pivot = new THREE.Group();
-      root.add(pivot);
       const length = Math.hypot(dx, dz);
-      void this.addModel(pivot, 'town.fence-gate', { x: length / 2, y: 0, z: 0 }, 0, 0.92);
       const id = `town-gate-${index}`;
-      pivot.rotation.y = (this.townGateOpenness.get(id) ?? 0) * DOOR_OPEN_ANGLE;
+      const { pivot, oppositePivot } = this.addDoubleGate(root, length, this.townGateOpenness.get(id) ?? 0);
       this.townGatePivots.set(id, {
         pivot,
+        oppositePivot,
         cx: (segment.start.x + segment.end.x) / 2,
         cz: (segment.start.y + segment.end.y) / 2,
       });
@@ -1339,7 +1523,43 @@ export class Elaris3DRenderer {
     for (const building of this.state.buildings) {
       sync(`building:${building.id}`, this.buildingVisualSignature(building), () => this.buildPlacedStructure(building));
     }
+    for (const container of this.state.containers) {
+      sync(`container:${container.id}`, `${container.kind}:${container.x}:${container.y}:${container.opened}`, () => {
+        this.buildWorldPickup(container.id, container.x, container.y, 0x987044,
+          container.kind.replaceAll('-', ' '), container.opened);
+      });
+    }
+    for (const drop of this.state.toolDrops) {
+      sync(`tool:${drop.id}`, `${drop.tool.definitionId}:${drop.x}:${drop.y}`, () => {
+        this.buildWorldPickup(drop.id, drop.x, drop.y, 0xa6bbc2, 'Dropped tool');
+      });
+    }
+    for (const drop of this.state.blueprintDrops) {
+      sync(`blueprint:${drop.id}`, `${drop.blueprintId}:${drop.x}:${drop.y}`, () => {
+        this.buildWorldPickup(drop.id, drop.x, drop.y, 0xe1c684, 'Blueprint');
+      });
+    }
     for (const key of this.entityVisuals.keys()) if (!live.has(key)) this.removeEntityVisual(key);
+    this.resourceGrounding.sync(this.state.resourceNodes);
+  }
+
+  private buildWorldPickup(id: string, x: number, y: number, color: number, label: string, opened = false): void {
+    const group = new THREE.Group();
+    group.name = id;
+    group.position.set(x / TILE_SIZE, 0, y / TILE_SIZE);
+    group.userData.opened = opened;
+    const material = new THREE.MeshStandardMaterial({ color, roughness: .9, transparent: opened, opacity: opened ? .45 : 1 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(.65, .4, .45), material);
+    body.position.y = .22;
+    body.castShadow = true;
+    group.add(body);
+    if (!opened) {
+      const plate = this.createWorldLabel(label);
+      plate.position.y = 1.05;
+      plate.scale.set(2.1, .525, 1);
+      group.add(plate);
+    }
+    this.entityRoot.add(group);
   }
 
   private removeEntityVisual(key: string): void {
@@ -1376,7 +1596,12 @@ export class Elaris3DRenderer {
       .join(',');
     const drops = this.state.groundDrops.map((drop) => `${drop.id}:${drop.amount}`).join(',');
     const buildings = this.state.buildings.map((building) => this.buildingVisualSignature(building)).join(',');
-    return `${this.state.currentArea.key}|${resources}|${creatures}|${drops}|${buildings}`;
+    const pickups = JSON.stringify([
+      this.state.containers.map(({id, kind, x, y, opened}) => [id, kind, x, y, opened]),
+      this.state.toolDrops.map(({id, x, y, tool}) => [id, x, y, tool.definitionId]),
+      this.state.blueprintDrops.map(({id, x, y, blueprintId}) => [id, x, y, blueprintId]),
+    ]);
+    return `${this.state.currentArea.key}|${resources}|${creatures}|${drops}|${buildings}|${pickups}`;
   }
 
   private detectEntityEffects(seedOnly: boolean): void {
@@ -1409,7 +1634,7 @@ export class Elaris3DRenderer {
     this.entityRoot.add(root);
 
     if (node.hp <= 0) {
-      if (node.kind === 'tree') this.addModel(root, 'nature.stump', { x: 0, y: 0, z: 0 }, 0, 0.62);
+      if (node.kind === 'tree') this.addModel(root, 'nature.stump', { x: 0, y: TREE_BASE_Y, z: 0 }, 0, 0.62);
       else this.addDepletedMarker(root, node.kind);
       return;
     }
@@ -1419,14 +1644,14 @@ export class Elaris3DRenderer {
         const entranceVariant = variant < 0 ? variant + 1 : variant;
         const key: ModelAssetKey = this.state.currentArea.theme === 'mountain' || entranceVariant > .72
           ? 'entrance.pine' : entranceVariant > .38 ? 'entrance.tree-broad' : 'entrance.tree';
-        this.addOccludingModel(root, key, { x: 0, y: 0, z: 0 }, variant * Math.PI * 2, undefined, 1.05, 'entity');
+        this.addOccludingModel(root, key, { x: 0, y: TREE_BASE_Y, z: 0 }, variant * Math.PI * 2, undefined, 1.05, 'entity');
         break;
       }
       case 'stone':
-        this.addModel(root, 'entrance.rock', { x: 0, y: 0, z: 0 }, node.x * 0.01, 1.15);
+        this.addModel(root, 'entrance.rock', { x: 0, y: ROCK_BASE_Y, z: 0 }, node.x * 0.01, 1.15);
         break;
       case 'metal':
-        this.addModel(root, 'entrance.rock', { x: 0, y: 0, z: 0 }, node.x * 0.01, 1.2, 0xc17a49);
+        this.addModel(root, 'entrance.rock', { x: 0, y: ROCK_BASE_Y, z: 0 }, node.x * 0.01, 1.2, 0xc17a49);
         this.addOreCrystals(root);
         break;
       case 'plant':
@@ -1767,7 +1992,7 @@ export class Elaris3DRenderer {
       root.add(vent);
     } else if (building.definitionId === 'war-table') {
       // A two-tile map table: dark timber frame, parchment surface, standing
-      // markers, and a banner — the same read as the 2D sprite.
+      // markers, and a banner.
       const frame = new THREE.MeshStandardMaterial({ color: 0x3f2c1c, roughness: 0.9 });
       const top = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.9), frame);
       top.position.set(0.5, 0.78, 0);
@@ -1798,7 +2023,7 @@ export class Elaris3DRenderer {
       this.addModel(root, 'town.banner-red', { x: 1.5, y: 0, z: -0.1 }, 0, 1.7);
     } else if (building.definitionId === 'turret') {
       // A swivel bolt-thrower on a timber platform. The magazine light is the
-      // ammo tell, matching the loaded/empty sprite pair.
+      // ammo tell.
       const platform = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.22, 0.8), wood);
       platform.position.y = 0.11;
       platform.castShadow = true;
@@ -1889,17 +2114,26 @@ export class Elaris3DRenderer {
     this.doorPivots.set(building.id, { pivot, cx: root.position.x, cz: root.position.z });
   }
 
-  /** Put a fence-gate model on an end hinge so it can swing like a door leaf. */
-  private addPlacedGate(root: THREE.Group, building: BuildingState): void {
+  /** Two one-tile leaves meet in the middle and swing apart on outer hinges. */
+  private addDoubleGate(root: THREE.Group, span: number, openness: number): { pivot: THREE.Group; oppositePivot: THREE.Group } {
     const pivot = new THREE.Group();
-    // Gates occupy the same two-edge span as fences; stretching from the end
-    // hinge keeps the full opening clear when the leaf swings.
-    pivot.position.x = -1;
-    pivot.scale.x = 2;
-    root.add(pivot);
-    void this.addModel(pivot, 'town.fence-gate', { x: 0.5, y: 0, z: 0 }, 0, 0.92);
-    pivot.rotation.y = (this.doorOpenness.get(building.id) ?? 0) * DOOR_OPEN_ANGLE;
-    this.doorPivots.set(building.id, { pivot, cx: root.position.x, cz: root.position.z });
+    const oppositePivot = new THREE.Group();
+    pivot.name = 'gate.hinge-left';
+    oppositePivot.name = 'gate.hinge-right';
+    pivot.position.x = -span / 2;
+    oppositePivot.position.x = span / 2;
+    root.add(pivot, oppositePivot);
+    const scale = { x: span / 2, y: 1, z: 1 };
+    void this.addModel(pivot, 'town.fence-gate', { x: span / 4, y: 0, z: 0 }, 0, 0.92, undefined, scale);
+    void this.addModel(oppositePivot, 'town.fence-gate', { x: -span / 4, y: 0, z: 0 }, Math.PI, 0.92, undefined, scale);
+    pivot.rotation.y = openness * DOOR_OPEN_ANGLE;
+    oppositePivot.rotation.y = -openness * DOOR_OPEN_ANGLE;
+    return { pivot, oppositePivot };
+  }
+
+  private addPlacedGate(root: THREE.Group, building: BuildingState): void {
+    const { pivot, oppositePivot } = this.addDoubleGate(root, 2, this.doorOpenness.get(building.id) ?? 0);
+    this.doorPivots.set(building.id, { pivot, oppositePivot, cx: root.position.x, cz: root.position.z });
   }
 
   /**
@@ -1907,19 +2141,20 @@ export class Elaris3DRenderer {
    * leave, easing openness by real time. Reduced motion snaps to the target.
    */
   private updateDoorSwings(playerX: number, playerZ: number, deltaSeconds: number, reducedMotion: boolean): void {
-    const step = deltaSeconds / DOOR_SWING_SECONDS;
+    const step = deltaSeconds / doorSwingSeconds(this.firstPersonFrame);
     const update = (
-      pivots: ReadonlyMap<string, { pivot: THREE.Object3D; cx: number; cz: number }>,
+      pivots: ReadonlyMap<string, { pivot: THREE.Object3D; oppositePivot?: THREE.Object3D; cx: number; cz: number }>,
       openness: Map<string, number>,
     ): void => {
       for (const [id, opening] of pivots) {
-        const target = Math.hypot(playerX - opening.cx, playerZ - opening.cz) <= DOOR_OPEN_RADIUS ? 1 : 0;
         const current = openness.get(id) ?? 0;
+        const target = doorSwingTarget(Math.hypot(playerX - opening.cx, playerZ - opening.cz), current, this.firstPersonFrame);
         const next = reducedMotion
           ? target
           : target > current ? Math.min(target, current + step) : Math.max(target, current - step);
         openness.set(id, next);
         opening.pivot.rotation.y = next * DOOR_OPEN_ANGLE;
+        if (opening.oppositePivot) opening.oppositePivot.rotation.y = -next * DOOR_OPEN_ANGLE;
       }
     };
     update(this.doorPivots, this.doorOpenness);
@@ -2008,6 +2243,8 @@ export class Elaris3DRenderer {
     const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(4.6, 1.15, 1);
+    sprite.userData.worldLabel = true;
+    sprite.visible = !this.firstPersonFrame;
     sprite.renderOrder = 12;
     return sprite;
   }
@@ -2042,7 +2279,11 @@ export class Elaris3DRenderer {
     texture.colorSpace = THREE.SRGBColorSpace;
     const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(material);
+    sprite.name = 'level-plate';
+    sprite.userData.level = level;
     sprite.scale.set(1.4, 0.7, 1);
+    sprite.userData.worldLabel = true;
+    sprite.visible = !this.firstPersonFrame;
     // Above the health readout's render order, so a plate is never hidden by
     // the bar that appears once a fight has already started.
     sprite.renderOrder = 13;
@@ -2298,6 +2539,8 @@ export class Elaris3DRenderer {
     texture.colorSpace = THREE.SRGBColorSpace;
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
     sprite.scale.set(4.8, 0.9, 1);
+    sprite.userData.worldLabel = true;
+    sprite.visible = !this.firstPersonFrame;
     sprite.renderOrder = 15;
     return sprite;
   }
@@ -2345,10 +2588,8 @@ export class Elaris3DRenderer {
   /**
    * Arcane strike markers, read straight off the saved strike records.
    *
-   * Deliberately the same numbers the 2D overlay draws: the outer ring is the
-   * authoritative damage radius, the inner ring is the same countdown
-   * proportion, and reward strikes carry the same gold core — so a player who
-   * switches renderers mid-storm is never shown a different deadline.
+   * The outer ring is the authoritative damage radius; the inner ring shows
+   * the countdown proportion, and reward strikes carry a gold core.
    */
   private syncArcaneStrikes(reducedMotion: boolean): void {
     const strikes = activeStormStrikes(this.state);
@@ -2437,42 +2678,74 @@ export class Elaris3DRenderer {
     }
   }
 
-  /**
-   * Creatures set to Work walk a loop around the facility they staff, so a pen
-   * with a Tuftle on duty reads as staffed from across the clearing. The path
-   * is presentation only — `workerCreaturePose` derives it from the creature id
-   * and the clock, and the 2D scene walks the same loop.
-   */
-  private syncFollowerCreatures(time: number, reducedMotion: boolean, assistance?: GatherAssistancePresentation | null): void {
-    const placements = followerCreaturePlacements(this.state);
+  private syncFollowerCreatures(
+    time: number,
+    deltaSeconds: number,
+    pose: { x: number; y: number },
+    reducedMotion: boolean,
+    assistance?: GatherAssistancePresentation | null,
+  ): void {
+    this.followerFormationAngle = this.followerFormationAngle === null || reducedMotion
+      ? this.travelAngle
+      : turnTowards(this.followerFormationAngle, this.travelAngle, deltaSeconds, 5);
+    const formation = this.followerFormationAngle;
+    const placements = followerCreaturePlacements(this.state, { x: Math.sin(formation), y: Math.cos(formation) }, this.firstPersonFrame, pose);
+    const party = this.state.pendingRespawn || this.state.player.traversalMode === 'boat' ? new Set<string>()
+      : new Set(this.state.ownedCreatures.filter((creature) => creature.role === 'follow').map((creature) => creature.id));
     for (const [id, rig] of this.followerRigs) {
-      if (placements.some((placement) => placement.id === id)) continue;
+      if (placements.some((placement) => placement.id === id)) {
+        this.followerSlotLostAt.delete(id);
+        continue;
+      }
+      // A slot that is blocked for a moment (a doorway, a fence corner) keeps
+      // the rig standing where it is rather than blinking it out and back.
+      const lostAt = this.followerSlotLostAt.get(id) ?? time;
+      if (party.has(id) && time - lostAt < 600) {
+        this.followerSlotLostAt.set(id, lostAt);
+        const frame = this.motionTracker.sample(rig.root, time, rig.root.position.x, rig.root.position.z, rig.root.rotation.y, creatureStride(rig.root.userData.speciesId as SpeciesId, 0));
+        rig.animate(time, 'idle', reducedMotion, frame);
+        continue;
+      }
+      this.followerSlotLostAt.delete(id);
       this.workerRoot.remove(rig.root);
       this.disposeObject(rig.root);
       this.followerRigs.delete(id);
     }
     for (const placement of placements) {
+      const slot = worldToThree(placement.x, placement.y);
       let rig = this.followerRigs.get(placement.id);
       if (!rig) {
         rig = createCreatureRig(placement.speciesId);
         rig.root.name = placement.id;
+        rig.root.userData.speciesId = placement.speciesId;
+        rig.root.position.set(slot.x, 0, slot.z);
+        rig.root.rotation.y = this.facingAngle() + Math.PI;
         this.followerRigs.set(placement.id, rig);
         this.workerRoot.add(rig.root);
       }
-      const position = worldToThree(placement.x, placement.y);
-      const dx=position.x-rig.root.position.x,dz=position.z-rig.root.position.z;
+      const previous = { x: rig.root.position.x, z: rig.root.position.z };
+      const position = easeFollowerToward(previous, slot, deltaSeconds);
+      const dx = position.x - previous.x, dz = position.z - previous.z;
       rig.root.position.set(position.x, 0, position.z);
       const helping = assistance?.creatureId === placement.id;
-      const heading=helping?Math.atan2(placement.x-assistance.x,placement.y-assistance.y)
-        :Math.hypot(dx,dz)>.001&&Math.hypot(dx,dz)<3?Math.atan2(-dx,-dz):this.facingAngle()+Math.PI;
+      // Face the way it is trotting; once settled, face the way the player does.
+      const moving = deltaSeconds > 0 && Math.hypot(dx, dz) / deltaSeconds > 0.35 && Math.hypot(dx, dz) < 3;
+      const heading = helping ? Math.atan2(placement.x - assistance.x, placement.y - assistance.y)
+        : moving ? Math.atan2(-dx, -dz) : this.facingAngle() + Math.PI;
       const frame=this.motionTracker.sample(rig.root,time,position.x,position.z,heading,creatureStride(placement.speciesId,this.motionTracker.speed(rig.root)));
-      rig.root.rotation.y=reducedMotion?heading:turnTowards(rig.root.rotation.y,heading,frame.deltaSeconds??1/60);
+      rig.root.rotation.y=reducedMotion?heading:turnTowards(rig.root.rotation.y,heading,frame.deltaSeconds??1/60,8);
       rig.animate(time,helping?'assist':(frame.speed??0)>2?'run':(frame.speed??0)>.04?'walk':'idle',reducedMotion,
         helping?{...frame,progress:assistance.progress}:frame);
       rig.root.position.y += followerAssistanceLift(placement.id, assistance, reducedMotion);
     }
   }
 
+  /**
+   * Creatures set to Work walk a loop around the facility they staff, so a pen
+   * with a Tuftle on duty reads as staffed from across the clearing. The path
+   * is presentation only — `workerCreaturePose` derives it from the creature id
+   * and the clock.
+   */
   private syncWorkerCreatures(time: number, reducedMotion: boolean): void {
     const placements = workerCreaturePlacements(this.state);
     for (const [id, rig] of this.workerRigs) {
@@ -2613,8 +2886,8 @@ export class Elaris3DRenderer {
     if (!reducedMotion) {
       for (const child of this.entityRoot.children) {
         const kind = child.userData.resourceKind as ResourceNodeState['kind'] | undefined;
-        if (kind === 'tree' || kind === 'plant' || kind === 'berry-bush') {
-          child.rotation.z = Math.sin(time * 0.00075 + child.position.x * 0.7 + child.position.z * 0.4) * (kind === 'tree' ? 0.012 : 0.025);
+        if (kind === 'plant' || kind === 'berry-bush') {
+          child.rotation.z = Math.sin(time * 0.00075 + child.position.x * 0.7 + child.position.z * 0.4) * 0.025;
         }
       }
     }
@@ -2662,13 +2935,12 @@ export class Elaris3DRenderer {
     });
   }
 
-  private readonly renderFrame = (time: number): void => {
-    this.animationFrame = requestAnimationFrame(this.renderFrame);
-    if (!this.enabled || document.hidden) return;
+  readonly renderFrame = (time: number): void => {
+    if (document.hidden) return;
     const presentation = this.presentationProvider?.() ?? null;
     // Keep the last world image as the journal's backdrop. Simulation continues,
     // while menu input and scrolling do not compete with world rendering.
-    if(presentation?.journalOpen)return;
+    if(presentation?.journalOpen || presentation?.worldBackdrop)return;
     const deltaSeconds = Math.min(0.05, Math.max(0, (time - this.lastFrameAt) / 1000));
     this.lastFrameAt = time;
     if (this.state.currentArea.key !== this.areaKey) this.rebuildWorld();
@@ -2677,7 +2949,8 @@ export class Elaris3DRenderer {
       this.syncEntities();
     }
 
-    const player = worldToThree(this.state.player.x, this.state.player.y);
+    const pose = presentation?.playerPosition ?? this.state.player;
+    const player = worldToThree(pose.x, pose.y);
     const reducedMotion = presentation?.prefersReducedMotion ?? false;
     if (presentation?.interior) {
       this.renderInteriorFrame(presentation.interior, time, deltaSeconds, reducedMotion);
@@ -2693,6 +2966,7 @@ export class Elaris3DRenderer {
     }
     this.battleStage.root.position.copy(this.battleAnchor);
     this.worldRoot.visible = !battleActive;
+    this.resourceGrounding.root.visible = !battleActive;
     this.contactShadows.mesh.visible = !battleActive;
     this.entityRoot.visible = !battleActive;
     this.raiderRoot.visible = !battleActive;
@@ -2705,6 +2979,7 @@ export class Elaris3DRenderer {
     this.playerRoot.visible = !battleActive;
     const activeTarget = battleActive || presentation?.placement ? null : presentation?.target ?? null;
     this.playerRoot.position.set(player.x, PLAYER_Y, player.z);
+    this.updateTravelAngle(player.x, player.z, time);
     const action=presentation?.playerAction;
     const facingTarget=action??(presentation?.gathering?presentation.target:null);
     const desiredFacing=facingTarget?Math.atan2(facingTarget.x/TILE_SIZE-player.x,facingTarget.y/TILE_SIZE-player.z):this.facingAngle();
@@ -2733,6 +3008,7 @@ export class Elaris3DRenderer {
       && equipped.durability > 0
       && gameToolDefinition(this.state, equipped.definitionId).kind === 'staff';
     if(gatheringNode)this.lastGatherKind=gatheringNode.kind;
+    else if(gathering && presentation?.gatherKind)this.lastGatherKind=presentation.gatherKind;
     if(!gathering)this.lastGatherKind=null;
     this.playerRig.setGatherTool(action?.kind==='ranged'?'bow':action?.kind==='magic'?holdingStaff?'staff':'hands'
       :holdingStaff?'staff':gatherToolForNode(action?.kind==='melee'?'tree':this.lastGatherKind));
@@ -2751,6 +3027,17 @@ export class Elaris3DRenderer {
       hurt?{...riderFrame,progress:(time-this.playerHurtAt)/380}:action?{...riderFrame,progress:action.progress}
         :gathering?{...riderFrame,progress:presentation?.gatherProgress??0}:riderFrame,
     );
+
+    const firstPerson = firstPersonView.active && !battleActive && presentation?.placement == null;
+    if (firstPerson !== this.firstPersonFrame) this.setFirstPersonFrame(firstPerson);
+    // The eye is inside the rig, so the local body is hidden; its ground
+    // contact shadow is drawn separately and stays.
+    this.actorRoot.visible = !firstPerson;
+    if (firstPerson) {
+      this.mountRoot.visible = false;
+      this.boatHull.visible = false;
+      this.playerRing.visible = false;
+    }
 
     // In battle the camera tracks the fighter inside the arena, so backing off
     // the enemy keeps the player framed instead of sliding to the screen edge.
@@ -2778,6 +3065,19 @@ export class Elaris3DRenderer {
       this.camera.updateProjectionMatrix();
     }
     this.camera.lookAt(this.cameraTarget);
+    if (firstPerson) {
+      // Position is the interpolated render pose itself, with no follow lag;
+      // rotation is the look state itself, with no easing. The sun and the
+      // shadow frustum follow the player through cameraTarget.
+      this.cameraTarget.set(player.x, 0, player.z);
+      this.firstPersonCamera.position.set(player.x, FIRST_PERSON_EYE_HEIGHT, player.z);
+      this.firstPersonCamera.rotation.set(
+        THREE.MathUtils.degToRad(firstPersonView.look.pitchDegrees),
+        THREE.MathUtils.degToRad(firstPersonView.look.yawDegrees),
+        0,
+      );
+      this.firstPersonHands.update(firstPersonHandsFrame(this.state, presentation));
+    }
     this.placementRangeRing.visible = placementActive;
     if (placementActive) this.placementRangeRing.position.set(player.x, 0.035, player.z);
     const batch = battleActive ? [] : presentation?.batchPlacements ?? [];
@@ -2795,17 +3095,26 @@ export class Elaris3DRenderer {
       // danger minute is real-time and never becomes a turn-based encounter.
       this.syncRaiders(time, deltaSeconds, reducedMotion);
       this.syncWorkerCreatures(time, reducedMotion);
-      this.syncFollowerCreatures(time,reducedMotion,presentation?.gatherAssistance);
+      this.syncFollowerCreatures(time,deltaSeconds,pose,reducedMotion,presentation?.gatherAssistance);
       this.syncArcaneStrikes(reducedMotion);
       this.updateArrows(deltaSeconds, reducedMotion);
       this.updateCombatEffects(presentation,time,reducedMotion);
       this.updateAmbientMotes(time, reducedMotion);
       this.entrance?.update(time, reducedMotion);
-      this.vegetation?.update(player.x, player.z);
-      this.contactShadows.update(this.state, this.workerRoot.children);
+      this.vegetation?.update(player.x, player.z, firstPerson ? 2 : 1);
+      this.contactShadows.update(this.state, this.workerRoot.children, pose);
       updateStyledWater(time, reducedMotion);
-      this.updateOccluders(player, deltaSeconds);
+      updateTreeWind(time, reducedMotion);
+      // Nothing stands between an eye-level camera and the player.
+      if (!firstPerson) this.updateOccluders(player, deltaSeconds);
       this.updateAtmosphere(time, reducedMotion);
+      if (firstPerson) this.firstPersonHands.lightFrom(this.hemisphere, this.sun, this.firstPersonCamera);
+      if (firstPerson && this.scene.fog instanceof THREE.Fog) {
+        // Pulled in so the edge of the loaded area is never visible; a denser
+        // danger fog still wins. The clear colour already equals the fog's.
+        this.scene.fog.near = Math.min(this.scene.fog.near, FIRST_PERSON_FOG_NEAR);
+        this.scene.fog.far = Math.min(this.scene.fog.far, FIRST_PERSON_FOG_FAR);
+      }
     }
     this.updateDangerOverlay(time, deltaSeconds, reducedMotion, battleActive);
     if (!battleActive) this.updatePurifierProtection(time);
@@ -2819,10 +3128,13 @@ export class Elaris3DRenderer {
     deltaSeconds: number,
     reducedMotion: boolean,
   ): void {
+    if (this.firstPersonFrame) this.setFirstPersonFrame(false);
+    this.actorRoot.visible = true;
     this.battleCameraActive = false;
     this.battleStage.root.visible = false;
     this.contactShadows.mesh.visible = false;
     this.worldRoot.visible = false;
+    this.resourceGrounding.root.visible = false;
     this.entityRoot.visible = false;
     this.raiderRoot.visible = false;
     this.workerRoot.visible = false;
@@ -2889,8 +3201,57 @@ export class Elaris3DRenderer {
     this.finish.render();
   }
 
+  /** Swap the composer's camera and undo occluder fades when first person starts or ends. */
+  private setFirstPersonFrame(enabled: boolean): void {
+    this.firstPersonFrame = enabled;
+    this.firstPersonHands.setVisible(enabled);
+    this.finish.setForegroundEnabled(enabled);
+    this.woodlandSky.mesh.visible = enabled;
+    // Existing labels and labels created later both follow the active view.
+    this.scene.traverse(child => { if (child.userData.worldLabel) child.visible = !enabled; });
+    this.lookPointer = null;
+    this.finish.setCamera(enabled ? this.firstPersonCamera : this.camera);
+    if (enabled) {
+      for (const occluder of this.occluders) {
+        occluder.opacity = 1;
+        occluder.materials.forEach((material, index) => {
+          material.opacity = occluder.baseOpacity[index]!;
+          material.depthWrite = true;
+        });
+      }
+    }
+  }
+
+  /** The overworld rig's heading: the direction of travel under free movement. */
   private facingAngle(): number {
-    return this.facingAngleFor(this.state.player.facing);
+    return this.travelAngle;
+  }
+
+  private updateTravelAngle(x: number, z: number, time: number): void {
+    const facing = this.state.player.facing;
+    if (!this.travelAnchor) {
+      this.travelAnchor = { x, z };
+      this.travelAngle = this.facingAngleFor(facing);
+      this.travelFacing = facing;
+      return;
+    }
+    const dx = x - this.travelAnchor.x;
+    const dz = z - this.travelAnchor.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance >= 3) {
+      // A teleport (respawn, area entry, door) is not a direction of travel.
+      this.travelAnchor = { x, z };
+    } else if (distance > 0.04) {
+      this.travelAngle = Math.atan2(dx, dz);
+      this.travelAnchor = { x, z };
+      this.travelMovedAt = time;
+    }
+    // Facing that changes while standing still (pushing into a wall, a d-pad
+    // tap that was blocked) still turns the character to that side.
+    if (facing !== this.travelFacing) {
+      this.travelFacing = facing;
+      if (time - this.travelMovedAt > 150) this.travelAngle = this.facingAngleFor(facing);
+    }
   }
 
   private facingAngleFor(facing: GameState['player']['facing']): number {
@@ -2947,6 +3308,7 @@ export class Elaris3DRenderer {
   ): void {
     void this.addModel(parent, key, position, rotationY, targetHeight, undefined, scale).then((model) => {
       if (model.parent !== parent) return;
+      if (parent.userData.resourceKind === 'tree') addGroundedTreeWind(model);
       const materials: THREE.Material[] = [];
       model.traverse((child) => {
         if (!(child instanceof THREE.Mesh)) return;
@@ -3021,6 +3383,7 @@ export class Elaris3DRenderer {
     const tintWeight = 0.16 + cue.twilight * 0.42 + cue.night * 0.5;
     const sky = new THREE.Color(palette.sky).lerp(new THREE.Color(cue.skyTint), tintWeight);
     this.scene.background = sky;
+    this.woodlandSky.update(this.firstPersonCamera, sky, Math.max(cue.night, this.dangerFogStrength * .8));
     if (this.scene.fog instanceof THREE.Fog) {
       this.scene.fog.color.copy(sky);
       this.scene.fog.near = cue.fogNear;
@@ -3043,6 +3406,7 @@ export class Elaris3DRenderer {
     );
     this.sun.target.updateMatrixWorld();
     this.updateLandmarkBeacon(time, reducedMotion, cue.night + cue.twilight * 0.3);
+    this.syncFieldSiteCrates();
     this.animatePurifierProtection(time, reducedMotion);
   }
 
@@ -3259,7 +3623,7 @@ export class Elaris3DRenderer {
     const points: ScreenPoint[] = [];
     for (const y of [0, 4.2]) {
       for (const [x, z] of [[left, top], [right, top], [right, bottom], [left, bottom]] as const) {
-        const projected = new THREE.Vector3(x, y, z).project(this.camera);
+        const projected = new THREE.Vector3(x, y, z).project(this.activeCamera());
         points.push({
           x: (projected.x + 1) * width / 2,
           y: (1 - projected.y) * height / 2,

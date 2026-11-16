@@ -39,6 +39,18 @@ export const SELL_PRICES: Readonly<Record<ResourceId, number>> = {
   'quillfinch-quill': 38,
   'mistmoth-scale': 60,
   'slingtail-stone': 46,
+  // Salvage sells, but poorly next to what it builds: the price is a floor for
+  // a full bag, not the reason to go out. The three zero-priced items are
+  // quest and key items that `sellResource` refuses outright.
+  'scrap-iron': 4,
+  clockwork: 12,
+  lens: 14,
+  'arcane-dust': 10,
+  'construct-core': 60,
+  'ancient-alloy': 90,
+  'sealed-satchel': 0,
+  'vault-key': 0,
+  'recall-flare': 0,
 };
 
 /**

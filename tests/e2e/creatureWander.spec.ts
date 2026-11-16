@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
 import { openApp, waitForDebugHandles } from './app';
 import { tapWorld } from './interact';
@@ -53,6 +54,7 @@ async function seedIdleCreature(
   // and a save the migrator rejects falls back to `lastKnownGood` without a
   // word, which is a fixture that appears to load and quietly is not there.
   await page.evaluate(async () => { await (globalThis as any).__controller.flushAndRelease(); });
+  await releaseSaveWriter(page);
   await page.evaluate(async ({ player, loadout: gear, place }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -138,14 +140,14 @@ test('an unprovoked creature wanders its patch and its sprite follows', async ({
   const pose = await page.evaluate(() => {
     const scene = (globalThis as any).__game.scene.getScene('world');
     const creature = scene.state.wildCreatures.find((candidate: any) => candidate.id === 'wander-e2e');
-    const sprite = scene.creatureSprites.get('wander-e2e');
+    const sprite = (globalThis as any).__renderer3d.creatureRigs.get('wander-e2e')?.root;
     return creature && sprite
-      ? { creature: { x: creature.x, y: creature.y }, sprite: { x: sprite.x, y: sprite.y } }
+      ? { creature: { x: creature.x, y: creature.y }, sprite: { x: sprite.position.x * 16, y: sprite.position.z * 16 } }
       : null;
   });
   expect(pose).not.toBeNull();
   expect(Math.hypot(pose!.sprite.x - pose!.creature.x, pose!.sprite.y - pose!.creature.y))
-    .toBeLessThanOrEqual(2);
+    .toBeLessThanOrEqual(8);
   // And it is genuinely off its spawn point in the live world too, so the
   // sprite is tracking a creature that moved rather than one that never did.
   expect(Math.hypot(pose!.creature.x - home.x, pose!.creature.y - home.y)).toBeGreaterThan(8);

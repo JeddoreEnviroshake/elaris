@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createInitialState, createLogisticsHubState, createWorkerHousingState } from '../../src/simulation/state';
 import { enclosedEnvironment } from '../unit/helpers/buildings';
 import { openApp, waitForDebugHandles } from './app';
-import { expectSavedState } from './save';
+import { releaseSaveWriter, expectSavedState } from './save';
 
 test('links a worker to bulk storage through the primary 3D Logistics Hub UI', async ({ page }) => {
   await openApp(page, 'render=3d');
@@ -42,6 +42,7 @@ test('links a worker to bulk storage through the primary 3D Logistics Hub UI', a
   }];
   state.nextEntityId = 600;
 
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixtureState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);

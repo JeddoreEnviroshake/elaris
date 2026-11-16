@@ -1,11 +1,9 @@
+import { entityAtWorld } from '../presentation/worldHitTests';
 import Phaser from 'phaser';
-import { generateWorldTextures } from '../art/proceduralTextures';
-import { creatureTextureKey, raiderTextureKey, townBuildingTextureKey, TextureKeys } from '../art/textureKeys';
-import { preloadArtAssets } from '../art/assetManifest';
-import { AnimationKeys, playerAnimationKey, registerWorldAnimations, type Facing } from '../art/animations';
-import { gameToolDefinition, INTERACTION_RANGE_PX, TAMING_RANGE_PX, toolDefinition } from '../config/balance';
-import { DEFAULT_WORLD_SEED, FIXED_STEP_MS, WORLD_PX, WORLD_TILES } from '../config/platform';
-import { computeLayout } from '../platform/responsiveLayout';
+
+import { gameToolDefinition, INTERACTION_RANGE_PX, TAMING_RANGE_PX } from '../config/balance';
+import { DEFAULT_WORLD_SEED, FIXED_STEP_MS } from '../config/platform';
+
 import type { MoveIntent } from '../simulation/commands';
 import {
   createGridMovementState,
@@ -14,101 +12,27 @@ import {
   stepMovement,
 } from '../simulation/commands';
 import { FixedStepLoop } from '../simulation/fixedStep';
-import {
-  buildableById,
-  FACILITY_INTERACTION_RANGE_PX,
-  attackFacedWall,
-  collectNearestGroundDrop,
-  depositResourceStackInFieldCache,
-  depositToolInFieldCache,
-  dropResourceStack,
-  selectCompanionAbility,
-  setBattleCompanion,
-  setCreatureRole,
-  craftTool,
-  craftRowboat,
-  equipBareHands,
-  equippedBow,
-  equipTool,
-  gatherNearest,
-  isStructureDamaged,
-  nearestFacedWall,
-  repairStructure,
-  nearestLiveNode,
-  nearestUsableFacility,
-  nearestWildCreature,
-  structureHp,
-  structureMaxHp,
-  repairTool,
-  dropTool,
-  splitResourceStack,
-  withdrawFromFieldCache,
-  withdrawResourceStackFromFieldCache,
-  withdrawToolFromFieldCache,
-  removeBuilding,
-  rowboatActionLabel,
-  toggleRowboat,
-  type CommandResult,
-} from '../simulation/gameplayCommands';
+import { buildableById, FACILITY_INTERACTION_RANGE_PX, attackFacedWall, collectNearestGroundDrop, depositResourceStackInFieldCache, depositToolInFieldCache, dropResourceStack, selectCompanionAbility, setBattleCompanion, setCreatureRole, craftTool, craftRowboat, equipBareHands, equippedBow, equipTool, gatherNearest, isStructureDamaged, nearestFacedWall, repairStructure, nearestLiveNode, nearestUsableFacility, nearestWildCreature, repairTool, dropTool, splitResourceStack, withdrawFromFieldCache, withdrawResourceStackFromFieldCache, withdrawToolFromFieldCache, removeBuilding, rowboatActionLabel, toggleRowboat, type CommandResult } from '../simulation/gameplayCommands';
 import { craftArrows, craftClothMask, craftReinforcedSnare, craftTamingSnare, resolveEncounterAction, startNearestEncounter, throwSnareAtCreature, type EncounterAction } from '../simulation/encounters';
 import { describeGardenBed, harvestGardenBed, nearestGardenBed } from '../simulation/gardenBeds';
 import { describeWoodlotPlanter, harvestWoodlotPlanter, nearestWoodlotPlanter } from '../simulation/woodlotPlanters';
 import type { BuildingState, GameState, GroundDropState, RaiderState, ResourceNodeState, WildCreatureState } from '../simulation/state';
-import type { ResourceId, WorldContainerKind } from '../simulation/state';
+import type { ResourceId } from '../simulation/state';
 import { nearestUnopenedContainer, openNearestContainer } from '../simulation/worldContainers';
 
-/** One ground-drop sprite per Bag item, including handcrafted supplies. */
-const DROP_TEXTURE_KEYS: Readonly<Record<ResourceId, string>> = {
-  wood: TextureKeys.DropWood,
-  stone: TextureKeys.DropStone,
-  fiber: TextureKeys.DropFiber,
-  'iron-ore': TextureKeys.DropIronOre,
-  'iron-ingot': TextureKeys.DropIronIngot,
-  'taming-snare': TextureKeys.DropTamingSnare,
-  'reinforced-snare': TextureKeys.DropReinforcedSnare,
-  berry: TextureKeys.DropBerry,
-  arrow: TextureKeys.DropArrow,
-  'cloth-mask': TextureKeys.DropClothMask,
-  'safeguard-charm': TextureKeys.DropSafeguardCharm,
-  'draft-parchment': TextureKeys.DropSafeguardCharm,
-  'tuftle-down': TextureKeys.DropTuftleDown,
-  'craghopper-shell': TextureKeys.DropCraghopperShell,
-  'stag-antler': TextureKeys.DropStagAntler,
-  'snarlfox-pelt': TextureKeys.DropSnarlfoxPelt,
-  'masonmole-claw': TextureKeys.DropMasonmoleClaw,
-  'boar-tusk': TextureKeys.DropBoarTusk,
-  'quillfinch-quill': TextureKeys.DropQuillfinchQuill,
-  'mistmoth-scale': TextureKeys.DropMistmothScale,
-  'slingtail-stone': TextureKeys.DropSlingtailStone,
-};
-
-/** One sprite per container kind; opened ones are the same art, faded. */
-const CONTAINER_TEXTURE_KEYS: Readonly<Record<WorldContainerKind, string>> = {
-  'hollow-log': TextureKeys.ContainerHollowLog,
-  'supply-cache': TextureKeys.ContainerSupplyCache,
-  'collapsed-cellar': TextureKeys.ContainerCollapsedCellar,
-  'storm-cache': TextureKeys.ContainerStormCache,
-};
-const OPENED_CONTAINER_ALPHA = 0.45;
-/** One tool silhouette lies in the world; its tier is carried by the tint. */
-const TOOL_DROP_TIER_TINTS: Readonly<Record<'wooden' | 'stone' | 'iron', number>> = {
-  wooden: 0xd9a066,
-  stone: 0x9aa1a8,
-  iron: 0xcfd8e3,
-};
 import { NO_SHOT_TARGET_MESSAGE, firePlayerShot, loadTurretAmmo, nearestRaiderInRange, playerShotRangePx, strikeRaiderMelee, unloadTurretAmmo, type AbsentBaseRaidReport } from '../simulation/raids';
 import {
   NO_SHOT_CREATURE_MESSAGE, fireCreatureShot, nearestCreatureInRange, nearestHuntableCreature, strikeCreatureMelee,
   type CreatureStrikeResult,
 } from '../simulation/creatureStrike';
 import { strikeReachPx } from '../simulation/strike';
+import { gatherResource } from '../simulation/gameplayCommands';
 import { createInitialState } from '../simulation/state';
 import { claimQuestReward, reconcileQuestProgress } from '../simulation/progression';
 import { spendAttributePoint, spendAttributePoints } from '../simulation/characterProgression';
 import { buildingCenterPx, effectiveBuildingDimensions } from '../simulation/buildingGeometry';
 import { BuildModeController } from './buildMode';
-import { DangerAtmosphereOverlay } from './dangerAtmosphere';
-import { ArcaneStormOverlay } from './arcaneStormOverlay';
+
 import type { PlaceResult } from './buildPlacement';
 import { BuildMenu } from '../ui/buildMenu';
 import { GameplayHud } from '../ui/gameplayHud';
@@ -135,32 +59,17 @@ import { acknowledgeOpeningFog } from '../simulation/openingFog';
 import { claimShelterSupplies, moveShelterPlan } from '../simulation/openingShelter';
 import { isOpeningTuftle } from '../content/onboarding';
 import { actOpeningTrust, beginOpeningTrust, nameOpeningCompanion, nearbyOpeningTuftle } from '../simulation/onboarding';
-import { coordinateHash, mountainElevationBand, starterBiomeAt } from '../simulation/biomes';
+
 import { TILE_SIZE } from '../config/platform';
-import { creatureDefinition } from '../content/creatures';
-import { regionalIdentityForArea, regionalIdentityForLandmark } from '../content/regions';
-import { areaPalette, isElaris } from '../simulation/areas';
+
+import { regionalIdentityForLandmark } from '../content/regions';
+
 import { BuildingItemMenu } from '../ui/buildingItemMenu';
-import {
-  isRuinedTownBuilding,
-  outsideDoorTile,
-  townBuildingDoorTiles,
-  townBuildingsInArea,
-  townBuildingById,
-  type TownBuildingId,
-  type TownBuildingDefinition,
-} from '../content/townBuildings';
-import { areaDisplayName, hasElarisFallen } from '../simulation/elarisFall';
-import { PERMANENT_AIR_PURIFIER, TOWN_AIR_PURIFIERS, TOWN_PERIMETER_SEGMENTS } from '../content/townDefences';
-import {
-  ELARIS_PUBLIC_WORKBENCH_SIZE,
-  ELARIS_PUBLIC_WORKBENCH_TILE,
-  elarisPublicWorkbenchContains,
-  elarisPublicWorkbenchFacility,
-  isElarisPublicWorkbenchId,
-} from '../simulation/elarisWorkbench';
-import { BLUEPRINT_QUALITY_COLORS, blueprintQuality } from '../content/blueprintQuality';
-import { ELARIS_WATER_TEMPLE } from '../content/elarisWaters';
+import { townBuildingsInArea, townBuildingById, type TownBuildingId, type TownBuildingDefinition } from '../content/townBuildings';
+import { areaDisplayName } from '../simulation/elarisFall';
+
+import { elarisPublicWorkbenchContains, elarisPublicWorkbenchFacility, isElarisPublicWorkbenchId } from '../simulation/elarisWorkbench';
+
 import {
   nearestTownBuildingDoor,
   positionPlayerInDoorway,
@@ -176,9 +85,8 @@ import { clearLogisticsRoute, setLogisticsRoute } from '../simulation/logistics'
 import { AdminPanel, type AdminSystemControls } from '../ui/adminPanel';
 import { globalBalanceService, type GlobalBalanceService } from '../platform/globalBalance';
 import { DurationWindow, type DurationStats } from '../platform/durationWindow';
-import { interpolateRenderPoint, mountedActorDepths, mountTransformForFacing } from './renderMotion';
-import { prioritizeTerrainChunks, terrainChunkLayout, type TerrainChunk } from './terrainChunks';
-import { CombatOverlay } from './combatOverlay';
+import { interpolateRenderPoint } from './renderMotion';
+
 import {
   loadoutStrikeStyle,
   resolveCombatTarget,
@@ -188,6 +96,7 @@ import {
 } from './combatPresentation';
 import {
   activeEntityChunkKeys,
+  chunkViewRectAround,
   entityChunkKey,
   EntityChunkIndex,
   type EntityActivationCounts,
@@ -207,16 +116,28 @@ import {
   type BattleRoundPresentation,
 } from '../three/battleState';
 import { cameraOrientationFromTenths, screenToCameraWorldIntent } from '../three/cameraControls';
-import { terrainAt } from '../simulation/landscape';
+import {
+  FIRST_PERSON_VIEW_RADIUS_TILES, KEYBOARD_TURN_DEGREES_PER_SECOND, firstPersonView, groundForward,
+} from '../three/firstPersonView';
+import { FirstPersonHud } from '../ui/firstPersonHud';
+import { CompassStrip, SearchProgressRing } from '../ui/compassStrip';
+import { compassMarks, compassPips } from '../presentation/compass';
+import { compassTargets } from '../presentation/siteViews';
+import {
+  beginSiteSearch, containerLabelFor, currentSiteProgress, liveAreaSites, nearestSearchableContainer,
+  siteSearchProgress, type SiteSearchResult,
+} from '../simulation/sites';
+import { pickCrosshairTarget, type CrosshairCandidate } from '../presentation/crosshairTarget';
+import { creatureDefinition } from '../content/creatures';
+
 import { InteriorSessionController, type GameplayMode } from '../presentation/interiorSession';
 import { interiorDefinitionById, interiorDefinitionForBuilding } from '../content/interiors';
 import { nearestInteriorHotspot, stepInteriorMovement } from '../presentation/interiorMovement';
-import { InteriorFallback } from '../ui/interiorFallback';
+
 import { InteriorTransitionOverlay } from '../ui/interiorTransition';
 import { NpcDialogueController, type DialogueChoiceResult } from '../presentation/npcDialogue';
 import { NpcBarkController } from '../presentation/npcBarks';
-import { workerCreaturePlacements, workerCreaturePose } from '../presentation/workerCreatures';
-import { followerCreaturePlacements, followerAssistanceLift } from '../presentation/followerCreatures';
+
 import { NpcDialogue } from '../ui/npcDialogue';
 import { NpcBark } from '../ui/npcBark';
 import { npcDefinition, type NpcId, type NpcService } from '../content/npcs';
@@ -229,7 +150,6 @@ export interface WorldSceneData {
   /** Cancel pending ordinary persistence before a transition paints. */
   onTransitionStarted?: () => void;
   globalBalance?: GlobalBalanceService;
-  is3DPresentation?: () => boolean;
   onBattleRound?: (round: BattleRoundPresentation) => void;
   /** System-level controls surfaced inside the Admin menu. */
   system?: AdminSystemControls;
@@ -238,7 +158,6 @@ export interface WorldSceneData {
 export interface WorldPerformanceSnapshot {
   frameTimes: DurationStats;
   areaTransitions: DurationStats;
-  terrainChunks: { visible: number; total: number };
   entities: EntityActivationCounts & {
     resources: EntityActivationCounts;
     drops: EntityActivationCounts;
@@ -290,29 +209,10 @@ const FACILITY_PANEL_DEFINITIONS: ReadonlySet<string> = new Set([
   'field-cache', 'workbench', 'furnace', 'war-table', 'turret',
   'farm-counter', 'small-pen', 'barn', 'stone-yard', 'cart-dock',
 ]);
-const HIGHLIGHT_TINT = 0xffe08a;
-const OVERLAY_DEPTH = 999_000;
-const TOWN_GATE_OPEN_RADIUS = TILE_SIZE * 1.35;
-const TOWN_GATE_SWING_MS = 180;
-const TOWN_GATE_SWING_FRAMES = [
-  TextureKeys.GateWood, TextureKeys.GateWoodSwing1, TextureKeys.GateWoodSwing2,
-  TextureKeys.GateWoodSwing3, TextureKeys.GateWoodSwing4,
-] as const;
+
 const HUD_REFRESH_INTERVAL_MS = 500;
 
-/** Viewport coordinates for a pointer, used to anchor DOM menus to the click. */
-function clientPointOf(pointer: Phaser.Input.Pointer): { x: number; y: number } {
-  const event = pointer.event as PointerEvent | undefined;
-  return { x: event?.clientX ?? pointer.x, y: event?.clientY ?? pointer.y };
-}
 const AREA_TRANSITION_SPLASH_MS = 1_000;
-/** How long the character keeps pulsing gold after a level up. */
-const LEVEL_UP_CELEBRATION_MS = 5_000;
-/** Pulses per second of the level-up glow. Fast enough to read as a fanfare. */
-const LEVEL_UP_PULSE_HZ = 3;
-const LEVEL_UP_GOLD = 0xffd23f;
-const LEVEL_UP_SPARKLE_INTERVAL_MS = 130;
-type ChunkedSprite = Phaser.GameObjects.Image | Phaser.GameObjects.Sprite;
 
 export class WorldScene extends Phaser.Scene {
   state!: GameState;
@@ -324,7 +224,7 @@ export class WorldScene extends Phaser.Scene {
   private onCriticalChanged: () => void = () => {};
   private onTransitionStarted: () => void = () => {};
   private globalBalance = globalBalanceService;
-  private is3DPresentation: () => boolean = () => false;
+
   private onBattleRound: (round: BattleRoundPresentation) => void = () => {};
   private systemControls: AdminSystemControls = {};
   private areaSplash: HTMLDivElement | null = null;
@@ -335,18 +235,14 @@ export class WorldScene extends Phaser.Scene {
   private transitionFinishTimer: ReturnType<typeof setTimeout> | null = null;
   private transitionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private loop!: FixedStepLoop;
-  private player!: Phaser.GameObjects.Sprite;
-  private boatHull!: Phaser.GameObjects.Ellipse;
-  private mount: Phaser.GameObjects.Image | null = null;
-  private cameraTarget: Phaser.GameObjects.Zone | null = null;
+
   private previousPlayerX = 0;
   private previousPlayerY = 0;
+  private renderPlayerPosition = { x: 0, y: 0 };
+  private simulationVisualsDirty = false;
   /** Last level the presentation has already celebrated. 0 means "not yet seeded". */
   private lastCelebratedLevel = 0;
-  private levelUpEndsAt = 0;
-  /** Aura pieces that ride along with the character for the celebration. */
-  private levelUpAura: Phaser.GameObjects.Arc[] = [];
-  private levelUpSparkleTimer: Phaser.Time.TimerEvent | null = null;
+
   private hudDirty = true;
   private lastHudRefreshAt = Number.NEGATIVE_INFINITY;
   private joystick!: TouchJoystick;
@@ -355,6 +251,18 @@ export class WorldScene extends Phaser.Scene {
   private intent: MoveIntent = NO_MOVE;
   private interiorIntent: MoveIntent = NO_MOVE;
   private readonly gridMovement = createGridMovementState();
+  /** First-person HUD furniture (rail toggle, crosshair, inspect button). */
+  private firstPersonHud: FirstPersonHud | null = null;
+  /** First-person bearing strip for discovered sites, the cache and the bed. */
+  private compassStrip: CompassStrip | null = null;
+  /** Search progress, at the crosshair or over the character. */
+  private searchRing: SearchProgressRing | null = null;
+  /** Whether last frame was in first person, to notice the mode starting and ending. */
+  private wasFirstPerson = false;
+  /** The look is aimed down the overhead camera's "up" once per toggle into first person. */
+  private firstPersonLookPrimed = false;
+  /** What sits under the first-person crosshair this frame, if anything. */
+  private crosshairTarget: CrosshairCandidate | null = null;
   private readonly interiorGridMovement = createGridMovementState();
   /**
    * One tile of travel asked for by a d-pad tap. It is held as intent until the
@@ -398,40 +306,21 @@ export class WorldScene extends Phaser.Scene {
   private paddockGuide!: PaddockGuide;
   private supplyRunGuide!: SupplyRunGuide;
   private gardenGuide!: GardenGuide;
-  private journeyOutline: Phaser.GameObjects.Graphics | null = null;
-  private shelterOutline: Phaser.GameObjects.Graphics | null = null;
+
   private npcServiceOverlay!: NpcServiceOverlay;
-  private interiorFallback!: InteriorFallback;
+
   private interiorTransition!: InteriorTransitionOverlay;
   private interiorAudio!: InteriorAudioRouter;
   private npcDialogue!: NpcDialogue;
   private npcBark!: NpcBark;
   private adminPanel!: AdminPanel;
-  private readonly resourceSprites = new Map<string, Phaser.GameObjects.Image>();
-  private readonly dropSprites = new Map<string, Phaser.GameObjects.Image>();
-  private readonly blueprintDropSprites = new Map<string, Phaser.GameObjects.Image>();
-  private readonly toolDropSprites = new Map<string, Phaser.GameObjects.Image>();
-  /** Containers are drawn directly: an area holds a handful, never enough to chunk. */
-  private readonly containerSprites = new Map<string, Phaser.GameObjects.Image>();
-  private readonly creatureSprites = new Map<string, Phaser.GameObjects.Sprite>();
+
   private readonly resourceNodesById = new Map<string, ResourceNodeState>();
   private readonly dropsById = new Map<string, GroundDropState>();
   private readonly creaturesById = new Map<string, WildCreatureState>();
-  /** Raiders are drawn directly; a wave is far too small to need chunking. */
-  private readonly raiderSprites = new Map<string, Phaser.GameObjects.Image>();
-  /** Owned creatures on Work duty, ambling around the facility they staff. */
-  private readonly workerCreatureSprites = new Map<string, Phaser.GameObjects.Sprite>();
-  private readonly followerCreatureSprites = new Map<string, Phaser.GameObjects.Sprite>();
+
   private gatherAssistance: { creatureId: string; x: number; y: number; startedAt: number } | null = null;
-  /**
-   * "Lv N" plates above wild creatures and raiders, keyed by entity id.
-   *
-   * Kept beside the sprites rather than parented to them: creature sprites go
-   * through chunk activation, and a label that inherited that visibility would
-   * still have to be positioned every frame anyway. One map, one pass, and the
-   * plate mirrors whatever its sprite is currently doing.
-   */
-  private readonly levelPlates = new Map<string, Phaser.GameObjects.Text>();
+
   private readonly buildingsById = new Map<string, BuildingState>();
   private readonly resourceChunks = new EntityChunkIndex();
   private readonly dropChunks = new EntityChunkIndex();
@@ -450,37 +339,16 @@ export class WorldScene extends Phaser.Scene {
   };
   private entityActivationDirty = true;
   private activeChunkSignature: string | null = null;
-  private readonly townBuildingSprites = new Map<string, Phaser.GameObjects.Image>();
-  private readonly townPropSprites = new Map<string, Phaser.GameObjects.Image[]>();
-  private readonly townGateSprites = new Map<string, {
-    sprite: Phaser.GameObjects.Image;
-    centerX: number;
-    centerY: number;
-    openness: number;
-  }>();
-  private readonly terrainChunkSprites: Phaser.GameObjects.Image[] = [];
-  private readonly terrainTextureKeys: string[] = [];
-  private pendingTerrainChunks: TerrainChunk[] = [];
-  private terrainBuildFrame: number | null = null;
+
   private readonly frameTimes = new DurationWindow(240);
   private readonly areaTransitionTimes = new DurationWindow(30);
   private readonly interactionQueryTimes = new DurationWindow(240);
   private lastInteractionCandidateCount = 0;
-  private facing: Facing = 'down';
-  private activeEffectCount = 0;
-  private ambientLeafSequence = 0;
+
   private gatheringUntil = 0;
+  private gatheringKind: ResourceNodeState['kind'] | null = null;
   private playerActionVisual:{kind:StrikeStyle;startedAt:number;x:number;y:number;arrowTracked:boolean}|null=null;
-  /**
-   * Walls are never an ambient target and never highlight on approach, but a
-   * damaged one carries a health bar until it is repaired or destroyed.
-   */
-  private wallHpBar!: Phaser.GameObjects.Graphics;
-  /** Ids and health of the bars currently drawn, so we only redraw on change. */
-  private damagedWallSignature = '';
-  private dangerAtmosphere!: DangerAtmosphereOverlay;
-  private arcaneStorm!: ArcaneStormOverlay;
-  private highlightedId: string | null = null;
+
   private lastTargetKey: string | null = null;
   private presentationTarget: InteractionTargetPresentation | null = null;
   /**
@@ -489,7 +357,6 @@ export class WorldScene extends Phaser.Scene {
    * fractional distances the canonical state hash would reject.
    */
   private stickyTarget: CombatTarget | null = null;
-  private combatOverlay!: CombatOverlay;
 
   constructor() {
     super('world');
@@ -500,7 +367,9 @@ export class WorldScene extends Phaser.Scene {
     const pose = this.interiorSession.pose;
     const buildingId = this.interiorSession.buildingId;
     return {
+      playerPosition: this.transitioningArea ? this.state.player : this.renderPlayerPosition,
       journalOpen:this.inventoryPanel?.open??false,
+      worldBackdrop: this.adminPanel?.open === true && !this.adminPanel.worldPreviewActive,
       placement: this.buildMode?.getPresentationState() ?? null,
       selection: this.buildMode?.getSelectionPresentationState() ?? null,
       batchPlacements: this.buildMode?.getBatchPresentationStates() ?? [],
@@ -508,6 +377,7 @@ export class WorldScene extends Phaser.Scene {
       journeyWaypoint: openingGardenAvailable(this.state) ? this.gardenGuide?.visibleWaypoint ?? null : this.supplyRunGuide?.visibleWaypoint ?? null,
       target: this.presentationTarget,
       gathering: this.time.now < this.gatheringUntil,
+      gatherKind: this.time.now < this.gatheringUntil ? this.gatheringKind : null,
       gatherProgress: Math.max(0,Math.min(1,1-(this.gatheringUntil-this.time.now)/280)),
       playerAction:this.playerActionVisual&&this.time.now-this.playerActionVisual.startedAt<600
         ?{id:this.playerActionVisual.startedAt,arrowTracked:this.playerActionVisual.arrowTracked,kind:this.playerActionVisual.kind,progress:Math.max(0,(this.time.now-this.playerActionVisual.startedAt)/600),x:this.playerActionVisual.x,y:this.playerActionVisual.y}:null,
@@ -548,7 +418,6 @@ export class WorldScene extends Phaser.Scene {
       }
       this.interiorAudio.leave();
       this.interiorSession.recoverToWorld();
-      this.interiorFallback.close();
     }
     this.enterTownBuilding(townBuildingById(buildingId));
   }
@@ -566,50 +435,23 @@ export class WorldScene extends Phaser.Scene {
       this.onCriticalChanged = () => data.onStateChanged?.('critical');
     }
     this.onTransitionStarted = data.onTransitionStarted ?? (() => {});
-    this.is3DPresentation = data.is3DPresentation ?? (() => false);
     this.onBattleRound = data.onBattleRound ?? (() => {});
     this.systemControls = data.system ?? {};
   }
 
-  preload(): void {
-    preloadArtAssets(this);
-  }
-
   create(): void {
-    this.cameras.main.setVisible(!this.is3DPresentation());
     this.gatherAssistance = null;
     this.hudDirty = true;
     this.lastHudRefreshAt = Number.NEGATIVE_INFINITY;
-    generateWorldTextures(this);
-    registerWorldAnimations(this);
-    this.buildGround();
-    this.buildTownBuildings();
     this.buildResourceNodes();
     this.syncWildCreatures();
     this.syncGroundDrops();
-    this.syncItemDrops();
-    this.syncContainers();
-    this.wallHpBar = this.add.graphics().setDepth(OVERLAY_DEPTH);
-    this.combatOverlay = new CombatOverlay(this, OVERLAY_DEPTH);
 
-    this.player = this.add
-      .sprite(this.state.player.x, this.state.player.y, TextureKeys.PlayerIdleDown)
-      .setOrigin(0.5, 0.875);
-    this.boatHull = this.add
-      .ellipse(this.state.player.x, this.state.player.y + 2, 24, 11, 0x8b5d38, 1)
-      .setStrokeStyle(2, 0x3f2b22, 1)
-      .setVisible((this.state.player.traversalMode ?? 'foot') === 'boat');
-    this.player.play(AnimationKeys.PlayerIdleDown);
     this.previousPlayerX = this.state.player.x;
     this.previousPlayerY = this.state.player.y;
-    this.syncMountAppearance();
 
-    this.setupCamera();
-    this.dangerAtmosphere = new DangerAtmosphereOverlay(this, this.state, OVERLAY_DEPTH - 1);
     // Above the atmospheric wash and every structure, below the HUD: a marker
     // the player has three seconds to read must never sit under a roof.
-    this.arcaneStorm = new ArcaneStormOverlay(this, this.state, OVERLAY_DEPTH - 1);
-    this.setupForestAmbience();
     this.setupInput();
     const parent = document.getElementById('app') ?? document.body;
     this.openingPanel = new OpeningPartnershipPanel(parent, this.state, {
@@ -692,7 +534,7 @@ export class WorldScene extends Phaser.Scene {
       onLoadTurretAmmo: (turretId, amount) => this.performTurretAmmo(loadTurretAmmo(this.state, turretId, amount)),
       onUnloadTurretAmmo: (turretId, amount) => this.performTurretAmmo(unloadTurretAmmo(this.state, turretId, amount)),
     });
-    this.buildMode = new BuildModeController(this, this.state, {
+    this.buildMode = new BuildModeController(this.state, {
       onBatchPreview: (preview) => this.buildMenu?.setBatchPreview(preview),
       onValidity: (check) => this.buildMenu.setValidity(check),
       onPlaced: (result) => this.onPlacementAttempt(result),
@@ -763,6 +605,7 @@ export class WorldScene extends Phaser.Scene {
       this.onCriticalChanged();
       this.refreshHudNow();
     }, this.globalBalance, this.systemControls);
+    this.adminPanel.attachToMenu(this.inventoryPanel);
     this.hud.attachToMenu(this.inventoryPanel);
     // Build is a section of the Craft tab now, so the palette mounts on the HUD.
     this.buildMenu.attachToMenu(this.hud);
@@ -805,9 +648,9 @@ export class WorldScene extends Phaser.Scene {
         if (result.ok) { this.inventoryPanel.close(); this.syncWildCreatures(); }
         this.applyEncounterResult(result);
       },
-      onRecover: () => { this.performToolCommand(() => recoverOpeningSupplies(this.state), true); this.syncContainers(); },
       onClaim: () => this.performToolCommand(() => claimOpeningDiscovery(this.state), true),
-      onSideCache: () => { this.performToolCommand(() => openOpeningSideCache(this.state), true); this.syncContainers(); },
+      onRecover: () => this.performToolCommand(() => recoverOpeningSupplies(this.state), true),
+      onSideCache: () => this.performToolCommand(() => openOpeningSideCache(this.state), true),
     });
     this.supplyRunGuide.attachToMenu(this.inventoryPanel);
     this.gardenGuide = new GardenGuide(this.state, {
@@ -839,11 +682,6 @@ export class WorldScene extends Phaser.Scene {
       (abilityId) => this.performCompanionAbilitySelection(abilityId),
     );
     this.encounterPanel.refresh();
-    // The 2D room paints the scene's own generated pixel art, so an interior is
-    // made of the same textures as the world outside its door.
-    this.interiorFallback = new InteriorFallback(parent, (key) => (
-      this.textures.exists(key) ? this.textures.getBase64(key) : null
-    ));
     this.interiorTransition = new InteriorTransitionOverlay(parent);
     this.interiorAudio = new InteriorAudioRouter();
     this.npcDialogue = new NpcDialogue(parent, {
@@ -855,7 +693,6 @@ export class WorldScene extends Phaser.Scene {
       const mode = this.interiorSession.mode;
       if (mode.kind === 'service') this.recentNpcPurchase = { npcId: mode.npcId, service: townBuildingsInArea(this.state.currentArea.key).find((building) => building.id === mode.buildingId)?.service ?? 'weaponsmith' };
       this.onCriticalChanged();
-      this.syncMountAppearance();
       this.refreshHudNow();
     }, (building) => {
       if (this.interiorSession.isActive) {
@@ -877,6 +714,7 @@ export class WorldScene extends Phaser.Scene {
       if (this.openingPanel.isOpen) return;
       this.previousPlayerX = this.state.player.x;
       this.previousPlayerY = this.state.player.y;
+      const acceptingQueuedStep = this.queuedStep !== null && !this.gridMovement.moving;
       this.hudDirty = true;
       const discoveriesBefore = this.state.regionalProgress.discoveredLandmarkIds.length;
       if (stepMovement(
@@ -886,13 +724,17 @@ export class WorldScene extends Phaser.Scene {
         this.gridMovement,
         (result) => this.onExposureDefeat(result),
         (reports) => this.onAbsentBaseRaids(reports),
-        (damage) => this.combatOverlay.reportPlayerDamage(this.state.player.x, this.state.player.y, damage),
+        undefined,
+        (result) => this.onSiteSearch(result),
       )) {
-        this.syncResourceTextures();
-        this.syncGroundDrops();
-    this.syncItemDrops();
-        this.buildMode.syncPlaced(); // a finished Garden Bed batch swaps its texture
-        this.onCriticalChanged();
+        // Wildlife can change every tick. Batch visual work after all catch-up
+        // steps and use ordinary autosaves for these ongoing simulation changes.
+        this.simulationVisualsDirty = true;
+      }
+      if (acceptingQueuedStep && (this.gridMovement.moving
+        || this.state.player.x !== this.previousPlayerX || this.state.player.y !== this.previousPlayerY)) {
+        this.queuedStep = null;
+        this.intent = { ...NO_MOVE, sprint: this.intent.sprint === true };
       }
       if (this.state.regionalProgress.discoveredLandmarkIds.length > discoveriesBefore) {
         const landmarkId = this.state.regionalProgress.discoveredLandmarkIds.at(-1);
@@ -907,9 +749,7 @@ export class WorldScene extends Phaser.Scene {
       }
     });
 
-    this.applyLayout();
     this.updateEntityChunkActivation();
-    this.scale.on(Phaser.Scale.Events.RESIZE, this.applyLayout, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.teardown, this);
     if (this.state.onboarding.trustSession && nearbyOpeningTuftle(this.state)) {
       this.areaSplash?.remove();
@@ -978,7 +818,7 @@ export class WorldScene extends Phaser.Scene {
     this.hud.showFeedback(`Raiders hit your other bases. ${detail}`, false);
   }
 
-  override update(time: number, deltaMs: number): void {
+  override update(_time: number, deltaMs: number): void {
     this.respawnPanel.refresh();
     this.frameTimes.record(deltaMs);
     if (this.transitioningArea) {
@@ -988,6 +828,7 @@ export class WorldScene extends Phaser.Scene {
     }
     const localInterior = this.interiorSession.mode.kind === 'interior';
     const inputBlocked = this.state.pendingRespawn || this.state.activeEncounter || this.openingPanel.isOpen || this.adminPanel.open || this.navigator.largeMapOpen;
+    this.updateFirstPersonMode(deltaMs, Boolean(inputBlocked));
     this.interiorIntent = !inputBlocked && localInterior && this.interiorSession.allowsLocalMovement
       ? this.alignInteriorIntentToPresentation(this.gatherRawInput())
       : NO_MOVE;
@@ -1004,14 +845,18 @@ export class WorldScene extends Phaser.Scene {
       this.beginAreaTransition();
       return;
     }
+    if (this.simulationVisualsDirty) {
+      this.simulationVisualsDirty = false;
+      this.syncResourceIndex();
+      this.syncGroundDrops();
+      this.buildMode.syncPlaced();
+      this.onMoved();
+    }
     if (localInterior) this.updateInteriorExploration(deltaMs);
     this.retireQueuedStep(movingBefore, poseBefore);
-    if (this.interiorSession.allowsWorldInteraction && (this.intent.x !== 0 || this.intent.y !== 0)) this.onMoved();
+    if (this.interiorSession.allowsWorldInteraction
+      && (this.state.player.x !== poseBefore.x || this.state.player.y !== poseBefore.y)) this.onMoved();
     if (!inputBlocked) this.updateSustainedFire();
-
-    // Doors swing open as the player walks up and shut behind them.
-    this.buildMode.updateOpeningAnimations(this.state.player.x, this.state.player.y, deltaMs);
-    this.updateTownGateAnimations(deltaMs);
 
     // Walking changes range/overlap validity while a ghost is out.
     if (this.buildMode.placing) this.buildMode.refreshValidity();
@@ -1024,262 +869,244 @@ export class WorldScene extends Phaser.Scene {
 
     this.watchForLevelUp();
     this.renderPlayerPose(alpha);
-    this.updateLevelUpCelebration();
-    this.updateTerrainChunkVisibility();
     this.updateEntityChunkActivation();
-    this.dangerAtmosphere.update(deltaMs);
-    this.arcaneStorm.update();
-    this.syncRaiders();
     this.syncWildCreaturePositions();
-    this.syncLevelPlates();
-    this.syncWorkerCreatures(time);
-    this.syncFollowerCreatures();
     this.navigator.refresh();
-    this.updateShelterOutline();
     this.updateTargetIndicators();
-    this.updateCombatOverlay(deltaMs);
-    this.updateDamagedWallBars();
+    this.updateCrosshairTarget();
+    this.updateSiteHud();
     this.syncFacilityInteraction();
     this.refreshHudIfDue();
   }
 
-  private buildGround(): void {
-    this.destroyTerrainChunks();
-    const palette = areaPalette(this.state.currentArea.theme);
-    this.add
-      .tileSprite(0, 0, WORLD_PX, WORLD_PX, TextureKeys.Ground)
-      .setOrigin(0, 0)
-      .setDepth(-WORLD_PX);
-
-    const prioritizedChunks = prioritizeTerrainChunks(
-      terrainChunkLayout(WORLD_TILES),
-      this.state.player.x / TILE_SIZE,
-      this.state.player.y / TILE_SIZE,
-    );
-
-    const buildChunk = (chunk: TerrainChunk): void => {
-      const biomeLayer = this.add.graphics();
-      for (let localTileY = 0; localTileY < chunk.tilesHigh; localTileY += 1) {
-        for (let localTileX = 0; localTileX < chunk.tilesWide; localTileX += 1) {
-          const tileX = chunk.tileX + localTileX;
-          const tileY = chunk.tileY + localTileY;
-          const worldX = tileX * TILE_SIZE;
-          const worldY = tileY * TILE_SIZE;
-          const x = localTileX * TILE_SIZE;
-          const y = localTileY * TILE_SIZE;
-          const isStarterForest = this.state.currentArea.theme === 'elaris'
-            && starterBiomeAt(this.state.currentArea.seed, worldX + 8, worldY + 8) === 'forest';
-          const isForest = this.state.currentArea.theme === 'forest' || isStarterForest;
-          const noise = coordinateHash(this.state.currentArea.seed ^ 0x6f6f_7265, tileX, tileY);
-          const isMountain = this.state.currentArea.theme === 'mountain';
-          const elevation = isMountain ? mountainElevationBand(this.state.currentArea.seed, tileX, tileY) : 0;
-          const mountainShade = elevation === 2 ? 0x59665a : elevation === 1 ? 0x4a5947 : 0x3d493e;
-          const shade = isMountain
-            ? mountainShade
-            : isForest
-              ? (noise > 0.64 ? 0x2b4a37 : 0x243f30)
-              : noise > 0.67 ? palette.alternate : palette.base;
-          biomeLayer.fillStyle(shade, isMountain || isForest ? 0.96 : 0.68).fillRect(x, y, TILE_SIZE, TILE_SIZE);
-          if (isMountain) {
-            const aboveElevation = mountainElevationBand(this.state.currentArea.seed, tileX, tileY - 1);
-            if (aboveElevation !== elevation) {
-              biomeLayer.fillStyle(aboveElevation < elevation ? 0x929b96 : 0x24292b, 0.92).fillRect(x, y, TILE_SIZE, 1);
-              biomeLayer.fillStyle(0x303a37, 0.74).fillRect(x + (noise > 0.5 ? 2 : 0), y + 1, TILE_SIZE - 2, 2);
-            }
-            const screeNoise = coordinateHash(this.state.currentArea.seed ^ 0x5343_5245, tileX, tileY);
-            if (screeNoise > 0.69) {
-              biomeLayer.fillStyle(elevation === 2 ? 0x929b96 : 0x697375, 0.75)
-                .fillRect(x + 3 + (tileX % 5), y + 8, 3, 2)
-                .fillRect(x + 10, y + 4 + (tileY % 6), 2, 1);
-              biomeLayer.fillStyle(0x24292b, 0.55).fillRect(x + 5 + (tileY % 4), y + 10, 2, 1);
-            }
-            if (screeNoise > 0.958) {
-              biomeLayer.fillStyle(0x8f4f32, 0.9)
-                .fillRect(x + 2, y + 11, 5, 1)
-                .fillRect(x + 6, y + 9, 7, 2);
-              biomeLayer.fillStyle(0xd08b54, 0.86).fillRect(x + 8, y + 9, 3, 1);
-            }
-          } else if (isForest) {
-            const forestDetail = coordinateHash(this.state.currentArea.seed ^ 0x464f_5245, tileX, tileY);
-            if (forestDetail > 0.64) {
-              biomeLayer.fillStyle(forestDetail > 0.91 ? 0x78a365 : 0x356246, 0.88)
-                .fillRect(x + 1 + (tileX % 6), y + 4 + (tileY % 4), 5, 2)
-                .fillRect(x + 8, y + 9, 4, 2);
-              biomeLayer.fillStyle(0x4e7955, 0.7).fillRect(x + 3, y + 3 + (tileX % 3), 3, 1);
-            }
-            if (forestDetail > 0.86) {
-              biomeLayer.fillStyle(0x513a29, 0.9)
-                .fillRect(x, y + 11, 8, 3)
-                .fillRect(x + 6, y + 9, 6, 2)
-                .fillRect(x + 11, y + 7, 4, 2);
-              biomeLayer.fillStyle(0x7a5435, 0.76).fillRect(x + 2, y + 10, 9, 1);
-            }
-            if (forestDetail > 0.955) {
-              biomeLayer.fillStyle(0xa9794a, 0.86)
-                .fillRect(x + 3, y + 4, 2, 1)
-                .fillRect(x + 11, y + 8, 2, 2);
-              biomeLayer.fillStyle(0xd0a466, 0.75).fillRect(x + 7, y + 6, 1, 1);
-            }
-          } else if (noise > 0.875) {
-            biomeLayer.fillStyle(palette.detail, 0.7);
-            biomeLayer.fillRect(x + 3 + (tileX % 7), y + 4 + (tileY % 6), 1, 2);
-            if (noise > 0.965) biomeLayer.fillStyle(0xd5ae58, 0.85).fillRect(x + 9, y + 7, 1, 1);
-          }
-          const terrain = terrainAt(this.state.seed, this.state.currentArea, tileX, tileY);
-          if (terrain === 'shallow-water' || terrain === 'deep-water') {
-            biomeLayer.fillStyle(terrain === 'deep-water' ? 0x256b7d : 0x3d9296, 0.98)
-              .fillRect(x, y, TILE_SIZE, TILE_SIZE);
-            const ripple = coordinateHash(this.state.seed ^ 0x5741_5645, tileX, tileY);
-            if (ripple > 0.46) {
-              biomeLayer.fillStyle(terrain === 'deep-water' ? 0x65aab3 : 0x86c5bc, 0.48)
-                .fillRect(x + 2 + (tileY % 4), y + 4 + (tileX % 5), 7, 1);
-            }
-          } else if (terrain === 'bridge') {
-            biomeLayer.fillStyle(0x765238, 1).fillRect(x, y, TILE_SIZE, TILE_SIZE);
-            biomeLayer.fillStyle(0xa77b4b, 0.9).fillRect(x, y + 2, TILE_SIZE, 2).fillRect(x, y + 10, TILE_SIZE, 2);
-            biomeLayer.fillStyle(0x3d2b21, 0.82).fillRect(x + 7, y, 1, TILE_SIZE);
-          } else if (terrain === 'rock-wall') {
-            biomeLayer.fillStyle(0x2d3332, 0.72).fillRect(x + 1, y + 4, TILE_SIZE - 1, TILE_SIZE - 3);
-            biomeLayer.fillStyle(isMountain ? 0x7e8982 : 0x626c66, 1).fillRect(x, y, TILE_SIZE - 1, TILE_SIZE - 5);
-            biomeLayer.fillStyle(0xa4aca4, 0.72).fillRect(x + 2, y + 1, 8, 2);
-          }
-        }
-      }
-      if (townBuildingsInArea(this.state.currentArea.key).length > 0) this.drawTownPaths(biomeLayer, chunk);
-
-      const textureKey = `terrain-chunk-${chunk.tileX}-${chunk.tileY}`;
-      if (this.textures.exists(textureKey)) this.textures.remove(textureKey);
-      biomeLayer.generateTexture(
-        textureKey,
-        chunk.tilesWide * TILE_SIZE,
-        chunk.tilesHigh * TILE_SIZE,
-      );
-      biomeLayer.destroy();
-
-      this.terrainTextureKeys.push(textureKey);
-      this.terrainChunkSprites.push(this.add
-        .image(chunk.tileX * TILE_SIZE, chunk.tileY * TILE_SIZE, textureKey)
-        .setOrigin(0, 0)
-        .setDepth(-WORLD_PX + 1));
-    };
-
-    // The player can see at most the current and neighboring chunks. Build
-    // those before the first destination frame, then spread the rest across
-    // later frames so a transition never pays for the whole 160x160 map.
-    for (const chunk of prioritizedChunks.immediate) buildChunk(chunk);
-    this.pendingTerrainChunks = prioritizedChunks.deferred;
-
-    const areaKey = this.state.currentArea.key;
-    const buildNextChunk = (): void => {
-      this.terrainBuildFrame = null;
-      if (!this.sys.isActive() || this.state.currentArea.key !== areaKey) return;
-      const chunk = this.pendingTerrainChunks.shift();
-      if (!chunk) return;
-      buildChunk(chunk);
-      this.updateTerrainChunkVisibility();
-      this.terrainBuildFrame = requestAnimationFrame(buildNextChunk);
-    };
-    if (this.pendingTerrainChunks.length > 0) {
-      this.terrainBuildFrame = requestAnimationFrame(buildNextChunk);
+  /**
+   * First person is what the player asked for, unless something that needs
+   * the overhead view is open: build mode, an interior, or the taming stage.
+   * The request survives those, so the view comes back when they close.
+   */
+  private updateFirstPersonMode(deltaMs: number, inputBlocked: boolean): void {
+    const active = firstPersonView.requested === 'first-person'
+      && this.interiorSession.mode.kind === 'world'
+      && !this.transitioningArea
+      && !this.buildMode.placing
+      && !this.buildMode.deleteMode
+      && !this.state.activeEncounter
+      && !this.state.pendingRespawn;
+    if (active && !this.firstPersonLookPrimed) {
+      // Look down the overhead view's "up", so the first step forward goes the
+      // way the stick went a moment ago.
+      firstPersonView.look.yawDegrees = cameraOrientationFromTenths(this.state.gameBalance.camera).yawDegrees;
+      firstPersonView.look.pitchDegrees = 0;
+      this.firstPersonLookPrimed = true;
     }
-    this.cameras.main.setBackgroundColor(palette.background);
+    if (active !== this.wasFirstPerson) this.entityActivationDirty = true;
+    this.wasFirstPerson = active;
+    firstPersonView.active = active;
+    // Keyboard fallback for desktop: E is the action key, so the arrows turn.
+    // The turn is applied directly from the held key, with no easing.
+    if (active && !inputBlocked && this.altKeys) {
+      const turn = (this.altKeys.left.isDown ? 1 : 0) - (this.altKeys.right.isDown ? 1 : 0);
+      if (turn !== 0) firstPersonView.look.turnBy(turn * KEYBOARD_TURN_DEGREES_PER_SECOND * Math.min(deltaMs, 100) / 1000);
+    }
   }
 
-  private drawTownPaths(layer: Phaser.GameObjects.Graphics, chunk: TerrainChunk): void {
-    for (let tileY = 83; tileY <= 86; tileY += 1) {
-      if (tileY < chunk.tileY || tileY >= chunk.tileY + chunk.tilesHigh) continue;
-      const startX = chunk.tileX;
-      const endX = chunk.tileX + chunk.tilesWide;
-      for (let tileX = startX; tileX < endX; tileX += 1) {
-        const x = (tileX - chunk.tileX) * TILE_SIZE;
-        const y = (tileY - chunk.tileY) * TILE_SIZE;
-        layer.fillStyle((tileX + tileY) % 3 === 0 ? 0x805b3c : 0x76543a, 0.96)
-          .fillRect(x, y, TILE_SIZE, TILE_SIZE);
-        if ((tileX + tileY) % 7 === 0) layer.fillStyle(0xa9794a, 0.68).fillRect(x + 2, y + 3, 7, 1);
+  /** Pick what the crosshair is on and hand it to the HUD and the focus ring. */
+  private updateCrosshairTarget(): void {
+    if (!firstPersonView.active) {
+      this.crosshairTarget = null;
+      this.firstPersonHud?.update(false, null, null);
+      return;
+    }
+    const target = pickCrosshairTarget(
+      this.state.player,
+      groundForward(firstPersonView.look.yawDegrees),
+      this.crosshairCandidates(),
+    );
+    this.crosshairTarget = target;
+    if (target?.kind === 'resource') {
+      const node = this.resourceNodesById.get(target.id) ?? null;
+      this.hud.setContextActionOverride(null);
+      this.hud.refreshTargets(node, null, null, resolveCombatTarget(this.state, { kind: 'resource', id: target.id }, 'melee'));
+    }
+    if (target && target.kind !== 'raider' && target.kind !== 'building') {
+      this.presentationTarget = { kind: target.kind, id: target.id, x: target.x, y: target.y, label: target.label };
+    } else if (target) {
+      this.presentationTarget = { kind: 'creature', id: target.id, x: target.x, y: target.y, label: target.label };
+    }
+    const building = target?.kind === 'building' || target?.kind === 'facility' ? this.buildingsById.get(target.id) ?? null : null;
+    this.firstPersonHud?.update(true, target?.label ?? null, building
+      ? {
+          label: isStructureDamaged(building) ? 'Repair' : 'Inspect',
+          run: () => this.openBuildingItemMenu(building, window.innerWidth / 2, window.innerHeight / 2),
+        }
+      : null);
+  }
+
+  /** Everything a tap could have meant, as ground points with a reach. */
+  private *crosshairCandidates(): Generator<CrosshairCandidate> {
+    const strikeReach = strikeReachPx(this.state);
+    const combatReach = Math.max(strikeReach, TAMING_RANGE_PX, TILE_SIZE * 8);
+    for (const raider of this.state.raiders) {
+      yield { kind: 'raider', id: raider.id, x: raider.x, y: raider.y, label: 'Raider', reachPx: combatReach };
+    }
+    for (const creature of this.state.wildCreatures) {
+      yield {
+        kind: 'creature', id: creature.id, x: creature.x, y: creature.y,
+        label: creatureDefinition(creature.speciesId).displayName, reachPx: combatReach,
+      };
+    }
+    for (const node of this.state.resourceNodes) {
+      if (node.hp <= 0) continue;
+      yield {
+        kind: 'resource', id: node.id, x: node.x, y: node.y,
+        label: node.kind === 'berry-bush' ? 'Berry bush' : node.kind[0]!.toUpperCase() + node.kind.slice(1),
+        reachPx: strikeReach,
+      };
+    }
+    for (const drop of this.state.groundDrops) {
+      yield { kind: 'drop', id: drop.id, x: drop.x, y: drop.y, label: `Pick up ${drop.amount} ${drop.resource}`, reachPx: INTERACTION_RANGE_PX };
+    }
+    for (const site of liveAreaSites(this.state)) {
+      const searched = currentSiteProgress(this.state, site.id).searched;
+      for (const container of site.containers) {
+        if (searched.includes(container.index)) continue;
+        yield {
+          kind: 'site-container', id: `${site.id}#${container.index}`, x: container.x, y: container.y,
+          label: `Search ${containerLabelFor(container)}`, reachPx: INTERACTION_RANGE_PX,
+        };
       }
+    }
+    for (const building of this.buildingsById.values()) {
+      const facility = FACILITY_PANEL_DEFINITIONS.has(building.definitionId);
+      yield {
+        kind: facility ? 'facility' : 'building', id: building.id,
+        x: (building.tileX + 0.5) * TILE_SIZE, y: (building.tileY + 0.5) * TILE_SIZE,
+        label: buildableById(building.definitionId).displayName,
+        reachPx: facility ? FACILITY_INTERACTION_RANGE_PX : TILE_SIZE * 3,
+      };
+    }
+    const townBench = elarisPublicWorkbenchFacility(this.state);
+    if (townBench) {
+      yield {
+        kind: 'facility', id: townBench.id,
+        x: (townBench.tileX + 0.5) * TILE_SIZE, y: (townBench.tileY + 0.5) * TILE_SIZE,
+        label: 'Workbench', reachPx: FACILITY_INTERACTION_RANGE_PX,
+      };
     }
     for (const building of townBuildingsInArea(this.state.currentArea.key)) {
-      const primaryOutside = outsideDoorTile(building);
-      const stepX = primaryOutside.tileX - building.door.tileX;
-      const stepY = primaryOutside.tileY - building.door.tileY;
-      for (const door of townBuildingDoorTiles(building)) {
-        const outside = { tileX: door.tileX + stepX, tileY: door.tileY + stepY };
-        for (let offset = 0; offset < 4; offset += 1) {
-          const tileX = outside.tileX + stepX * offset;
-          const tileY = outside.tileY + stepY * offset;
-          if (
-            tileX < chunk.tileX || tileX >= chunk.tileX + chunk.tilesWide
-            || tileY < chunk.tileY || tileY >= chunk.tileY + chunk.tilesHigh
-          ) continue;
-          const x = (tileX - chunk.tileX) * TILE_SIZE;
-          const y = (tileY - chunk.tileY) * TILE_SIZE;
-          layer.fillStyle(offset % 2 === 0 ? 0x76543a : 0x805b3c, 0.96).fillRect(x, y, TILE_SIZE, TILE_SIZE);
-          layer.fillStyle(0xa9794a, 0.7).fillRect(x + 2, y + 2, 7, 1);
-          layer.fillStyle(0x513a29, 0.7).fillRect(x + 11, y + 10, 2, 2);
+      yield {
+        kind: 'door', id: building.id,
+        x: (building.door.tileX + 0.5) * TILE_SIZE, y: (building.door.tileY + 0.5) * TILE_SIZE,
+        label: `Enter ${building.displayName}`, reachPx: TILE_SIZE * 2,
+      };
+    }
+  }
+
+  /**
+   * What the action button says near a site: "Searching…" while a search runs,
+   * else "Search Crate" for the crate under the crosshair (first person) or the
+   * nearest crate in reach (overhead).
+   */
+  private siteContextAction(): { label: string; hint: string } | null {
+    if (this.state.activeSearch) return { label: 'Searching…', hint: 'Hold still · moving or a hit stops the search' };
+    if (firstPersonView.active) {
+      return this.crosshairTarget?.kind === 'site-container'
+        ? { label: this.crosshairTarget.label, hint: `${this.crosshairTarget.label} · E / Space` }
+        : null;
+    }
+    const nearest = nearestSearchableContainer(this.state);
+    if (!nearest) return null;
+    const label = `Search ${containerLabelFor(nearest.container)}`;
+    return { label, hint: `${label} · E / Space` };
+  }
+
+  /** An unsearched site container under an overhead tap, if any. */
+  private siteContainerAtWorld(worldX: number, worldY: number): { siteId: string; index: number } | null {
+    for (const site of liveAreaSites(this.state)) {
+      const searched = currentSiteProgress(this.state, site.id).searched;
+      for (const container of site.containers) {
+        if (searched.includes(container.index)) continue;
+        if (Math.abs(worldX - container.x) <= TILE_SIZE * 0.75 && Math.abs(worldY - container.y) <= TILE_SIZE * 0.75) {
+          return { siteId: site.id, index: container.index };
         }
       }
     }
+    return null;
   }
 
-  private destroyTerrainChunks(): void {
-    if (this.terrainBuildFrame !== null) cancelAnimationFrame(this.terrainBuildFrame);
-    this.terrainBuildFrame = null;
-    this.pendingTerrainChunks.length = 0;
-    for (const sprite of this.terrainChunkSprites) sprite.destroy();
-    this.terrainChunkSprites.length = 0;
-    for (const textureKey of this.terrainTextureKeys) {
-      if (this.textures.exists(textureKey)) this.textures.remove(textureKey);
+  private performSiteSearch(siteId: string, containerIndex: number): void {
+    const result = beginSiteSearch(this.state, siteId, containerIndex);
+    this.hud.showFeedback(result.message, result.ok);
+    if (result.ok) this.simulationVisualsDirty = true;
+    this.refreshHudNow();
+  }
+
+  /** A search finished or was cut short this tick. */
+  private onSiteSearch(result: SiteSearchResult): void {
+    if (result.kind === 'interrupted') {
+      this.hud.showFeedback(result.message, false);
+      return;
     }
-    this.terrainTextureKeys.length = 0;
+    this.hud.showFeedback(result.message, true);
+    result.gains.forEach(([resource, amount], index) => {
+      this.spawnFloatingText(this.state.player.x, this.state.player.y - index * 9, `+${amount} ${resource.replaceAll('-', ' ')}`);
+    });
+    this.hud.showResourceTotals(result.gains.map(([resource]) => `${this.state.inventory[resource]} ${resource.replaceAll('-', ' ')}`));
+    if (result.spilled.length > 0) this.syncGroundDrops();
+    this.simulationVisualsDirty = true;
+    this.onCriticalChanged();
+    this.refreshHudNow();
   }
 
-  /** Restrained deterministic leaf drift; presentation-only and visibility aware. */
-  private setupForestAmbience(): void {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    this.time.addEvent({ delay: 1400, loop: true, callback: () => {
-      if (document.hidden || this.activeEffectCount >= 16) return;
-      const view = this.cameras.main.worldView;
-      const centerX = view.centerX;
-      const centerY = view.centerY;
-      const inForest = this.state.currentArea.theme === 'forest'
-        || (this.state.currentArea.theme === 'elaris'
-          && starterBiomeAt(this.state.currentArea.seed, centerX, centerY) === 'forest');
-      if (!inForest) return;
-
-      const sequence = this.ambientLeafSequence++;
-      const horizontal = coordinateHash(this.state.currentArea.seed ^ 0x4c45_4146, sequence, 1);
-      const drift = coordinateHash(this.state.currentArea.seed ^ 0x4452_4946, sequence, 2);
-      const x = view.left + 24 + horizontal * Math.max(1, view.width - 48);
-      const y = view.top + 18 + drift * Math.max(1, view.height * 0.28);
-      this.activeEffectCount += 1;
-      const leaf = this.add.rectangle(x, y, sequence % 2 === 0 ? 3 : 2, 2, sequence % 3 === 0 ? 0xd0a466 : 0x78a365, 0.8)
-        .setAngle(sequence % 2 === 0 ? 24 : -18)
-        .setDepth(OVERLAY_DEPTH - 4);
-      this.tweens.add({
-        targets: leaf,
-        x: x + 18 + drift * 16,
-        y: y + 48 + horizontal * 24,
-        angle: leaf.angle + 150,
-        alpha: 0,
-        duration: 2200,
-        ease: 'Sine.easeInOut',
-        onComplete: () => { leaf.destroy(); this.activeEffectCount -= 1; },
-      });
-    } });
+  /** Compass strip and search ring; both are placed straight from state, no easing. */
+  private updateSiteHud(): void {
+    const firstPerson = firstPersonView.active;
+    if (this.compassStrip) {
+      if (firstPerson) {
+        // Unrounded, so the strip turns exactly with the view rather than in whole-degree steps.
+        const heading = ((-firstPersonView.look.yawDegrees % 360) + 360) % 360;
+        this.compassStrip.update(true, compassMarks(heading), compassPips(this.state.player, heading, compassTargets(this.state), TILE_SIZE));
+      } else {
+        this.compassStrip.update(false, [], []);
+      }
+    }
+    this.searchRing?.update(siteSearchProgress(this.state), firstPerson);
   }
 
-  /** Phaser does not spatially cull ordinary images, so hide distant chunks. */
-  private updateTerrainChunkVisibility(): void {
-    const view = this.cameras.main.worldView;
-    if (view.width <= 0 || view.height <= 0) return;
-    const padding = TILE_SIZE * 2;
-
-    for (const chunk of this.terrainChunkSprites) {
-      const visible = chunk.x + chunk.width >= view.left - padding
-        && chunk.x <= view.right + padding
-        && chunk.y + chunk.height >= view.top - padding
-        && chunk.y <= view.bottom + padding;
-      if (chunk.visible !== visible) chunk.setVisible(visible);
+  /** The action button in first person: act on the crosshair target exactly as a tap on it would. */
+  private performCrosshairAction(target: CrosshairCandidate): void {
+    switch (target.kind) {
+      case 'raider':
+        this.stickyTarget = { kind: 'raider', id: target.id };
+        this.performPlayerShot(target.id);
+        return;
+      case 'creature':
+        if (isOpeningTuftle(this.state, target.id)) { this.performOpeningTrust(); return; }
+        this.stickyTarget = { kind: 'creature', id: target.id };
+        this.performCreatureAttack(target.id);
+        return;
+      case 'resource':
+        this.stickyTarget = { kind: 'resource', id: target.id };
+        this.performContextAction(target.id);
+        return;
+      case 'facility': {
+        const building = this.buildingsById.get(target.id) ?? elarisPublicWorkbenchFacility(this.state);
+        if (building) this.openFacilityInteraction(building);
+        return;
+      }
+      case 'site-container': {
+        const split = target.id.lastIndexOf('#');
+        this.performSiteSearch(target.id.slice(0, split), Number(target.id.slice(split + 1)));
+        return;
+      }
+      case 'door': {
+        const building = townBuildingById(target.id as TownBuildingId);
+        if (nearestTownBuildingDoor(this.state)?.id === building.id) this.enterTownBuilding(building);
+        else this.hud.showFeedback(`Move closer to the ${building.displayName} door`, false);
+        return;
+      }
+      default:
+        this.performContextAction();
     }
   }
 
@@ -1287,10 +1114,6 @@ export class WorldScene extends Phaser.Scene {
     return {
       frameTimes: this.frameTimes.snapshot(33.33),
       areaTransitions: this.areaTransitionTimes.snapshot(),
-      terrainChunks: {
-        visible: this.terrainChunkSprites.reduce((count, chunk) => count + (chunk.visible ? 1 : 0), 0),
-        total: this.terrainChunkSprites.length,
-      },
       entities: {
         ...this.entityActivation,
         resources: { ...this.entityActivation.resources },
@@ -1307,675 +1130,70 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateEntityChunkActivation(): void {
-    const view = this.cameras.main.worldView;
-    if (view.width <= 0 || view.height <= 0 || !this.buildMode) return;
-    const activeChunks = activeEntityChunkKeys(view, 1);
-    const signature = [...activeChunks].join('|');
+    const {x,y} = this.state.player;
+    // First person sees out to its fog in every direction, not a view rectangle.
+    const extent = TILE_SIZE * (firstPersonView.active ? FIRST_PERSON_VIEW_RADIUS_TILES : 24);
+    const chunks = activeEntityChunkKeys(chunkViewRectAround(x, y, extent),1);
+    const signature = [...chunks].join('|');
     if (!this.entityActivationDirty && signature === this.activeChunkSignature) return;
-    const resources = this.applyChunkActivation(
-      this.resourceChunks,
-      this.resourceSprites,
-      this.activeResourceIds,
-      activeChunks,
-      (id, sprite) => {
-        const node = this.resourceNodesById.get(id);
-        if (node && sprite.texture.key !== this.nodeTexture(node)) sprite.setTexture(this.nodeTexture(node));
-      },
-    );
-    const drops = this.applyChunkActivation(this.dropChunks, this.dropSprites, this.activeDropIds, activeChunks);
-    const creatures = this.applyChunkActivation(this.creatureChunks, this.creatureSprites, this.activeCreatureIds, activeChunks);
-    const structures = this.buildMode.updateChunkActivation(activeChunks);
-    this.entityActivation = {
-      active: resources.active + drops.active + creatures.active + structures.active,
-      total: resources.total + drops.total + creatures.total + structures.total,
-      resources,
-      drops,
-      creatures,
-      structures,
+    const activate = (index: EntityChunkIndex, ids: Set<string>): EntityActivationCounts => {
+      ids.clear(); for (const id of index.idsInChunks(chunks)) ids.add(id);
+      return {active:ids.size,total:index.size};
     };
-    this.activeChunkSignature = signature;
-    this.entityActivationDirty = false;
-  }
-
-  private applyChunkActivation<T extends ChunkedSprite>(
-    index: EntityChunkIndex,
-    sprites: ReadonlyMap<string, T>,
-    activeIds: Set<string>,
-    activeChunks: ReadonlySet<string>,
-    onActivate?: (id: string, sprite: T) => void,
-  ): EntityActivationCounts {
-    const nextActiveIds = index.idsInChunks(activeChunks);
-    for (const id of activeIds) {
-      if (!nextActiveIds.has(id)) sprites.get(id)?.setActive(false).setVisible(false);
-    }
-    for (const id of nextActiveIds) {
-      if (activeIds.has(id)) continue;
-      const sprite = sprites.get(id);
-      if (!sprite) continue;
-      onActivate?.(id, sprite);
-      sprite.setActive(true).setVisible(true);
-    }
-    activeIds.clear();
-    for (const id of nextActiveIds) activeIds.add(id);
-    return { active: nextActiveIds.size, total: index.size };
-  }
-
-  private addForgeAmbience(building: TownBuildingDefinition): void {
-    const { footprint } = building;
-    const chimneyX = (footprint.tileX + footprint.tilesWide - 1.15) * TILE_SIZE;
-    const chimneyY = (footprint.tileY + 0.2) * TILE_SIZE;
-    const glow = this.add.rectangle(
-      (building.door.tileX + building.doorWidth / 2) * TILE_SIZE,
-      (building.door.tileY + 0.55) * TILE_SIZE,
-      12,
-      9,
-      0xe66a32,
-      0.28,
-    ).setDepth((footprint.tileY + footprint.tilesHigh) * TILE_SIZE);
-    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      this.tweens.add({ targets: glow, alpha: { from: 0.18, to: 0.38 }, duration: 900, yoyo: true, repeat: -1 });
-      this.time.addEvent({ delay: 720, loop: true, callback: () => {
-        if (document.hidden || this.activeEffectCount >= 24) return;
-        this.activeEffectCount += 1;
-        const smoke = this.add.rectangle(chimneyX, chimneyY, 3, 3, 0xb9c7ba, 0.42).setDepth(OVERLAY_DEPTH - 2);
-        this.tweens.add({ targets: smoke, x: chimneyX - 4, y: chimneyY - 13, alpha: 0, scale: 1.7, duration: 1250,
-          onComplete: () => { smoke.destroy(); this.activeEffectCount -= 1; } });
-      } });
-    }
+    const resources=activate(this.resourceChunks,this.activeResourceIds), drops=activate(this.dropChunks,this.activeDropIds), creatures=activate(this.creatureChunks,this.activeCreatureIds);
+    const structures={active:this.buildingChunks.idsInChunks(chunks).size,total:this.buildingChunks.size};
+    this.entityActivation={resources,drops,creatures,structures,active:resources.active+drops.active+creatures.active+structures.active,total:resources.total+drops.total+creatures.total+structures.total};
+    this.activeChunkSignature=signature; this.entityActivationDirty=false;
   }
 
   private buildResourceNodes(): void {
-    this.resourceSprites.clear();
-    this.resourceNodesById.clear();
-    this.resourceChunks.clear();
-    this.activeResourceIds.clear();
+    this.resourceChunks.clear(); this.resourceNodesById.clear();
+    for (const node of this.state.resourceNodes) { this.resourceNodesById.set(node.id,node); this.resourceChunks.upsert(node.id,node.x,node.y); }
     this.entityActivationDirty = true;
-    for (const node of this.state.resourceNodes) {
-      const sprite = this.add
-        .image(node.x, node.y, this.nodeTexture(node))
-        .setOrigin(0.5, 0.875)
-        .setDepth(node.y)
-        .setActive(false)
-        .setVisible(false);
-      this.resourceSprites.set(node.id, sprite);
-      this.resourceNodesById.set(node.id, node);
-      this.resourceChunks.upsert(node.id, node.x, node.y);
-    }
   }
 
-  private buildTownBuildings(): void {
-    const fallen = hasElarisFallen(this.state);
-    if (isElaris(this.state)) {
-      TOWN_PERIMETER_SEGMENTS.forEach((segment, index) => {
-        // Every third piece of a fallen perimeter is simply gone. The gaps are
-        // the visual promise that the fence no longer stops anything, which is
-        // exactly what the simulation now does.
-        if (fallen && index % 3 === 0) return;
-        const dx = segment.end.x - segment.start.x;
-        const dy = segment.end.y - segment.start.y;
-        const sprite = this.add.image(
-          (segment.start.x + segment.end.x) * TILE_SIZE / 2,
-          (segment.start.y + segment.end.y) * TILE_SIZE / 2,
-          segment.kind === 'gate' ? TextureKeys.GateWood : TextureKeys.FenceWood,
-        )
-          .setOrigin(0.5)
-          .setAngle(Phaser.Math.RadToDeg(Math.atan2(dy, dx)))
-          .setScale(Math.hypot(dx, dy), 1)
-          .setDepth(Math.max(segment.start.y, segment.end.y) * TILE_SIZE);
-        if (fallen) {
-          sprite.setTint(0x5a4c40).setAlpha(0.7);
-          return;
-        }
-        if (segment.kind === 'gate') {
-          this.townGateSprites.set(`town-gate-${index}`, {
-            sprite,
-            centerX: (segment.start.x + segment.end.x) * TILE_SIZE / 2,
-            centerY: (segment.start.y + segment.end.y) * TILE_SIZE / 2,
-            openness: 0,
-          });
-        }
-      });
-      // Cold purifiers are removed rather than drawn dark: their sprite is the
-      // player's cue for "you can breathe here", and it must not lie.
-      // The permanent column is the exception, and it is drawn by the same rule:
-      // it is still running, so it is still shown.
-      const purifiers = fallen ? [PERMANENT_AIR_PURIFIER] : [...TOWN_AIR_PURIFIERS, PERMANENT_AIR_PURIFIER];
-      for (const purifier of purifiers) {
-        this.add.image(
-          (purifier.x + 0.5) * TILE_SIZE,
-          (purifier.y + 0.5) * TILE_SIZE,
-          TextureKeys.AirPurifier,
-        ).setOrigin(0.5).setDepth((purifier.y + 1) * TILE_SIZE);
-      }
-      // The town's public workbench, where a new character registers blueprints
-      // before they can build a bench of their own. Unlike the purifiers it is
-      // drawn even after the fall: a ruined bench you can walk up to and fail
-      // to use is how a player learns that registering is now their problem.
-      const bench = this.add.image(
-        ELARIS_PUBLIC_WORKBENCH_TILE.tileX * TILE_SIZE,
-        ELARIS_PUBLIC_WORKBENCH_TILE.tileY * TILE_SIZE,
-        TextureKeys.Workbench,
-      ).setOrigin(0, 0).setDepth(
-        (ELARIS_PUBLIC_WORKBENCH_TILE.tileY + ELARIS_PUBLIC_WORKBENCH_SIZE.tilesHigh) * TILE_SIZE - 1,
-      );
-      if (fallen) bench.setTint(0x4b4038).setAlpha(0.82);
-      this.buildWaterTemple();
-    }
-    for (const building of townBuildingsInArea(this.state.currentArea.key)) {
-      const ruined = isRuinedTownBuilding(building, fallen);
-      const { footprint } = building;
-      const x = footprint.tileX * TILE_SIZE;
-      const y = footprint.tileY * TILE_SIZE;
-      const sprite = this.add.image(x, y, townBuildingTextureKey(building.id))
-        .setOrigin(0, 0)
-        .setDepth((footprint.tileY + footprint.tilesHigh) * TILE_SIZE - 1);
-      // A ruin is the same silhouette burned down to soot: the player should
-      // recognise which building they lost from across the square.
-      if (ruined) sprite.setTint(0x4b4038).setAlpha(0.82);
-      this.townBuildingSprites.set(building.id, sprite);
-      const labelX = (footprint.tileX + footprint.tilesWide / 2) * TILE_SIZE;
-      const labelY = footprint.tileY * TILE_SIZE - 3;
-      const label = this.add.text(labelX, labelY, ruined ? `${building.displayName} (ruined)` : building.displayName, {
-        fontFamily: 'system-ui, sans-serif', fontSize: '9px', color: ruined ? '#8e8378' : '#fff3c4',
-        stroke: '#09140e', strokeThickness: 3,
-      }).setOrigin(0.5, 1).setDepth(OVERLAY_DEPTH);
-      label.setData('town-label', true);
-      if (ruined) {
-        this.addRuinRubble(building);
-        continue;
-      }
-      this.addTownContextProps(building);
-      if (building.id === 'weaponsmith') this.addForgeAmbience(building);
-    }
-    this.buildRegionalLandmark();
-  }
-
-  /** Matching top-down silhouette for the optional Phaser presentation. */
-  private buildWaterTemple(): void {
-    const x = (ELARIS_WATER_TEMPLE.tileX + 0.5) * TILE_SIZE;
-    const y = (ELARIS_WATER_TEMPLE.tileY + 0.5) * TILE_SIZE;
-    this.add.ellipse(x, y + 8, 176, 116, 0x466a55).setStrokeStyle(5, 0x78977a).setDepth(y - 48);
-    this.add.ellipse(x, y + 8, 112, 72, 0x58747a).setStrokeStyle(4, 0xc9d8cf).setDepth(y - 42);
-    this.add.rectangle(x, y - 5, 86, 58, 0xc9d8cf).setStrokeStyle(3, 0x58747a).setDepth(y - 36);
-    for (const columnX of [x - 31, x + 31]) {
-      this.add.rectangle(columnX, y - 18, 9, 48, 0xe1e9df).setStrokeStyle(2, 0x58747a).setDepth(y + 18);
-    }
-    this.add.triangle(x, y - 69, 0, 54, 50, 0, 100, 54, 0x4ab3b2)
-      .setStrokeStyle(4, 0x245f78).setDepth(y + 20);
-    this.add.ellipse(x, y + 8, 31, 19, 0x63d8d4).setStrokeStyle(4, 0x58747a).setDepth(y + 23);
-    this.add.circle(x, y - 4, 7, 0xbafff4).setStrokeStyle(2, 0x328f95).setDepth(y + 25);
-    this.add.text(x, y - 78, 'Water Temple', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '10px', color: '#aefaf0', stroke: '#102a2d', strokeThickness: 3,
-    }).setOrigin(0.5, 1).setDepth(OVERLAY_DEPTH);
-  }
-
-  private buildRegionalLandmark(): void {
-    const definition = regionalIdentityForArea(this.state.currentArea.key);
-    if (!definition) return;
-    const x = (definition.landmark.tileX + 0.5) * TILE_SIZE;
-    const y = (definition.landmark.tileY + 0.5) * TILE_SIZE;
-    const depth = y + TILE_SIZE * 2;
-
-    if (definition.landmark.kind === 'sunwheel-orchard') {
-      this.add.circle(x, y + 7, 24, 0x3b662f, 0.34).setDepth(y - 2);
-      for (let point = 0; point < 8; point += 1) {
-        const angle = point / 8 * Math.PI * 2;
-        const treeX = x + Math.cos(angle) * 18;
-        const treeY = y + Math.sin(angle) * 12;
-        this.add.rectangle(treeX, treeY + 5, 3, 10, 0x76512c).setDepth(treeY + 6);
-        this.add.circle(treeX, treeY, 7, point % 2 === 0 ? 0xb8c94d : 0x82a83f)
-          .setStrokeStyle(1, 0x38592e).setDepth(treeY + 7);
-      }
-      this.add.circle(x, y, 8, 0xf4cf62).setStrokeStyle(3, 0x8b622b).setDepth(depth);
-    } else {
-      this.add.circle(x, y + 8, 20, 0x356d78, 0.75).setStrokeStyle(3, 0x8fd7d2).setDepth(y - 1);
-      this.add.rectangle(x, y - 5, 8, 30, 0x745da5).setStrokeStyle(2, 0xc9a6ff).setDepth(depth);
-      this.add.triangle(x, y - 25, 0, 14, 9, 0, 18, 14, 0xd8c6ff)
-        .setStrokeStyle(2, 0x6f4ea0).setDepth(depth + 1);
-    }
-
-    this.add.text(x, y - 34, definition.landmark.name, {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: '9px',
-      color: definition.landmark.color,
-      stroke: '#09140e',
-      strokeThickness: 3,
-    }).setOrigin(0.5, 1).setDepth(OVERLAY_DEPTH);
-  }
-
-  /** Match the authored town gates to the proximity-driven door animation. */
-  private updateTownGateAnimations(deltaMs: number): void {
-    const step = deltaMs / TOWN_GATE_SWING_MS;
-    for (const gate of this.townGateSprites.values()) {
-      const target = Math.hypot(
-        this.state.player.x - gate.centerX,
-        this.state.player.y - gate.centerY,
-      ) <= TOWN_GATE_OPEN_RADIUS ? 1 : 0;
-      gate.openness = target > gate.openness
-        ? Math.min(target, gate.openness + step)
-        : Math.max(target, gate.openness - step);
-      const frame = TOWN_GATE_SWING_FRAMES[Math.round(gate.openness * (TOWN_GATE_SWING_FRAMES.length - 1))]
-        ?? TOWN_GATE_SWING_FRAMES[0];
-      if (gate.sprite.texture.key !== frame) gate.sprite.setTexture(frame);
-    }
-  }
-
-  /**
-   * Charred debris around a ruined footprint. Deterministic from the footprint
-   * so the same wreck is drawn every time the area is entered.
-   */
-  private addRuinRubble(building: TownBuildingDefinition): void {
-    const { footprint } = building;
-    const bottom = footprint.tileY + footprint.tilesHigh;
-    const props: Phaser.GameObjects.Image[] = [];
-    for (let index = 0; index < 5; index += 1) {
-      const tileX = footprint.tileX + 0.6 + (footprint.tilesWide - 1.2) * (index / 4);
-      const tileY = bottom - 0.15 - (index % 2) * 0.45;
-      props.push(this.add
-        .image(tileX * TILE_SIZE, tileY * TILE_SIZE, TextureKeys.TownBarrel)
-        .setOrigin(0.5, 1)
-        .setDepth(bottom * TILE_SIZE)
-        .setTint(0x3d342c)
-        .setAlpha(0.8)
-        .setAngle(index % 2 === 0 ? 74 : -63)
-        .setScale(0.85));
-    }
-    this.townPropSprites.set(building.id, props);
-  }
-
-  private addTownContextProps(building: TownBuildingDefinition): void {
-    const { footprint } = building;
-    const bottom = footprint.tileY + footprint.tilesHigh;
-    const specs = building.id === 'weaponsmith'
-      ? [
-        { key: TextureKeys.TownAnvil, tileX: footprint.tileX + 1.15, tileY: bottom - 0.15 },
-        { key: TextureKeys.TownBarrel, tileX: footprint.tileX + footprint.tilesWide - 0.85, tileY: bottom - 0.15 },
-      ]
-      : building.id === 'farm'
-        ? [
-          { key: TextureKeys.TownHayBale, tileX: footprint.tileX + 0.9, tileY: bottom - 0.15 },
-          { key: TextureKeys.TownHayBale, tileX: footprint.tileX + footprint.tilesWide - 0.9, tileY: bottom - 0.15 },
-          { key: TextureKeys.TownBarrel, tileX: footprint.tileX + footprint.tilesWide - 1.85, tileY: bottom - 0.15 },
-        ]
-        : building.id === 'market'
-          ? [
-          { key: TextureKeys.TownProduceCrate, tileX: footprint.tileX + 1.1, tileY: footprint.tileY + 2.2 },
-          { key: TextureKeys.TownProduceCrate, tileX: footprint.tileX + footprint.tilesWide - 1.1, tileY: footprint.tileY + 2.2 },
-          { key: TextureKeys.TownBarrel, tileX: footprint.tileX + footprint.tilesWide - 1.9, tileY: footprint.tileY + 2.2 },
-          ]
-          : [
-            { key: TextureKeys.TownBarrel, tileX: footprint.tileX + 0.9, tileY: bottom - 0.15 },
-            { key: TextureKeys.TownBarrel, tileX: footprint.tileX + footprint.tilesWide - 0.9, tileY: bottom - 0.15 },
-          ];
-    const props = specs.map(({ key, tileX, tileY }) => this.add
-      .image(tileX * TILE_SIZE, tileY * TILE_SIZE, key)
-      .setOrigin(0.5, 1)
-      .setDepth(bottom * TILE_SIZE));
-    this.townPropSprites.set(building.id, props);
-  }
-
-  /** Worker automation changes node HP off-screen, so reconcile their art too. */
-  private syncResourceTextures(): void {
-    for (const id of this.activeResourceIds) {
-      const node = this.resourceNodesById.get(id);
-      if (!node) continue;
-      const sprite = this.resourceSprites.get(id);
-      if (sprite && sprite.texture.key !== this.nodeTexture(node)) sprite.setTexture(this.nodeTexture(node));
-    }
-  }
-
-  /** Depleted nodes stay visible as remains — they still occupy their tile. */
-  private nodeTexture(node: ResourceNodeState): string {
-    if (node.kind === 'tree') return node.hp > 0 ? (coordinateHash(this.state.seed, Math.round(node.x), Math.round(node.y)) > 0.5 ? TextureKeys.TreeAlt : TextureKeys.Tree) : TextureKeys.Stump;
-    if (node.kind === 'stone') return node.hp > 0 ? (coordinateHash(this.state.seed ^ 0x51a7, Math.round(node.x), Math.round(node.y)) > 0.5 ? TextureKeys.RockAlt : TextureKeys.Rock) : TextureKeys.Rubble;
-    if (node.kind === 'metal') return node.hp > 0 ? TextureKeys.IronVein : TextureKeys.IronRubble;
-    if (node.kind === 'berry-bush') return node.hp > 0 ? TextureKeys.BerryBush : TextureKeys.BerryRemains;
-    return node.hp > 0 ? TextureKeys.Plant : TextureKeys.PlantRemains;
-  }
-
-  /**
-   * Draw blueprints and put-down tools lying in the world.
-   *
-   * Kept out of the chunked ground-drop pipeline on purpose: there are only
-   * ever a handful, they carry a hard ten-minute expiry, and a corpse run fails
-   * outright if the thing being run back for is not on screen. They are drawn
-   * with the blueprint icon tinted to their quality so a player can tell from a
-   * distance whether the sprint is worth it; a dropped tool is tinted to its
-   * material tier for the same reason.
-   */
-  private syncItemDrops(): void {
-    for (const [id, sprite] of this.toolDropSprites) {
-      if (!this.state.toolDrops.some((drop) => drop.id === id)) {
-        sprite.destroy();
-        this.toolDropSprites.delete(id);
-      }
-    }
-    for (const drop of this.state.toolDrops) {
-      const existing = this.toolDropSprites.get(drop.id);
-      if (existing) {
-        existing.setPosition(drop.x, drop.y).setDepth(drop.y);
-        continue;
-      }
-      const sprite = this.add.image(drop.x, drop.y, TextureKeys.DropTool)
-        .setOrigin(0.5, 0.9)
-        .setDepth(drop.y);
-      sprite.setTint(TOOL_DROP_TIER_TINTS[toolDefinition(drop.tool.definitionId).tier]);
-      this.toolDropSprites.set(drop.id, sprite);
-    }
-    for (const [id, sprite] of this.blueprintDropSprites) {
-      if (!this.state.blueprintDrops.some((drop) => drop.id === id)) {
-        sprite.destroy();
-        this.blueprintDropSprites.delete(id);
-      }
-    }
-    for (const drop of this.state.blueprintDrops) {
-      const existing = this.blueprintDropSprites.get(drop.id);
-      if (existing) {
-        existing.setPosition(drop.x, drop.y).setDepth(drop.y);
-        continue;
-      }
-      const sprite = this.add.image(drop.x, drop.y, TextureKeys.DropSafeguardCharm)
-        .setOrigin(0.5, 0.9)
-        .setDepth(drop.y);
-      const quality = blueprintQuality(drop.blueprintId);
-      sprite.setTint(Number.parseInt(BLUEPRINT_QUALITY_COLORS[quality].slice(1), 16));
-      this.blueprintDropSprites.set(drop.id, sprite);
-    }
-  }
+  private syncResourceIndex(): void { this.buildResourceNodes(); }
 
   private syncGroundDrops(): void {
+    this.dropChunks.clear(); this.dropsById.clear();
+    for (const drop of this.state.groundDrops) { this.dropsById.set(drop.id,drop); this.dropChunks.upsert(drop.id,drop.x,drop.y); }
     this.entityActivationDirty = true;
-    for (const [id, sprite] of this.dropSprites) {
-      if (!this.state.groundDrops.some((drop) => drop.id === id)) {
-        sprite.destroy();
-        this.dropSprites.delete(id);
-        this.dropChunks.delete(id);
-        this.activeDropIds.delete(id);
-        this.dropsById.delete(id);
-      }
-    }
-    for (const drop of this.state.groundDrops) {
-      this.dropsById.set(drop.id, drop);
-      const existing = this.dropSprites.get(drop.id);
-      if (existing) {
-        existing.setPosition(drop.x, drop.y).setDepth(drop.y);
-        this.dropChunks.upsert(drop.id, drop.x, drop.y);
-        continue;
-      }
-      const key = DROP_TEXTURE_KEYS[drop.resource];
-      const sprite = this.add.image(drop.x, drop.y, key)
-        .setOrigin(0.5, 0.9)
-        .setDepth(drop.y)
-        .setActive(false)
-        .setVisible(false);
-      this.dropSprites.set(drop.id, sprite);
-      this.dropChunks.upsert(drop.id, drop.x, drop.y);
-    }
-  }
-
-  /**
-   * Draw the current area's containers. An opened one keeps its sprite at
-   * reduced alpha rather than vanishing, so a player can read at a glance which
-   * caches in a region they have already cleared.
-   */
-  private syncContainers(): void {
-    for (const [id, sprite] of this.containerSprites) {
-      if (!this.state.containers.some((container) => container.id === id)) {
-        sprite.destroy();
-        this.containerSprites.delete(id);
-      }
-    }
-    for (const container of this.state.containers) {
-      const existing = this.containerSprites.get(container.id);
-      if (existing) {
-        existing.setAlpha(container.opened ? OPENED_CONTAINER_ALPHA : 1);
-        continue;
-      }
-      const sprite = this.add.image(container.x, container.y, CONTAINER_TEXTURE_KEYS[container.kind])
-        .setOrigin(0.5, 0.85)
-        .setDepth(container.y)
-        .setAlpha(container.opened ? OPENED_CONTAINER_ALPHA : 1);
-      this.containerSprites.set(container.id, sprite);
-    }
-  }
-
-  private syncFollowerCreatures(): void {
-    const placements = followerCreaturePlacements(this.state);
-    const assistance = this.get3DPresentationState().gatherAssistance;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    for (const [id, sprite] of this.followerCreatureSprites) {
-      if (placements.some((placement) => placement.id === id)) continue;
-      sprite.destroy();
-      this.followerCreatureSprites.delete(id);
-    }
-    for (const placement of placements) {
-      let sprite = this.followerCreatureSprites.get(placement.id);
-      if (!sprite) {
-        sprite = this.add.sprite(placement.x, placement.y, creatureTextureKey(placement.speciesId)).setOrigin(0.5, 0.875);
-        if (placement.speciesId === 'tuftle') sprite.play(AnimationKeys.TuftleIdle);
-        this.followerCreatureSprites.set(placement.id, sprite);
-      }
-      sprite.setPosition(placement.x, placement.y - followerAssistanceLift(placement.id, assistance, reducedMotion) * TILE_SIZE)
-        .setDepth(placement.y).setVisible(!this.interiorSession.isActive && !this.state.activeEncounter);
-    }
   }
 
   private syncWildCreatures(): void {
+    this.creatureChunks.clear(); this.creaturesById.clear();
+    for (const creature of this.state.wildCreatures) { this.creaturesById.set(creature.id,creature); this.creatureChunks.upsert(creature.id,creature.x,creature.y); }
     this.entityActivationDirty = true;
-    for (const [id, sprite] of this.creatureSprites) {
-      if (!this.state.wildCreatures.some((creature) => creature.id === id)) {
-        sprite.destroy();
-        this.creatureSprites.delete(id);
-        this.creatureChunks.delete(id);
-        this.activeCreatureIds.delete(id);
-        this.creaturesById.delete(id);
-      }
-    }
-    for (const creature of this.state.wildCreatures) {
-      this.creaturesById.set(creature.id, creature);
-      const existing = this.creatureSprites.get(creature.id);
-      if (existing) {
-        existing.setPosition(creature.x, creature.y).setDepth(creature.y);
-        this.creatureChunks.upsert(creature.id, creature.x, creature.y);
-        continue;
-      }
-      const sprite = this.add.sprite(creature.x, creature.y, creatureTextureKey(creature.speciesId))
-        .setOrigin(0.5, 0.875)
-        .setDepth(creature.y)
-        .setActive(false)
-        .setVisible(false);
-      if (creature.speciesId === 'tuftle') sprite.play(AnimationKeys.TuftleIdle);
-      if (creature.speciesId === 'craghopper') sprite.play(AnimationKeys.CraghopperIdle);
-      if (creature.speciesId === 'glade-stag') sprite.play(AnimationKeys.GladeStagIdle);
-      this.creatureSprites.set(creature.id, sprite);
-      this.creatureChunks.upsert(creature.id, creature.x, creature.y);
-    }
   }
 
-  /**
-   * Follow moving creatures each frame.
-   *
-   * `syncWildCreatures` only runs when the roster changes, which was fine while
-   * a creature stood on its spawn point for its whole life. Now that they wander
-   * and chase, a sprite left at its last synced position meant the world
-   * simulated movement no player ever saw — a creature could bite from the far
-   * side of the screen. Deliberately narrower than the full sync: no creation,
-   * no destruction, just the pose and the chunk index for the handful of
-   * creatures an area holds.
-   */
   private syncWildCreaturePositions(): void {
     for (const creature of this.state.wildCreatures) {
-      const sprite = this.creatureSprites.get(creature.id);
-      if (!sprite || sprite.x === creature.x && sprite.y === creature.y) continue;
-      // Facing follows travel, so an ambling creature does not moonwalk across
-      // its patch. Vertical-only movement leaves the last horizontal facing.
-      if (creature.x !== sprite.x) sprite.setFlipX(creature.x < sprite.x);
-      // Reindexed only on a chunk crossing. Marking activation dirty on every
-      // pixel of movement would rerun the whole-world activation pass each
-      // frame for the sake of six creatures.
-      const crossedChunk = entityChunkKey(sprite.x, sprite.y) !== entityChunkKey(creature.x, creature.y);
-      sprite.setPosition(creature.x, creature.y).setDepth(creature.y);
-      if (crossedChunk) {
-        this.creatureChunks.upsert(creature.id, creature.x, creature.y);
-        this.entityActivationDirty = true;
-      }
-    }
-  }
-
-  /**
-   * Raiders are few and short-lived — at most one wave, for one minute — so
-   * they are drawn directly rather than going through the chunk activation the
-   * thousands of static world entities need. They also draw above the danger
-   * fog, because a raider you cannot see through the fog is not a fair fight.
-   */
-  private syncRaiders(): void {
-    for (const [id, sprite] of this.raiderSprites) {
-      if (!this.state.raiders.some((raider) => raider.id === id)) {
-        sprite.destroy();
-        this.raiderSprites.delete(id);
-      }
-    }
-    for (const raider of this.state.raiders) {
-      const existing = this.raiderSprites.get(raider.id);
-      if (existing) {
-        existing.setPosition(raider.x, raider.y).setDepth(OVERLAY_DEPTH - 1 + raider.y / WORLD_PX);
-        continue;
-      }
-      this.raiderSprites.set(raider.id, this.add
-        .image(raider.x, raider.y, raiderTextureKey(raider.kindId))
-        .setOrigin(0.5, 0.875)
-        .setDepth(OVERLAY_DEPTH - 1 + raider.y / WORLD_PX));
-    }
-  }
-
-  /**
-   * The "Lv N" plate over every wild creature and raider.
-   *
-   * Levels are the one thing about an enemy a player has to know before they
-   * commit — health bars only appear once the fight has started, by which point
-   * the decision is made. So the plate is drawn for everything hostile-capable,
-   * not just for what is currently angry.
-   *
-   * Runs every frame over the few dozen entities an area holds, because both
-   * populations move: a creature that ambles away from its plate would be worse
-   * than no plate at all.
-   */
-  private syncLevelPlates(): void {
-    const live = new Set<string>();
-    for (const creature of this.state.wildCreatures) {
-      const sprite = this.creatureSprites.get(creature.id);
-      // Chunk activation decides whether a creature is drawn at all; the plate
-      // follows that decision rather than making its own.
-      if (!sprite?.visible) continue;
-      live.add(creature.id);
-      this.positionLevelPlate(creature.id, creature.level, creature.x, creature.y, creature.y + 1);
-    }
-    for (const raider of this.state.raiders) {
-      live.add(raider.id);
-      this.positionLevelPlate(
-        raider.id,
-        raider.level,
-        raider.x,
-        raider.y,
-        OVERLAY_DEPTH - 1 + raider.y / WORLD_PX + 0.001,
-      );
-    }
-    for (const [id, plate] of this.levelPlates) {
-      if (live.has(id)) continue;
-      plate.destroy();
-      this.levelPlates.delete(id);
-    }
-  }
-
-  private positionLevelPlate(id: string, level: number, x: number, y: number, depth: number): void {
-    let plate = this.levelPlates.get(id);
-    if (!plate) {
-      plate = this.add.text(x, y, `Lv ${level}`, {
-        fontFamily: 'Trebuchet MS, sans-serif',
-        fontSize: '10px',
-        color: '#f5ecd6',
-        backgroundColor: 'rgba(11, 18, 14, 0.72)',
-        padding: { x: 3, y: 1 },
-      }).setOrigin(0.5, 1);
-      plate.name = `level-plate-${id}`;
-      this.levelPlates.set(id, plate);
-    } else if (plate.text !== `Lv ${level}`) {
-      plate.setText(`Lv ${level}`);
-    }
-    // Above the sprite's head: sprites use a 0.875 origin, so their art rises
-    // roughly a tile and a half above the anchor point.
-    plate.setPosition(x, y - TILE_SIZE * 2).setDepth(depth);
-  }
-
-  /**
-   * Creatures set to Work amble around the facility they staff. Like raiders
-   * these are a handful of sprites that move every frame, so they skip chunk
-   * activation; unlike raiders they are pure presentation — the wander path is
-   * derived from the creature id and the clock, never from simulation state.
-   */
-  private syncWorkerCreatures(time: number): void {
-    const placements = workerCreaturePlacements(this.state);
-    for (const [id, sprite] of this.workerCreatureSprites) {
-      if (!placements.some((placement) => placement.id === id)) {
-        sprite.destroy();
-        this.workerCreatureSprites.delete(id);
-      }
-    }
-    for (const placement of placements) {
-      const pose = workerCreaturePose(placement, time);
-      let sprite = this.workerCreatureSprites.get(placement.id);
-      if (!sprite) {
-        sprite = this.add.sprite(pose.x, pose.y, creatureTextureKey(placement.speciesId)).setOrigin(0.5, 0.875);
-        if (placement.speciesId === 'tuftle') sprite.play(AnimationKeys.TuftleIdle);
-        if (placement.speciesId === 'craghopper') sprite.play(AnimationKeys.CraghopperIdle);
-        if (placement.speciesId === 'glade-stag') sprite.play(AnimationKeys.GladeStagIdle);
-        this.workerCreatureSprites.set(placement.id, sprite);
-      }
-      // Facing only changes while it is actually walking, so a dawdling worker
-      // does not flip back and forth on the spot.
-      if (pose.dirX !== 0) sprite.setFlipX(pose.dirX < 0);
-      sprite.setPosition(pose.x, pose.y).setDepth(pose.y);
+      const previousChunk = this.creatureChunks.chunkOf(creature.id);
+      this.creatureChunks.upsert(creature.id,creature.x,creature.y);
+      if (previousChunk !== entityChunkKey(creature.x,creature.y)) this.entityActivationDirty = true;
     }
   }
 
   private performTurretAmmo(result: CommandResult): void {
     this.hud.showFeedback(result.message, !result.ok);
     if (!result.ok) return;
-    this.buildMode.syncPlaced(); // an emptied turret swaps to its dry texture
+    this.buildMode.syncPlaced();
     this.onCriticalChanged();
     this.refreshHudNow();
   }
 
-  /** Raider whose sprite is under the pointer, nearest hit-box wins. */
-  private raiderAtWorld(worldX: number, worldY: number): RaiderState | null {
-    let best: RaiderState | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const raider of this.state.raiders) {
-      const sprite = this.raiderSprites.get(raider.id);
-      if (!sprite) continue;
-      const bounds = sprite.getBounds();
-      if (
-        worldX < bounds.x - 4 || worldX > bounds.right + 4 ||
-        worldY < bounds.y - 4 || worldY > bounds.bottom + 4
-      ) continue;
-      const distance = Math.hypot(bounds.centerX - worldX, bounds.centerY - worldY);
-      if (distance < bestDistance) {
-        best = raider;
-        bestDistance = distance;
-      }
-    }
-    return best;
-  }
+  private raiderAtWorld(x: number, y: number): RaiderState | null { return entityAtWorld(this.state.raiders,x,y); }
 
   /**
    * Shoot a raider. Deliberately separate from performEncounterStartOn: a raid
    * is real-time, and clicking a raider must never open the turn-based panel.
    */
   private performPlayerShot(raiderId?: string): void {
+    const swingStyle = this.heldStrikeVisualStyle();
     // Health before the swing, so damage can be derived here rather than made
     // part of the simulation's return contract. Either command can pick its own
     // target when none is named, so every raider is snapshotted.
-    const before = new Map(this.state.raiders.map((raider) => [raider.id, raider.hp]));
+    const before = new Map(this.state.raiders.map(raider => [raider.id, { ...raider }]));
 
     // The bow stays the primary answer whenever it can actually fire — it hits
     // far harder than an axe used as a club. Melee is the fallback for the
@@ -1985,7 +1203,7 @@ export class WorldScene extends Phaser.Scene {
     if (!result.ok) {
       const swing = strikeRaiderMelee(this.state, raiderId);
       if (swing.ok) {
-        style = 'melee';
+        style = swingStyle;
         result = swing;
       } else {
         // Both refused. The melee complaint is the useful one only when the
@@ -2004,14 +1222,10 @@ export class WorldScene extends Phaser.Scene {
     this.hud.showFeedback(result.message, false);
     // The lock follows whatever was actually struck, exactly as the resource
     // path does. Without this a hostile engaged from the action button — rather
-    // than by tapping its sprite — would never light up or name itself.
+    // than by tapping its model — would never light up or name itself.
     if (result.raiderId && !result.killed) this.stickyTarget = { kind: 'raider', id: result.raiderId };
-    // Reported before syncRaiders, which destroys a killed raider's sprite and
-    // would leave the hit-stop with nothing to shake.
     this.reportRaiderHit(result.raiderId, before, style);
-    this.syncRaiders();
     this.syncGroundDrops();
-    this.syncItemDrops();
     this.refreshHudNow();
   }
 
@@ -2036,6 +1250,10 @@ export class WorldScene extends Phaser.Scene {
     // Repeating before the cooldown clears would replace the hit message with
     // "Not ready yet" on every frame and nothing else.
     if (this.state.tick < this.state.actionCooldownUntilTick) return;
+    if (firstPersonView.active && this.crosshairTarget?.kind === 'resource') {
+      if (!equippedBow(this.state)) this.performContextAction(this.crosshairTarget.id);
+      return;
+    }
     // Bow only, and only with arrows: without this the repeat would quietly
     // fall through performPlayerShot's melee branch and swing a held tool.
     const bow = this.state.tools.find((tool) => tool.instanceId === this.state.equippedToolId);
@@ -2053,7 +1271,7 @@ export class WorldScene extends Phaser.Scene {
     // first press. `sustainedGatherNode` is what keeps that safe: it only says
     // yes when the press would land on a resource node, so holding the button
     // never re-opens a door or a container behind it.
-    if (this.sustainedGatherNode()) this.performContextAction();
+    if (!firstPersonView.active && this.sustainedGatherNode()) this.performContextAction();
   }
 
   /**
@@ -2076,9 +1294,14 @@ export class WorldScene extends Phaser.Scene {
     if (nearestHuntableCreature(this.state, this.playerEngageRangePx())) return null;
     if (nearestTownBuildingDoor(this.state)) return null;
     if (nearestUnopenedContainer(this.state)) return null;
+    if (this.state.activeSearch || nearestSearchableContainer(this.state)) return null;
     const nearby = this.findNearbyTargets();
     if ((nearby.bed?.garden?.readyFiber ?? 0) > 0) return null;
     if ((nearby.planter?.woodlot?.readyWood ?? 0) > 0) return null;
+    if (this.stickyTarget?.kind === 'resource') {
+      const locked = this.resourceNodesById.get(this.stickyTarget.id);
+      return locked && locked.hp > 0 && Math.hypot(locked.x - this.state.player.x, locked.y - this.state.player.y) <= strikeReachPx(this.state) ? locked : null;
+    }
     return nearby.node;
   }
 
@@ -2114,37 +1337,16 @@ export class WorldScene extends Phaser.Scene {
     return this.hud.actionPressed || this.actionKey?.isDown === true || this.altActionKey?.isDown === true;
   }
 
-  /** Float a damage number and refresh the health bar for a struck node. */
-  private reportNodeHit(node: ResourceNodeState, previousHp: number): void {
-    const damage = Math.max(0, previousHp - node.hp);
-    if (damage <= 0) return;
-    this.combatOverlay.reportHit(node.id, node.x, node.y, node.hp, node.maxHp, damage, 'melee', 'hit');
-    const sprite = this.resourceSprites.get(node.id);
-    if (sprite) this.combatOverlay.playHitStop(sprite);
+  /** Snapshot the held weapon's visual style before a hit can break it. */
+  private heldStrikeVisualStyle(): StrikeStyle {
+    const tool = this.state.tools.find(tool => tool.instanceId === this.state.equippedToolId);
+    return tool && gameToolDefinition(this.state, tool.definitionId).kind === 'staff' ? 'magic' : 'melee';
   }
 
   /** Float a damage number and refresh the health bar for a struck raider. */
-  private reportRaiderHit(
-    raiderId: string | undefined,
-    before: ReadonlyMap<string, number>,
-    style: StrikeStyle,
-  ): void {
-    if (!raiderId) return;
-    const previous = before.get(raiderId);
-    if (previous === undefined) return;
-    const raider = this.state.raiders.find((candidate) => candidate.id === raiderId);
-    const sprite = this.raiderSprites.get(raiderId);
-    // A killed raider is already out of state, so its remaining health is zero
-    // and its last known position is the sprite still standing on screen.
-    const hp = raider?.hp ?? 0;
-    const maxHp = raider?.maxHp ?? Math.max(1, previous);
-    const x = raider?.x ?? sprite?.x ?? this.state.player.x;
-    const y = raider?.y ?? sprite?.y ?? this.state.player.y;
-    const damage = Math.max(0, previous - hp);
-    if (damage <= 0) return;
-    this.playerActionVisual={kind:style,startedAt:this.time.now,x,y,arrowTracked:style==='ranged'};
-    this.combatOverlay.reportHit(raiderId, x, y, hp, maxHp, damage, style, 'hit');
-    if (sprite) this.combatOverlay.playHitStop(sprite);
+  private reportRaiderHit(raiderId: string | undefined, before: ReadonlyMap<string, RaiderState>, style: StrikeStyle): void {
+    const struck = raiderId ? before.get(raiderId) : undefined;
+    if (struck) this.playerActionVisual={kind:style,startedAt:this.time.now,x:struck.x,y:struck.y,arrowTracked:style==='ranged'};
   }
 
   private syncBuildingQueryIndex(): void {
@@ -2160,66 +1362,8 @@ export class WorldScene extends Phaser.Scene {
     this.entityActivationDirty = true;
   }
 
-  private setupCamera(): void {
-    const cam = this.cameras.main;
-    cam.setBounds(0, 0, WORLD_PX, WORLD_PX);
-    cam.setRoundPixels(true);
-    this.cameraTarget = this.add.zone(this.state.player.x, this.state.player.y, 1, 1).setVisible(false);
-    // The target receives the interpolated render pose. Full-strength follow
-    // avoids adding a second, frame-rate-dependent smoothing layer.
-    cam.startFollow(this.cameraTarget, true, 1, 1);
-  }
-
   private renderPlayerPose(alpha: number): void {
-    const position = interpolateRenderPoint(
-      { x: this.previousPlayerX, y: this.previousPlayerY },
-      this.state.player,
-      alpha,
-    );
-    const boating = (this.state.player.traversalMode ?? 'foot') === 'boat';
-    const mounted = this.mount !== null && !boating;
-    const depths = mountedActorDepths(position.y);
-    const mountTransform = mountTransformForFacing(this.state.player.facing);
-    this.mount
-      ?.setVisible(!boating)
-      ?.setPosition(position.x, position.y)
-      .setDepth(depths.mount)
-      .setAngle(mountTransform.angle)
-      .setFlipX(mountTransform.flipX);
-    this.boatHull
-      .setVisible(boating)
-      .setPosition(position.x, position.y + 2)
-      .setDepth(position.y - 0.5)
-      .setAngle(this.state.player.facing === 'left' || this.state.player.facing === 'right' ? 90 : 0);
-    this.player.setPosition(position.x, position.y - (mounted ? 4 : boating ? 3 : 0));
-    this.player.setDepth(mounted ? depths.player : position.y);
-    this.cameraTarget?.setPosition(position.x, position.y);
-    this.syncPlayerAnimation();
-    this.syncBuildingOcclusion();
-  }
-
-  private syncPlayerAnimation(): void {
-    if (this.time.now < this.gatheringUntil) return;
-    const moving = this.gridMovement.moving;
-    this.facing = this.state.player.facing;
-    this.player.setFlipX(this.facing === 'left');
-    const key = playerAnimationKey(this.facing, moving);
-    if (this.player.anims.currentAnim?.key !== key) this.player.play(key);
-  }
-
-  private syncBuildingOcclusion(): void {
-    for (const building of townBuildingsInArea(this.state.currentArea.key)) {
-      const sprite = this.townBuildingSprites.get(building.id);
-      if (!sprite) continue;
-      const left = building.footprint.tileX * TILE_SIZE;
-      const right = (building.footprint.tileX + building.footprint.tilesWide) * TILE_SIZE;
-      const top = (building.footprint.tileY + 2) * TILE_SIZE;
-      const bottom = (building.footprint.tileY + building.footprint.tilesHigh) * TILE_SIZE + 10;
-      const behindFacade = this.state.player.x >= left && this.state.player.x <= right
-        && this.state.player.y >= top && this.state.player.y <= bottom;
-      sprite.setAlpha(behindFacade ? 0.42 : 1);
-      for (const prop of this.townPropSprites.get(building.id) ?? []) prop.setAlpha(behindFacade ? 0.42 : 1);
-    }
+    this.renderPlayerPosition=interpolateRenderPoint({x:this.previousPlayerX,y:this.previousPlayerY},this.state.player,alpha);
   }
 
   /** Prevent interpolation across teleports, admin edits, and door exits. */
@@ -2293,24 +1437,16 @@ export class WorldScene extends Phaser.Scene {
         else this.queueStep(dx, dy);
       },
     });
-    this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerAction);
-    this.input.on(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
-    this.input.on(Phaser.Input.Events.POINTER_UP, this.onPointerUp);
+    this.compassStrip?.destroy();
+    this.compassStrip = new CompassStrip(parent);
+    this.searchRing?.destroy();
+    this.searchRing = new SearchProgressRing(parent);
+    this.firstPersonHud?.destroy();
+    this.firstPersonHud = new FirstPersonHud(parent, firstPersonView, () => {
+      if (firstPersonView.requested === 'first-person') this.firstPersonLookPrimed = false;
+      this.entityActivationDirty = true;
+    });
   }
-
-  private onPointerAction = (pointer: Phaser.Input.Pointer): void => {
-    if (this.state.pendingRespawn || !this.interiorSession.allowsWorldInteraction) return;
-    if (this.is3DPresentation()) return;
-    if (this.buildMode.placing) {
-      this.buildMode.handlePointerDown(pointer);
-      return;
-    }
-    if (this.buildMode.aimDeleteAtWorld(pointer.worldX, pointer.worldY)) return;
-    if (!pointer.leftButtonDown()) return;
-    if (this.buildMode.beginBuildingPress(pointer)) return;
-    this.buildingItemMenu.close();
-    this.performWorldAction(pointer.worldX, pointer.worldY, clientPointOf(pointer));
-  };
 
   /** World coordinates resolved against the visible Three.js ground plane. */
   handle3DWorldPointer(
@@ -2320,7 +1456,10 @@ export class WorldScene extends Phaser.Scene {
     clientX: number,
     clientY: number,
   ): void {
-    if (this.state.pendingRespawn || !this.is3DPresentation() || !this.interiorSession.allowsWorldInteraction) return;
+    if (this.state.pendingRespawn || !this.interiorSession.allowsWorldInteraction) return;
+    // First person has no world taps: the canvas is the look pad, and the
+    // action button acts on the crosshair instead.
+    if (firstPersonView.active) return;
     if (intent === 'hover') {
       if (this.buildMode.placing) this.buildMode.handleWorldPointerMove(worldX, worldY);
       return;
@@ -2348,23 +1487,6 @@ export class WorldScene extends Phaser.Scene {
     this.performWorldAction(worldX, worldY, { x: clientX, y: clientY });
   }
 
-  private onPointerMove = (pointer: Phaser.Input.Pointer): void => {
-    this.buildMode.handlePointerMove(pointer);
-  };
-
-  private onPointerUp = (pointer: Phaser.Input.Pointer): void => {
-    if (this.state.pendingRespawn) return;
-    // A ghost (or a delete cursor) is only ever aimed by the pointer, so a
-    // release has nothing left to do.
-    if (this.buildMode.placing || this.buildMode.deleteMode) return;
-    // A short press over a building resolves here (a long press already opened
-    // the item menu), so a tap on a facility routes through the same world
-    // action as a tap on empty ground or a creature.
-    if (this.buildMode.finishBuildingPress(pointer)) {
-      this.performWorldAction(pointer.worldX, pointer.worldY, clientPointOf(pointer));
-    }
-  };
-
   /** E, Space, and the Gather button confirm an active placement ghost. */
   private performInteractAction(): void {
     if (this.openingPanel.isOpen) return;
@@ -2380,6 +1502,10 @@ export class WorldScene extends Phaser.Scene {
     // Delete is deliberately not on the context button: demolishing is only
     // ever the Delete control, never the same press that gathers.
     if (this.buildMode.deleteMode) return;
+    if (firstPersonView.active && this.crosshairTarget) {
+      this.performCrosshairAction(this.crosshairTarget);
+      return;
+    }
     this.performContextAction();
   }
 
@@ -2401,6 +1527,11 @@ export class WorldScene extends Phaser.Scene {
       // then goes to the raider the player picked.
       this.stickyTarget = { kind: 'raider', id: raider.id };
       this.performPlayerShot(raider.id);
+      return;
+    }
+    const tappedCrate = this.siteContainerAtWorld(worldX, worldY);
+    if (tappedCrate) {
+      this.performSiteSearch(tappedCrate.siteId, tappedCrate.index);
       return;
     }
     const townBuilding = this.townBuildingAtWorld(worldX, worldY);
@@ -2451,49 +1582,9 @@ export class WorldScene extends Phaser.Scene {
     this.performContextAction();
   }
 
-  /** Resource node whose sprite is under the pointer, nearest hit-box wins. */
-  private resourceAtWorld(worldX: number, worldY: number): ResourceNodeState | null {
-    let best: ResourceNodeState | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const id of this.activeResourceIds) {
-      const sprite = this.resourceSprites.get(id);
-      if (!sprite?.visible) continue;
-      const node = this.resourceNodesById.get(id);
-      if (!node || node.hp <= 0) continue;
-      const bounds = sprite.getBounds();
-      if (
-        worldX < bounds.x - 4 || worldX > bounds.right + 4 ||
-        worldY < bounds.y - 4 || worldY > bounds.bottom + 4
-      ) continue;
-      const distance = Math.hypot(bounds.centerX - worldX, bounds.centerY - worldY);
-      if (distance < bestDistance) {
-        best = node;
-        bestDistance = distance;
-      }
-    }
-    return best;
-  }
+  private resourceAtWorld(x: number, y: number): ResourceNodeState | null { return entityAtWorld(this.state.resourceNodes.filter(node=>node.hp>0),x,y); }
 
-  /** Wild creature whose sprite is under the pointer, nearest hit-box wins. */
-  private creatureAtWorld(worldX: number, worldY: number): WildCreatureState | null {
-    let best: WildCreatureState | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const id of this.activeCreatureIds) {
-      const sprite = this.creatureSprites.get(id);
-      if (!sprite?.visible) continue;
-      const bounds = sprite.getBounds();
-      if (
-        worldX < bounds.x - 4 || worldX > bounds.right + 4 ||
-        worldY < bounds.y - 4 || worldY > bounds.bottom + 4
-      ) continue;
-      const distance = Math.hypot(bounds.centerX - worldX, bounds.centerY - worldY);
-      if (distance < bestDistance) {
-        best = this.creaturesById.get(id) ?? null;
-        bestDistance = distance;
-      }
-    }
-    return best;
-  }
+  private creatureAtWorld(x: number, y: number): WildCreatureState | null { return entityAtWorld(this.state.wildCreatures,x,y); }
 
   /** Open a clicked facility's panel when the player is close enough to use it. */
   private openFacilityInteraction(building: BuildingState): void {
@@ -2525,28 +1616,29 @@ export class WorldScene extends Phaser.Scene {
    * gather the nearest live node, pick up a nearby drop, else report the
    * nearby bed's growing/blocked/suspended status.
    */
-  private performContextAction(): void {
+  private performContextAction(targetResourceId?: string): void {
     if (this.openingPanel.isOpen) return;
-    if (nearbyOpeningTuftle(this.state)) { this.performOpeningTrust(); return; }
+    const resourceId = targetResourceId ?? (this.stickyTarget?.kind === 'resource' ? this.stickyTarget.id : undefined);
+    if (!resourceId && nearbyOpeningTuftle(this.state)) { this.performOpeningTrust(); return; }
     if (this.state.activeEncounter || !this.interiorSession.allowsWorldInteraction) return;
     const inventoryBefore = { ...this.state.inventory };
     // A raider in range outranks every peacetime action: during the danger
     // minute the action button is the player's weapon, not their sickle.
-    if (nearestRaiderInRange(this.state)) {
+    if (!resourceId && nearestRaiderInRange(this.state)) {
       this.performPlayerShot();
       return;
     }
     // A lock the player walked out of bow range of says so, rather than letting
     // the press fall through to "Move closer to a resource" — the button is
     // still labelled with that raider, and the two must agree.
-    if (this.stickyTarget?.kind === 'raider' && this.state.raiders.some((raider) => raider.id === this.stickyTarget!.id)) {
+    if (!resourceId && this.stickyTarget?.kind === 'raider' && this.state.raiders.some((raider) => raider.id === this.stickyTarget!.id)) {
       this.hud.showFeedback('Too far to shoot — move closer', false);
       return;
     }
     // A creature the player deliberately locked keeps the button, in range or
     // not — the label already names it, and silently gathering a bush instead
     // would contradict what the button says it will do.
-    if (this.stickyTarget?.kind === 'creature'
+    if (!resourceId && this.stickyTarget?.kind === 'creature'
       && this.state.wildCreatures.some((creature) => creature.id === this.stickyTarget!.id)) {
       this.performCreatureAttack(this.stickyTarget.id);
       return;
@@ -2556,23 +1648,27 @@ export class WorldScene extends Phaser.Scene {
     // biting you. Placid creatures are excluded by isHuntable, so walking past
     // a herd with a sword equipped never turns the button into a slaughter —
     // tapping one is still the only way to pick a fight with it.
-    if (nearestHuntableCreature(this.state, this.playerEngageRangePx())) {
+    if (!resourceId && nearestHuntableCreature(this.state, this.playerEngageRangePx())) {
       this.performCreatureAttack();
       return;
     }
     const door = nearestTownBuildingDoor(this.state);
-    if (door) {
+    if (!resourceId && door) {
       this.enterTownBuilding(door);
+      return;
+    }
+    // A site crate outranks gathering for the same reason a cache does.
+    const siteContainer = resourceId ? null : nearestSearchableContainer(this.state);
+    if (siteContainer) {
+      this.performSiteSearch(siteContainer.site.id, siteContainer.container.index);
       return;
     }
     // A container outranks gathering: it is one-shot and the player walked to
     // it deliberately, so a tree behind it must never eat the press.
-    if (nearestUnopenedContainer(this.state)) {
+    if (!resourceId && nearestUnopenedContainer(this.state)) {
       const opened = openNearestContainer(this.state);
       if (opened.ok) {
-        this.syncContainers();
         this.syncGroundDrops();
-    this.syncItemDrops();
         this.onCriticalChanged();
       }
       if (opened.ok) this.reportResourceCollection(inventoryBefore);
@@ -2582,10 +1678,14 @@ export class WorldScene extends Phaser.Scene {
     }
     const nearby = this.findNearbyTargets();
     const bed = nearby.bed;
-    const bedReady = bed !== null && (bed.garden?.readyFiber ?? 0) > 0;
+    const bedReady = !resourceId && bed !== null && (bed.garden?.readyFiber ?? 0) > 0;
     const planter = nearby.planter;
-    const planterReady = planter !== null && (planter.woodlot?.readyWood ?? 0) > 0;
-    const node = nearby.node;
+    const planterReady = !resourceId && planter !== null && (planter.woodlot?.readyWood ?? 0) > 0;
+    const node = resourceId ? this.state.resourceNodes.find(node => node.id === resourceId) ?? null : nearby.node;
+    if (resourceId && !node) {
+      this.hud.showFeedback('That resource is no longer available', false);
+      return;
+    }
 
     // With a bow in hand the button is a trigger, which is what its label now
     // says. A bow's damage table has only a raider row, so every branch below
@@ -2594,7 +1694,7 @@ export class WorldScene extends Phaser.Scene {
     // outrank it — a ready harvest and a drop underfoot are not misfires — and
     // when nothing is in range the shot explains itself rather than silently
     // falling through to a no-op.
-    if (equippedBow(this.state) && !bedReady && !planterReady && !nearby.drop) {
+    if (!resourceId && equippedBow(this.state) && !bedReady && !planterReady && !nearby.drop) {
       this.performPlayerShot();
       return;
     }
@@ -2614,15 +1714,9 @@ export class WorldScene extends Phaser.Scene {
         this.onCriticalChanged();
       }
     } else if (node) {
-      const previousHp = node.hp;
-      result = gatherNearest(this.state);
+      result = resourceId ? gatherResource(this.state, resourceId) : gatherNearest(this.state);
       if (result.ok) {
-        // The lock follows what was actually struck. `gatherNearest` still
-        // picks the nearest node on its own, so pointing the ring anywhere
-        // else would put a label on the screen that the swing does not honour.
-        // Phase 2's targeted strike makes the lock authoritative instead.
-        this.stickyTarget = { kind: 'resource', id: node.id };
-        this.reportNodeHit(node, previousHp);
+        this.stickyTarget = { kind: 'resource', id: result.targetId ?? node.id };
       }
     } else {
       result = collectNearestGroundDrop(this.state);
@@ -2632,10 +1726,9 @@ export class WorldScene extends Phaser.Scene {
         // It still outranks the bed/planter fallbacks, which are status text.
         const wall = nearestFacedWall(this.state);
         if (wall) {
-          const previousWallHp = structureHp(wall, this.state.gameBalance) ?? 0;
           result = attackFacedWall(this.state, wall.id);
           wallStruck = result.ok && result.depleted !== true;
-          if (result.ok) this.onWallDamaged(wall, result.depleted === true, previousWallHp);
+          if (result.ok) this.onWallDamaged(wall, result.depleted === true);
         } else {
           result = bed
             ? { ok: false, message: describeGardenBed(this.state, bed).message, targetId: bed.id }
@@ -2651,20 +1744,16 @@ export class WorldScene extends Phaser.Scene {
     // Resource and wall hits already have world-space animation and an HP bar.
     // Keep the central feedback toast for other interactions, but do not cover
     // play with hit/cooldown messages such as "Not ready yet" while striking.
-    if (!wallStruck && !(node && !bedReady && !planterReady)) this.hud.showFeedback(result.message, result.ok);
+    const blockedGather = !result.ok && result.message !== 'Not ready yet';
+    if (blockedGather || (!wallStruck && !(node && !bedReady && !planterReady))) this.hud.showFeedback(result.message, result.ok);
     if (result.ok) {
       if (result.critical) this.onCriticalChanged();
       else this.onMoved();
       if (node && !bedReady && result.targetId) {
+        this.gatheringKind = node.kind;
         this.gatheringUntil = this.time.now + 280;
-        this.player.setFlipX(node.x < this.state.player.x);
-        this.player.play(AnimationKeys.PlayerGather, true);
-        this.spawnGatherEffect(node);
-        this.flashNodeHit(result.targetId);
-        if (result.depleted) this.onNodeDepleted(result.targetId);
       }
       this.syncGroundDrops();
-    this.syncItemDrops();
     }
     if (result.ok) this.reportResourceCollection(inventoryBefore);
     if (result.gatherAssistance && node) {
@@ -2701,7 +1790,6 @@ export class WorldScene extends Phaser.Scene {
       y: interior.playerSpawn.tileY + 0.5,
       facing: interior.playerSpawn.facing,
     });
-    if (!this.is3DPresentation()) this.interiorFallback.open(interior);
     this.interiorTransition.enter(
       () => {
         this.interiorSession.completeTransition();
@@ -2731,10 +1819,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.interiorSession.mode.kind === 'interior' && this.interiorSession.allowsLocalMovement) {
       this.interiorSession.focusHotspot(nearestInteriorHotspot(interior, updatedPose)?.id ?? null);
     }
-    if (!this.is3DPresentation()) {
-      this.interiorFallback.open(interior);
-      this.interiorFallback.update(updatedPose, this.interiorSession.focusedHotspotId);
-    } else this.interiorFallback.close();
+
   }
 
   private performInteriorAction(): void {
@@ -2825,7 +1910,6 @@ export class WorldScene extends Phaser.Scene {
     if (!building) {
       this.interiorAudio.leave();
       this.interiorSession.recoverToWorld();
-      this.interiorFallback.close();
       return;
     }
     this.interiorAudio.leave();
@@ -2833,7 +1917,6 @@ export class WorldScene extends Phaser.Scene {
     this.npcBark.hide();
     this.interiorTransition.exit(() => {
       this.interiorSession.completeTransition();
-      this.interiorFallback.close();
       positionPlayerOutsideDoor(this.state, building);
       this.snapRenderPoseToState();
       this.onCriticalChanged();
@@ -2866,8 +1949,12 @@ export class WorldScene extends Phaser.Scene {
     // the player is standing next to does. A swing scatters skittish species,
     // so requiring a lock here would mean the only creatures that could be
     // tamed are the ones that never ran.
-    const locked = this.stickyTarget?.kind === 'creature'
-      ? this.state.wildCreatures.find((creature) => creature.id === this.stickyTarget!.id) ?? null
+    const crosshairCreatureId = firstPersonView.active && this.crosshairTarget?.kind === 'creature'
+      ? this.crosshairTarget.id
+      : null;
+    const lockedId = crosshairCreatureId ?? (this.stickyTarget?.kind === 'creature' ? this.stickyTarget.id : null);
+    const locked = lockedId
+      ? this.state.wildCreatures.find((creature) => creature.id === lockedId) ?? null
       : null;
     const inSnareRange = locked
       && Math.hypot(locked.x - this.state.player.x, locked.y - this.state.player.y) <= TAMING_RANGE_PX;
@@ -2905,16 +1992,17 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private performCreatureAttack(creatureId?: string): void {
+    const swingStyle = this.heldStrikeVisualStyle();
     if (this.openingPanel.isOpen) return;
     if (creatureId && isOpeningTuftle(this.state, creatureId)) { this.performOpeningTrust(); return; }
-    const before = new Map(this.state.wildCreatures.map((creature) => [creature.id, creature.hp]));
+    const before = new Map(this.state.wildCreatures.map(creature => [creature.id, { ...creature }]));
 
     let style: StrikeStyle = 'ranged';
     let result = fireCreatureShot(this.state, creatureId);
     if (!result.ok) {
       const swing = strikeCreatureMelee(this.state, creatureId);
       if (swing.ok) {
-        style = 'melee';
+        style = swingStyle;
         result = swing;
       } else {
         // Both refused. The swing's complaint is the useful one whenever
@@ -2935,12 +2023,12 @@ export class WorldScene extends Phaser.Scene {
   /** Feedback, lock follow-through, and damage numbers for a landed attack. */
   private reportCreatureAttack(
     result: CreatureStrikeResult,
-    before: ReadonlyMap<string, number>,
+    before: ReadonlyMap<string, WildCreatureState>,
     style: StrikeStyle,
   ): void {
     this.hud.showFeedback(result.message, result.ok);
     if (!result.ok) return;
-    const struck=result.creatureId?this.state.wildCreatures.find(creature=>creature.id===result.creatureId)??this.creatureSprites.get(result.creatureId):null;
+    const struck = result.creatureId ? before.get(result.creatureId) : undefined;
     if(struck)this.playerActionVisual={kind:style,startedAt:this.time.now,x:struck.x,y:struck.y,arrowTracked:false};
 
     // The lock follows what was actually struck, exactly as the raider and
@@ -2952,22 +2040,10 @@ export class WorldScene extends Phaser.Scene {
       this.stickyTarget = null;
     }
 
-    // Reported before syncCreatures, which destroys a killed creature's sprite
-    // and would leave the damage number with nowhere to spawn.
-    for (const creature of this.state.wildCreatures) {
-      const previous = before.get(creature.id);
-      if (previous !== undefined && creature.hp < previous) {
-        this.combatOverlay.reportHit(
-          creature.id, creature.x, creature.y, creature.hp, creature.maxHp,
-          previous - creature.hp, style, 'hit',
-        );
-      }
-    }
     this.syncWildCreatures();
     // A defeat with a full bag spills its loot onto the ground, exactly as a
     // raider's does, so the drops have to be synced or the pile is invisible.
     this.syncGroundDrops();
-    this.syncItemDrops();
     this.onCriticalChanged();
     this.refreshHudNow();
   }
@@ -3017,53 +2093,21 @@ export class WorldScene extends Phaser.Scene {
     const result = setCreatureRole(this.state, creatureId, role);
     this.hud.showFeedback(result.message, result.ok);
     if (result.ok) {
-      this.syncMountAppearance();
       this.onCriticalChanged();
     }
     this.refreshHudNow();
   }
 
-  /** A mount is an active follower with mount mode; strongest wins if content adds more later. */
-  private syncMountAppearance(): void {
-    const activeMount = this.state.ownedCreatures
-      .filter((creature) => creature.role === 'follow' && creatureDefinition(creature.speciesId).followMode === 'mount')
-      .sort((left, right) =>
-        creatureDefinition(right.speciesId).travelSpeedMultiplier - creatureDefinition(left.speciesId).travelSpeedMultiplier,
-      )[0];
-    if (!activeMount) {
-      this.mount?.destroy();
-      this.mount = null;
-      return;
-    }
-    const texture = creatureTextureKey(activeMount.speciesId);
-    if (!this.mount) this.mount = this.add.image(this.state.player.x, this.state.player.y, texture).setOrigin(0.5, 0.9);
-    else this.mount.setTexture(texture);
-  }
-
-  private onNodeDepleted(nodeId: string): void {
-    const node = this.state.resourceNodes.find((item) => item.id === nodeId);
-    if (!node) return;
-    this.resourceSprites.get(nodeId)?.setTexture(this.nodeTexture(node)).clearTint().setScale(1);
-  }
-
   /** Swing at a struck wall; its health bar is picked up by the next redraw. */
-  private onWallDamaged(wall: BuildingState, destroyed: boolean, previousHp: number): void {
+  private onWallDamaged(wall: BuildingState, destroyed: boolean): void {
     const center = buildingCenterPx(wall);
-    const maxHp = structureMaxHp(wall, this.state.gameBalance) ?? Math.max(1, previousHp);
-    const hp = destroyed ? 0 : structureHp(wall, this.state.gameBalance) ?? 0;
-    const damage = Math.max(0, previousHp - hp);
-    if (damage > 0) {
-      this.combatOverlay.reportHit(wall.id, center.x, center.y, hp, maxHp, damage, 'melee', 'hit');
-    }
+    this.playerActionVisual={kind:'melee',startedAt:this.time.now,x:center.x,y:center.y,arrowTracked:false};
+    this.gatheringKind = null;
     this.gatheringUntil = this.time.now + 280;
-    this.player.setFlipX(center.x < this.state.player.x);
-    this.player.play(AnimationKeys.PlayerGather, true);
     if (destroyed) {
       this.spawnFloatingText(center.x, center.y, 'Destroyed');
       this.buildMode.syncPlaced();
       this.syncBuildingQueryIndex();
-    } else {
-      this.buildMode.flashBuildingHit(wall.id);
     }
     this.onCriticalChanged();
   }
@@ -3103,86 +2147,7 @@ export class WorldScene extends Phaser.Scene {
     return result.ok;
   }
 
-  /**
-   * A bar sits above every damaged wall for as long as it stays damaged, so the
-   * player can see what needs repairing without hunting for it. Redrawn only
-   * when the damaged set or its health actually changes.
-   */
-  /**
-   * Health bars over anything a raid has chewed on. Facilities are included as
-   * well as walls: at 0 they are destroyed outright, so the player needs to see
-   * what is about to be lost while there is still time to repair it.
-   */
-  private updateDamagedWallBars(): void {
-    const balance = this.state.gameBalance;
-    const damaged = this.state.buildings.filter((building) => isStructureDamaged(building, balance));
-    const signature = damaged.map((wall) => `${wall.id}:${wall.hp}`).join('|');
-    if (signature === this.damagedWallSignature) return;
-    this.damagedWallSignature = signature;
-
-    this.wallHpBar.clear();
-    for (const wall of damaged) {
-      const center = buildingCenterPx(wall);
-      const ratio = structureHp(wall, balance)! / structureMaxHp(wall, balance)!;
-      const color = ratio > 0.5 ? 0x4cc07f : ratio > 0.25 ? 0xc9a227 : 0xd9534f;
-      this.wallHpBar.fillStyle(0x09140e, 0.85).fillRect(center.x - 9, center.y - 22, 18, 4);
-      this.wallHpBar.fillStyle(color, 1).fillRect(center.x - 8, center.y - 21, Math.max(1, Math.round(16 * ratio)), 2);
-    }
-  }
-
-  private flashNodeHit(nodeId: string): void {
-    const sprite = this.resourceSprites.get(nodeId);
-    if (!sprite) return;
-    sprite.setTintFill(0xffffff);
-    this.tweens.add({ targets: sprite, x: sprite.x + 1, duration: 40, yoyo: true, repeat: 2 });
-    this.time.delayedCall(90, () => {
-      if (!sprite.active) return;
-      if (this.highlightedId === nodeId) sprite.setTint(HIGHLIGHT_TINT);
-      else sprite.clearTint();
-    });
-  }
-
-  private spawnGatherEffect(node: ResourceNodeState): void {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || this.activeEffectCount >= 20) return;
-    const color = node.kind === 'tree' ? 0xa9794a
-      : node.kind === 'stone' || node.kind === 'metal' ? 0x929b96
-        : node.kind === 'berry-bush' ? 0xbd5c52 : 0xa7b96a;
-    for (let index = 0; index < 4 && this.activeEffectCount < 24; index += 1) {
-      this.activeEffectCount += 1;
-      const chip = this.add.rectangle(node.x, node.y - 10, index % 2 === 0 ? 2 : 1, 2, color, 1).setDepth(OVERLAY_DEPTH - 1);
-      const direction = index < 2 ? -1 : 1;
-      this.tweens.add({
-        targets: chip,
-        x: node.x + direction * (5 + index * 2),
-        y: node.y - 17 - (index % 2) * 5,
-        alpha: 0,
-        duration: 380,
-        ease: 'Cubic.easeOut',
-        onComplete: () => { chip.destroy(); this.activeEffectCount -= 1; },
-      });
-    }
-  }
-
-  private spawnFloatingText(x: number, y: number, text: string): void {
-    const label = this.add
-      .text(x, y - 18, text, {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '10px',
-        color: '#ffe08a',
-        stroke: '#09140e',
-        strokeThickness: 3,
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(OVERLAY_DEPTH + 1);
-    this.tweens.add({
-      targets: label,
-      y: y - 34,
-      alpha: 0,
-      duration: 1000,
-      ease: 'Cubic.easeOut',
-      onComplete: () => label.destroy(),
-    });
-  }
+  private spawnFloatingText(_x: number, _y: number, text: string): void { this.hud.showFeedback(text,true); }
 
   /** Report only positive Bag deltas from one player-triggered action. */
   private reportResourceCollection(before: Readonly<GameState['inventory']>): void {
@@ -3219,116 +2184,7 @@ export class WorldScene extends Phaser.Scene {
     this.lastCelebratedLevel = level;
   }
 
-  private playLevelUpCelebration(level: number): void {
-    this.levelUpEndsAt = this.time.now + LEVEL_UP_CELEBRATION_MS;
-    const { x, y } = this.player;
-
-    // Rings burst outward from the character's feet on a repeating beat.
-    for (let ring = 0; ring < 3; ring += 1) {
-      const arc = this.add
-        .circle(x, y, 14)
-        .setStrokeStyle(2, LEVEL_UP_GOLD, 1)
-        .setDepth(OVERLAY_DEPTH)
-        .setScale(0.3)
-        .setAlpha(0);
-      this.levelUpAura.push(arc);
-      this.tweens.add({
-        targets: arc,
-        scale: { from: 0.3, to: 2.6 },
-        alpha: { from: 0.9, to: 0 },
-        delay: ring * 220,
-        duration: 900,
-        repeat: Math.floor(LEVEL_UP_CELEBRATION_MS / 1_100),
-        repeatDelay: 200,
-        ease: 'Cubic.easeOut',
-      });
-    }
-
-    // A trail of sparkles keeps rising for the whole five seconds.
-    this.levelUpSparkleTimer?.remove();
-    this.levelUpSparkleTimer = this.time.addEvent({
-      delay: LEVEL_UP_SPARKLE_INTERVAL_MS,
-      repeat: Math.floor(LEVEL_UP_CELEBRATION_MS / LEVEL_UP_SPARKLE_INTERVAL_MS) - 1,
-      callback: () => this.spawnLevelUpSparkle(),
-    });
-
-    const banner = this.add
-      .text(x, y - 30, `LEVEL UP\nLEVEL ${level}`, {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '14px',
-        fontStyle: 'bold',
-        color: '#ffe9a3',
-        stroke: '#3a2400',
-        strokeThickness: 4,
-        align: 'center',
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(OVERLAY_DEPTH + 2)
-      .setScale(0.4);
-    this.tweens.add({ targets: banner, scale: 1, duration: 260, ease: 'Back.easeOut' });
-    this.tweens.add({
-      targets: banner,
-      y: y - 58,
-      alpha: 0,
-      delay: 1_100,
-      duration: 900,
-      ease: 'Cubic.easeIn',
-      onComplete: () => banner.destroy(),
-    });
-    this.hud.showFeedback(`Level Up! You are now level ${level}.`, true);
-  }
-
-  private spawnLevelUpSparkle(): void {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 6 + Math.random() * 12;
-    const x = this.player.x + Math.cos(angle) * radius;
-    const y = this.player.y + Math.sin(angle) * radius * 0.5;
-    const sparkle = this.add.circle(x, y, 1 + Math.random() * 1.5, LEVEL_UP_GOLD, 1).setDepth(OVERLAY_DEPTH + 1);
-    this.tweens.add({
-      targets: sparkle,
-      y: y - (18 + Math.random() * 16),
-      alpha: 0,
-      duration: 600 + Math.random() * 300,
-      ease: 'Sine.easeOut',
-      onComplete: () => sparkle.destroy(),
-    });
-  }
-
-  /** Drive the gold pulse and keep the aura centred on the moving character. */
-  private updateLevelUpCelebration(): void {
-    if (this.levelUpEndsAt === 0) return;
-    const remaining = this.levelUpEndsAt - this.time.now;
-    if (remaining <= 0) {
-      this.stopLevelUpCelebration();
-      return;
-    }
-    for (const arc of this.levelUpAura) arc.setPosition(this.player.x, this.player.y + 4);
-    // Cosine wave so the glow swells and settles rather than strobing, easing
-    // off toward the end of the five seconds.
-    const wave = 0.5 - 0.5 * Math.cos((this.time.now / 1_000) * Math.PI * 2 * LEVEL_UP_PULSE_HZ);
-    const strength = wave * (0.45 + 0.55 * (remaining / LEVEL_UP_CELEBRATION_MS));
-    const blend = Phaser.Display.Color.Interpolate.ColorWithColor(
-      Phaser.Display.Color.ValueToColor(0xffffff),
-      Phaser.Display.Color.ValueToColor(LEVEL_UP_GOLD),
-      100,
-      strength * 100,
-    );
-    this.player.setTint(Phaser.Display.Color.GetColor(blend.r, blend.g, blend.b));
-    this.player.setScale(1 + 0.14 * strength);
-  }
-
-  private stopLevelUpCelebration(): void {
-    this.levelUpEndsAt = 0;
-    this.levelUpSparkleTimer?.remove();
-    this.levelUpSparkleTimer = null;
-    for (const arc of this.levelUpAura) {
-      this.tweens.killTweensOf(arc);
-      arc.destroy();
-    }
-    this.levelUpAura = [];
-    this.player.clearTint();
-    this.player.setScale(1);
-  }
+  private playLevelUpCelebration(level: number): void { this.hud.showFeedback(`Level Up! You are now level ${level}.`,true); }
 
   private performCraft(definitionId: import('../simulation/state').ToolDefinitionId): void {
     const result = craftTool(this.state, definitionId);
@@ -3344,7 +2200,6 @@ export class WorldScene extends Phaser.Scene {
     if (result.ok) {
       this.buildMode.syncPlaced();
       this.syncGroundDrops();
-    this.syncItemDrops();
       if (critical) this.onCriticalChanged();
       else this.onMoved();
       this.reportResourceCollection(inventoryBefore);
@@ -3368,28 +2223,12 @@ export class WorldScene extends Phaser.Scene {
     if (!result.ok) return;
     this.syncBuildingQueryIndex();
     this.syncGroundDrops();
-    this.syncItemDrops();
     this.onCriticalChanged();
     this.refreshHudNow();
   }
 
-  /**
-   * Building over a knocked-down node retires it from the sim, so its stump or
-   * rubble sprite has to go with it instead of lingering under the structure
-   * until the next area rebuild.
-   */
-  private pruneRetiredResourceNodes(): void {
-    for (const [id, sprite] of this.resourceSprites) {
-      if (this.state.resourceNodes.some((node) => node.id === id)) continue;
-      sprite.destroy();
-      this.resourceSprites.delete(id);
-      this.resourceChunks.delete(id);
-      this.activeResourceIds.delete(id);
-      this.resourceNodesById.delete(id);
-      if (this.highlightedId === id) this.highlightedId = null;
-      this.entityActivationDirty = true;
-    }
-  }
+  /** Reconcile interaction indexes after construction retires resource nodes. */
+  private pruneRetiredResourceNodes(): void { this.buildResourceNodes(); }
 
   private deleteBuilding(buildingId: string): boolean {
     const result = removeBuilding(this.state, buildingId);
@@ -3398,7 +2237,6 @@ export class WorldScene extends Phaser.Scene {
       this.buildMode.syncPlaced();
       this.syncBuildingQueryIndex();
       this.syncGroundDrops();
-    this.syncItemDrops();
       this.onCriticalChanged();
       this.refreshHudNow();
     }
@@ -3433,12 +2271,9 @@ export class WorldScene extends Phaser.Scene {
     const openingStatus = this.state.onboarding.status;
     const wildCount = this.state.wildCreatures.length;
     if (reconcileQuestProgress(this.state)) {
-      this.syncContainers();
       if (openingStatus !== this.state.onboarding.status || wildCount !== this.state.wildCreatures.length) this.syncWildCreatures();
       for (const node of this.state.resourceNodes) {
         if (this.resourceNodesById.has(node.id)) continue;
-        const sprite = this.add.image(node.x, node.y, this.nodeTexture(node)).setOrigin(.5, .875).setDepth(node.y).setActive(false).setVisible(false);
-        this.resourceSprites.set(node.id, sprite);
         this.resourceNodesById.set(node.id, node);
         this.resourceChunks.upsert(node.id, node.x, node.y);
         this.entityActivationDirty = true;
@@ -3468,21 +2303,6 @@ export class WorldScene extends Phaser.Scene {
   private refreshHudIfDue(): void {
     if (!this.hudDirty || this.time.now - this.lastHudRefreshAt < HUD_REFRESH_INTERVAL_MS) return;
     this.refreshHudNow();
-  }
-
-  private updateShelterOutline(): void {
-    if (!this.journeyOutline?.active) this.journeyOutline = this.add.graphics().setDepth(999_001);
-    this.journeyOutline.clear();
-    const waypoint = openingGardenAvailable(this.state) ? this.gardenGuide?.visibleWaypoint : this.supplyRunGuide?.visibleWaypoint;
-    if (waypoint && !this.interiorSession.isActive && !this.state.activeEncounter) this.journeyOutline.lineStyle(2, 0x8de4ed, .95).strokeCircle((waypoint.tileX + .5) * TILE_SIZE, (waypoint.tileY + .5) * TILE_SIZE, 10);
-    const garden = this.gardenGuide?.visibleSite;
-    if (garden && !this.interiorSession.isActive && !this.state.activeEncounter) this.journeyOutline.lineStyle(1, 0x8de4ed, .8).strokeRect(garden.tileX * TILE_SIZE, garden.tileY * TILE_SIZE, 2 * TILE_SIZE, TILE_SIZE);
-    if (!this.shelterOutline?.active) this.shelterOutline = this.add.graphics().setDepth(999_000);
-    this.shelterOutline.clear();
-    const site = this.paddockGuide.visibleSite ?? this.shelterGuide.visibleSite;
-    if (!site || this.interiorSession.isActive || this.state.activeEncounter) return;
-    this.shelterOutline.lineStyle(1, 0xffdb83, .8);
-    for (let y = 0; y < 2; y++) for (let x = 0; x < 4; x++) this.shelterOutline.strokeRect((site.tileX + x) * TILE_SIZE, (site.tileY + y) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
   }
 
   private nearestDropInRange(candidates: Iterable<GroundDropState>): GroundDropState | null {
@@ -3592,9 +2412,10 @@ export class WorldScene extends Phaser.Scene {
     const bed = nearby.bed;
     const planter = nearby.planter;
     const door = nearby.door;
+    const siteAction = door ? null : this.siteContextAction();
     this.hud.setContextActionOverride(
-      door ? `Enter ${door.displayName}` : null,
-      door ? `${door.displayName} · E / Space` : '',
+      door ? `Enter ${door.displayName}` : siteAction?.label ?? null,
+      door ? `${door.displayName} · E / Space` : siteAction?.hint ?? '',
     );
     this.presentationTarget = door
       ? {
@@ -3642,15 +2463,6 @@ export class WorldScene extends Phaser.Scene {
     if (key === this.lastTargetKey) return;
     this.lastTargetKey = key;
 
-    const nextHighlight = target?.id ?? null;
-    if (nextHighlight !== this.highlightedId) {
-      if (this.highlightedId) this.resourceSprites.get(this.highlightedId)?.clearTint().setScale(1);
-      this.highlightedId = nextHighlight;
-      if (this.highlightedId) {
-        this.resourceSprites.get(this.highlightedId)?.setTint(HIGHLIGHT_TINT).setScale(1.12);
-      }
-    }
-
     this.hud.refreshTargets(target, drop, creature, locked);
   }
 
@@ -3678,46 +2490,6 @@ export class WorldScene extends Phaser.Scene {
     const resolved = resolveCombatTarget(this.state, this.stickyTarget, this.currentStrikeStyle());
     if (!resolved) this.stickyTarget = null;
     return resolved;
-  }
-
-  private updateCombatOverlay(deltaMs: number): void {
-    // Raiders walk every tick and nodes can respawn, so tracked bars re-read
-    // their subject each frame. Only recently-damaged entities are tracked,
-    // which keeps this loop to a handful of lookups.
-    for (const id of this.combatOverlay.trackedIds()) {
-      const node = this.resourceNodesById.get(id);
-      if (node) {
-        this.combatOverlay.observe(id, node.x, node.y, node.hp, node.maxHp);
-        continue;
-      }
-      const raider = this.state.raiders.find((candidate) => candidate.id === id);
-      if (raider) {
-        this.combatOverlay.observe(id, raider.x, raider.y, raider.hp, raider.maxHp);
-        continue;
-      }
-      const creature = this.state.wildCreatures.find((candidate) => candidate.id === id);
-      if (creature) {
-        // Only while it is actually on screen: chunk activation can hide a
-        // creature mid-fight, and a bar left hanging over an empty patch of
-        // grass reads as a bug. Dropping it is safe — the next hit re-adds it.
-        if (this.creatureSprites.get(id)?.visible) {
-          this.combatOverlay.observe(id, creature.x, creature.y, creature.hp, creature.maxHp);
-          continue;
-        }
-      }
-      const building = this.state.buildings.find((candidate) => candidate.id === id);
-      if (building) {
-        const center = buildingCenterPx(building);
-        const hp = structureHp(building, this.state.gameBalance);
-        const maxHp = structureMaxHp(building, this.state.gameBalance);
-        if (hp !== null && maxHp !== null) {
-          this.combatOverlay.observe(id, center.x, center.y, hp, maxHp);
-          continue;
-        }
-      }
-      this.combatOverlay.forget(id);
-    }
-    this.combatOverlay.draw(this.resolveStickyTarget(), deltaMs);
   }
 
   private gatherInput(): MoveIntent {
@@ -3764,7 +2536,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.queuedStep) return { x: this.queuedStep.x, y: this.queuedStep.y, slow: false, sprint };
     const stick = this.joystick.getVector();
     if (stick.magnitude > 0.05) {
-      return { x: stick.x, y: stick.y, slow: false, sprint };
+      return { x: stick.x, y: stick.y, slow: false, sprint, continuous: true };
     }
 
     let x = 0;
@@ -3772,19 +2544,28 @@ export class WorldScene extends Phaser.Scene {
     let slow = false;
     for (const set of [this.keys, this.altKeys]) {
       if (!set) continue;
-      if (set.left.isDown) x -= 1;
-      if (set.right.isDown) x += 1;
+      // In first person the left/right arrows turn the view instead.
+      const turnsInstead = set === this.altKeys && firstPersonView.active;
+      if (set.left.isDown && !turnsInstead) x -= 1;
+      if (set.right.isDown && !turnsInstead) x += 1;
       if (set.up.isDown) y -= 1;
       if (set.down.isDown) y += 1;
       if (set.slow.isDown) slow = true;
     }
     x = Math.max(-1, Math.min(1, x));
     y = Math.max(-1, Math.min(1, y));
-    return { x, y, slow, sprint };
+    return { x, y, slow, sprint, continuous: true };
   }
 
   private alignIntentToPresentation(intent: MoveIntent): MoveIntent {
-    if (!this.is3DPresentation()) return intent;
+    if (firstPersonView.active) {
+      // The stick is relative to where the player is looking, and the heading
+      // keeps the character facing the view while strafing.
+      return {
+        ...screenToCameraWorldIntent(intent, firstPersonView.look.yawDegrees),
+        heading: firstPersonView.look.heading(),
+      };
+    }
     // The published camera angle is what the player is looking through, so the
     // stick is rotated onto the ground plane by that same yaw.
     const yaw = cameraOrientationFromTenths(this.state.gameBalance.camera).yawDegrees;
@@ -3792,22 +2573,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private alignInteriorIntentToPresentation(intent: MoveIntent): MoveIntent {
-    if (!this.is3DPresentation()) return intent;
     if (!this.interiorSession.buildingId) return intent;
     // Interiors are shot from the overworld orientation, so the stick rotates
     // by exactly the same yaw indoors as it does outside.
     return this.alignIntentToPresentation(intent);
   }
 
-  private applyLayout = (): void => {
-    const layout = computeLayout({
-      width: this.scale.gameSize.width,
-      height: this.scale.gameSize.height,
-    });
-    this.cameras.main.setZoom(layout.zoom);
-  };
-
-  /** Paint travel feedback first, then replace only area-owned Phaser objects. */
+  /** Paint travel feedback before reconciling the destination area. */
   private beginAreaTransition(): void {
     if (this.transitioningArea) return;
     this.transitioningArea = true;
@@ -3821,13 +2593,10 @@ export class WorldScene extends Phaser.Scene {
     this.hud.closeFacility();
     this.showTravelOverlay(document.getElementById('app') ?? document.body);
     this.onTransitionStarted();
-    if (this.terrainBuildFrame !== null) cancelAnimationFrame(this.terrainBuildFrame);
-    this.terrainBuildFrame = null;
-    this.pendingTerrainChunks.length = 0;
     const startedAt = performance.now();
 
     // Two animation frames are deliberate: the first commits the overlay and
-    // the second starts synchronous nearby-terrain work after it has painted.
+    // the second reconciles the area after it has painted.
     this.transitionFrameA = requestAnimationFrame(() => {
       this.transitionFrameA = null;
       this.transitionFrameB = requestAnimationFrame(() => {
@@ -3866,88 +2635,15 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  /** Rebuild the map layer while retaining DOM HUD, input, and scene systems. */
   private rebuildAreaWorld(): void {
-    this.cameras.main.stopFollow();
-    this.tweens.killAll();
     this.time.removeAllEvents();
     this.buildMode.clearForAreaSwap();
-    this.destroyTerrainChunks();
-    this.dangerAtmosphere.destroy();
-    this.arcaneStorm.destroy();
-    this.children.removeAll(true);
-    this.shelterOutline = null;
-
-    this.mount = null;
-    this.cameraTarget = null;
-    this.activeEffectCount = 0;
-    this.gatheringUntil = 0;
-    this.playerActionVisual=null;
-    this.gatherAssistance = null;
-    this.lastInteractionCandidateCount = 0;
-    this.hudDirty = true;
-    this.highlightedId = null;
-    // Nothing in the new area can be the thing the player locked in the old one.
-    this.stickyTarget = null;
-    this.damagedWallSignature = '';
-    this.lastTargetKey = null;
-    this.activeChunkSignature = null;
-    this.entityActivationDirty = true;
-    this.resourceSprites.clear();
-    this.dropSprites.clear();
-    this.containerSprites.clear();
-    this.creatureSprites.clear();
-    this.raiderSprites.clear();
-    this.workerCreatureSprites.clear();
-    this.followerCreatureSprites.clear();
-    this.levelPlates.clear();
-    this.resourceNodesById.clear();
-    this.dropsById.clear();
-    this.creaturesById.clear();
-    this.buildingsById.clear();
-    this.resourceChunks.clear();
-    this.dropChunks.clear();
-    this.creatureChunks.clear();
-    this.buildingChunks.clear();
-    this.activeResourceIds.clear();
-    this.activeDropIds.clear();
-    this.activeCreatureIds.clear();
-    this.townBuildingSprites.clear();
-    this.townPropSprites.clear();
-    this.townGateSprites.clear();
-
-    this.buildGround();
-    this.buildTownBuildings();
-    this.buildResourceNodes();
-    this.syncWildCreatures();
-    this.syncGroundDrops();
-    this.syncItemDrops();
-    this.syncContainers();
-    this.wallHpBar = this.add.graphics().setDepth(OVERLAY_DEPTH);
-    this.combatOverlay = new CombatOverlay(this, OVERLAY_DEPTH);
-    this.player = this.add
-      .sprite(this.state.player.x, this.state.player.y, TextureKeys.PlayerIdleDown)
-      .setOrigin(0.5, 0.875);
-    this.player.play(playerAnimationKey(this.state.player.facing, false));
-    this.previousPlayerX = this.state.player.x;
-    this.previousPlayerY = this.state.player.y;
-    this.facing = this.state.player.facing;
-    this.syncMountAppearance();
-    this.setupCamera();
-    this.dangerAtmosphere = new DangerAtmosphereOverlay(this, this.state, OVERLAY_DEPTH - 1);
-    // Above the atmospheric wash and every structure, below the HUD: a marker
-    // the player has three seconds to read must never sit under a roof.
-    this.arcaneStorm = new ArcaneStormOverlay(this, this.state, OVERLAY_DEPTH - 1);
-    this.setupForestAmbience();
-    this.buildMode.syncPlaced();
-    this.syncBuildingQueryIndex();
-    this.applyLayout();
-    this.updateTerrainChunkVisibility();
-    this.updateEntityChunkActivation();
-    this.navigator.refresh(true);
-    this.encounterPanel.refresh();
-    this.hotbar.setSuppressed(false);
-    this.refreshHudNow();
+    this.gatheringUntil=0; this.playerActionVisual=null; this.gatherAssistance=null;
+    this.stickyTarget=null; this.lastTargetKey=null; this.activeChunkSignature=null;
+    this.entityActivationDirty=true; this.hudDirty=true;
+    this.buildResourceNodes(); this.syncWildCreatures(); this.syncGroundDrops(); this.syncBuildingQueryIndex();
+    this.previousPlayerX=this.state.player.x; this.previousPlayerY=this.state.player.y; this.renderPlayerPose(1);
+    this.navigator.refresh(true); this.encounterPanel.refresh(); this.hotbar.setSuppressed(false); this.refreshHudNow();
   }
 
   private showTravelOverlay(parent: HTMLElement): void {
@@ -4040,6 +2736,13 @@ export class WorldScene extends Phaser.Scene {
   };
 
   private teardown(): void {
+    this.firstPersonHud?.destroy();
+    this.firstPersonHud = null;
+    this.compassStrip?.destroy();
+    this.compassStrip = null;
+    this.searchRing?.destroy();
+    this.searchRing = null;
+    firstPersonView.active = false;
     this.openingPanel.destroy();
     this.shelterGuide.destroy();
     this.paddockGuide.destroy();
@@ -4048,9 +2751,6 @@ export class WorldScene extends Phaser.Scene {
     this.interiorAudio.dispose();
     this.interiorSession.recoverToWorld();
     resetGridMovement(this.interiorGridMovement);
-    this.stopLevelUpCelebration();
-    this.dangerAtmosphere.destroy();
-    this.arcaneStorm.destroy();
     if (this.transitionFrameA !== null) cancelAnimationFrame(this.transitionFrameA);
     if (this.transitionFrameB !== null) cancelAnimationFrame(this.transitionFrameB);
     if (this.transitionFinishTimer !== null) clearTimeout(this.transitionFinishTimer);
@@ -4063,10 +2763,6 @@ export class WorldScene extends Phaser.Scene {
     this.transitionAreaKey = null;
     this.areaSplash?.remove();
     this.areaSplash = null;
-    this.scale.off(Phaser.Scale.Events.RESIZE, this.applyLayout, this);
-    this.input.off(Phaser.Input.Events.POINTER_DOWN, this.onPointerAction);
-    this.input.off(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
-    this.input.off(Phaser.Input.Events.POINTER_UP, this.onPointerUp);
     this.actionKey?.off('down', this.onActionShortcut);
     this.altActionKey?.off('down', this.onActionShortcut);
     this.craftKey?.off('down', this.onCraftShortcut);
@@ -4080,7 +2776,6 @@ export class WorldScene extends Phaser.Scene {
     // shutdown after the camera manager is already down; the throw used to abort
     // teardown here and leave the old HUD/panels in the page beside the new ones.
     this.cameras?.main?.stopFollow();
-    this.cameraTarget = null;
     this.hotbarKeys.forEach((key, slot) => key.off('down', this.hotbarShortcutHandlers[slot]!));
     this.joystick.destroy();
     this.hud.destroy();
@@ -4094,20 +2789,10 @@ export class WorldScene extends Phaser.Scene {
     this.respawnPanel.destroy();
     this.encounterPanel.destroy();
     this.npcServiceOverlay.destroy();
-    this.interiorFallback.destroy();
     this.interiorTransition.destroy();
     this.npcDialogue.destroy();
     this.npcBark.destroy();
     this.adminPanel.destroy();
-    this.followerCreatureSprites.clear();
-    this.destroyTerrainChunks();
-    this.resourceSprites.clear();
-    this.dropSprites.clear();
-    this.containerSprites.clear();
-    this.creatureSprites.clear();
-    this.raiderSprites.clear();
-    this.workerCreatureSprites.clear();
-    this.levelPlates.clear();
     this.resourceNodesById.clear();
     this.dropsById.clear();
     this.creaturesById.clear();
@@ -4119,9 +2804,5 @@ export class WorldScene extends Phaser.Scene {
     this.activeResourceIds.clear();
     this.activeDropIds.clear();
     this.activeCreatureIds.clear();
-    this.townBuildingSprites.clear();
-    this.townGateSprites.clear();
-    for (const props of this.townPropSprites.values()) for (const prop of props) prop.destroy();
-    this.townPropSprites.clear();
   }
 }

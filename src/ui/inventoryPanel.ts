@@ -73,6 +73,7 @@ export class InventoryPanel {
   private readonly tabViews = new Map<MenuTabId, MenuTab>();
   private readonly backdrop:HTMLDivElement;
   private readonly subtitle:HTMLDivElement;
+  private readonly headerActions: HTMLDivElement;
   private activeTab: MenuTabId = 'bag';
   private actionOverlay: HTMLDivElement | null = null;
   private inventorySignature='';
@@ -135,7 +136,9 @@ export class InventoryPanel {
     close.setAttribute('aria-label','Close');close.classList.add('elaris-menu-close');
     close.replaceChildren(createUiIcon('close',20));
     Object.assign(close.style, { minHeight: '44px', background: 'rgba(30,48,37,0.94)' });
-    header.append(crest,identity,close);
+    this.headerActions = div({ display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' });
+    this.headerActions.append(close);
+    header.append(crest,identity,this.headerActions);
 
     this.tabs = div({
       display: 'flex',
@@ -182,6 +185,11 @@ export class InventoryPanel {
 
   get open(): boolean {
     return this.panel.style.display !== 'none';
+  }
+
+  /** Place a global action at the top of the Menu, before its Close button. */
+  addHeaderAction(button: HTMLButtonElement): void {
+    this.headerActions.prepend(button);
   }
 
   toggle(): void {

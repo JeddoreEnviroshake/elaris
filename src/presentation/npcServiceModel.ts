@@ -315,7 +315,9 @@ function blueprintSaleOffers(state: GameState): readonly NpcServiceOfferModel[] 
 }
 
 function marketOffers(state: GameState): readonly NpcServiceOfferModel[] {
-  return BAG_ITEM_IDS.map((resource) => {
+  // Zero-priced items are quest and key items that sellResource refuses, so
+  // they never get a market row that could only ever say no.
+  return BAG_ITEM_IDS.filter((resource) => SELL_PRICES[resource] > 0).map((resource) => {
     const label = BAG_ITEM_LABELS[resource];
     const unavailable = state.inventory[resource] <= 0 ? `No ${resource} to sell` : null;
     return offer(

@@ -1,6 +1,7 @@
+import { releaseSaveWriter } from './save';
 import { expect, test } from '@playwright/test';
 import { openApp, waitForDebugHandles } from './app';
-import { openBuildPalette, grantBlueprints } from './menu';
+import { openAdmin, openBuildPalette, grantBlueprints } from './menu';
 import { createInitialState } from '../../src/simulation/state';
 import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
 import { findShelterSite } from '../../src/simulation/openingShelter';
@@ -20,6 +21,7 @@ test('3D roads stay clear and bridges cover the road only over water after a sav
   );
   state.buildings.push({ id: 'player-road-box', definitionId: 'field-cache', tileX: 30, tileY: 85, storage: { ...state.inventory, wood: 12, fiber: 0, stone: 0 } });
   storageBoxContents(state.buildings[state.buildings.length - 1]!);
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const globals = globalThis as unknown as { __controller: { prepareCriticalSave: () => void }; __game: { scene: { getScene: (key: string) => { state: GameState } } } };
     Object.assign(globals.__game.scene.getScene('world').state, fixture);
@@ -56,21 +58,19 @@ test('3D roads stay clear and bridges cover the road only over water after a sav
   await page.screenshot({ path: `tmp/roads-clean-${testInfo.project.name}.png` }); expect(errors).toEqual([]);
 });
 
-test('3D presentation loads and can switch back to the original renderer', async ({ page }) => {
-  await openApp(page, 'render=3d');
-  const threeCanvas = page.locator('#elaris-three-canvas');
-  await expect(threeCanvas).toBeVisible();
-  await expect(page.locator('html')).toHaveAttribute('data-presentation', '3d');
-
-  // The renderer toggle now lives inside the Admin menu.
-  await page.getByRole('button', { name: 'Admin' }).click();
-  const toggle = page.getByTestId('presentation-mode-toggle');
-  await expect(toggle).toHaveText('3D WORLD');
-  await toggle.click();
-
-  await expect(page.locator('html')).toHaveAttribute('data-presentation', '2d');
-  await expect(toggle).toHaveText('2D WORLD');
-  await expect(page.locator('#game canvas')).toHaveCSS('opacity', '1');
+test('legacy 2D preferences still load the 3D-only game without hidden world sprites', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('elaris.presentation-mode','2d'));
+  await openApp(page, 'render=2d');
+  await waitForDebugHandles(page);
+  await expect(page.locator('#elaris-three-canvas')).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-presentation','3d');
+  await expect(page.locator('#game canvas')).toBeHidden();
+  expect(await page.evaluate(() => {
+    const game = (globalThis as any).__game;
+    return { objects:game.scene.getScene('world').children.list.length, renderer:game.renderer };
+  })).toEqual({objects:0,renderer:null});
+  await openAdmin(page);
+  await expect(page.getByTestId('presentation-mode-toggle')).toHaveCount(0);
 });
 
 test('3D world draws an owned Tuftle follower and removes it when resting', async ({ page }) => {
@@ -151,7 +151,7 @@ test('Admin stages the camera tilt as a global value and previews it live', asyn
 
   // The angle is published balance now, so it is edited on the Global Values
   // tab rather than as a per-device preference above the tabs.
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await page.getByRole('tab', { name: 'Global Values' }).click();
   const yaw = page.getByTestId('admin-camera-yaw');
   const pitch = page.getByTestId('admin-camera-pitch');
@@ -178,7 +178,7 @@ test('Admin stages the camera tilt as a global value and previews it live', asyn
   await expect(startingValues).toBeVisible();
 
   // Closing without publishing drops the preview back onto the published angle.
-  await page.getByRole('dialog', { name: 'Admin stat editor' }).getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('dialog', { name: 'Admin stat editor' }).getByRole('button', { name: 'Close', exact: true }).click();
   expect(await orientation()).toMatchObject({ yawDegrees: 20 });
 });
 
@@ -206,7 +206,7 @@ test('3D presentation mirrors the authoritative build-placement ghost', async ({
     return renderer.getSnapshot();
   })).toMatchObject({ placementActive: true, placementValid: true });
 
-  const canvas = page.locator('#game canvas');
+  const canvas = page.locator('#elaris-three-canvas');
   const bounds = await canvas.boundingBox();
   if (!bounds) throw new Error('Game canvas is not visible');
   await page.mouse.click(bounds.x + bounds.width * 0.12, bounds.y + bounds.height * 0.2);

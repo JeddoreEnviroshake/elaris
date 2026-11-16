@@ -1,10 +1,9 @@
 /**
  * Who gets the Admin menu.
  *
- * The public build is embedded on jeddore.com and installed by players, so the
- * Admin rail button is hidden unless this browser has asked for it. Open the
- * game once with `?admin=1` to turn it on (remembered in this browser), or with
- * `?admin=0` to turn it off again. Development builds always show it.
+ * Admin is available by default at the top of the gameplay Menu. Open the
+ * game with `?admin=0` to hide it in this browser, or `?admin=1` to restore it.
+ * Development builds always show it.
  *
  * This only hides the menu. Publishing global balance is still gated by the
  * Firebase admin sign-in and the Firestore rules.
@@ -32,7 +31,7 @@ export function adminMenuEnabled(
     const on = requested !== '0' && requested !== 'false' && requested !== 'off';
     try {
       if (on) storage?.setItem(STORAGE_KEY, '1');
-      else storage?.removeItem(STORAGE_KEY);
+      else storage?.setItem(STORAGE_KEY, '0');
     } catch {
       // A blocked write only means the choice is not remembered.
     }
@@ -40,8 +39,8 @@ export function adminMenuEnabled(
   }
   if (dev) return true;
   try {
-    return storage?.getItem(STORAGE_KEY) === '1';
+    return storage?.getItem(STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }

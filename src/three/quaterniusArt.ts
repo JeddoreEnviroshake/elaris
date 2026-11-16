@@ -8,6 +8,7 @@ import type { ModelAssetKey } from './assetRegistry';
 import { isInsideBufferedFootprint, type EnvironmentFootprint } from './environmentComposition';
 import { ModelLibrary, type ModelPlacement } from './modelLibrary';
 import { finishRoof, SETTLEMENT_ROOFS } from './visualDirection';
+import { addRoofUnderside } from './buildingUndersides';
 
 export const artNoise = (seed: number, x: number, z: number): number => {
   const noise = coordinateHash(seed, x, z);
@@ -198,6 +199,8 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
   ruined: boolean): Promise<THREE.Material[]> {
   const pieces = settlementModules(building);
   const width = building.footprint.tilesWide * .84, depth = building.footprint.tilesHigh * .8;
+  const wallHeight = building.id === 'church' ? 2.8 : building.id === 'magic-shop' ? 2.7 : 2.4;
+  const linings = [addRoofUnderside(root, width + .58, depth + .68, wallHeight - .05)];
   const add = (key: ModelAssetKey,x:number,y:number,z:number,height:number,rotation=0,width?:number,modelDepth?:number): void => {
     pieces.push({key,x,y,z,height,rotation,roofColor:SETTLEMENT_ROOFS[building.id],...(width===undefined?{}:{width}),...(modelDepth===undefined?{}:{depth:modelDepth})});
   };
@@ -208,6 +211,7 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
       add('entrance.wall',0,level,direction*.95,1.8,direction>0?0:Math.PI,1.9);
     }
     add('detail.tower-roof',0,level+1.75,0,building.id==='magic-shop'?2.5:1.95,0,2.7,2.7);
+    linings.push(addRoofUnderside(root, 2.68, 2.68, level + 1.73));
     if (building.id === 'church') {
       const brass = new THREE.MeshStandardMaterial({color:0xd4b36b,metalness:.4,roughness:.65});
       const upright = new THREE.Mesh(new THREE.BoxGeometry(.08,.85,.08),brass); upright.position.set(0,7.1,0);
@@ -226,7 +230,10 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
   if(building.id==='tavern'||building.id==='farm') {
     const front=building.door.tileY===building.footprint.tileY?-1:1;
     for(const x of [-1.9,1.2])add('detail.support',x,0,front*(depth/2+.1),2.15,front<0?Math.PI:0);
-    if(building.id==='farm')add('detail.wood-roof',-.35,2.15,front*(depth/2+.65),.55,front<0?Math.PI:0,4,1.65);
+    if(building.id==='farm') {
+      add('detail.wood-roof',-.35,2.15,front*(depth/2+.65),.55,front<0?Math.PI:0,4,1.65);
+      linings.push(addRoofUnderside(root, 3.98, 1.63, 2.13, -.35, front * (depth / 2 + .65)));
+    }
   }
   if(building.id==='magic-shop')add('detail.balcony',0,2.1,depth/2+.15,.6,0,2.2,.6);
   if (building.id === 'market') {
@@ -253,6 +260,9 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
   void art.surface(base,'entrance.paving',.1);
   const materials = await art.modules(root,pieces);
   materials.push(base.material);
+  for (const lining of linings) lining.traverse(child => {
+    if (child instanceof THREE.Mesh && child.material instanceof THREE.Material && !materials.includes(child.material)) materials.push(child.material);
+  });
   const windows=pieces.filter(piece=>piece.key==='entrance.wall-window');
   if(windows.length) {
     const glazing=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),
@@ -316,12 +326,16 @@ export class VegetationStream {
     this.root.name = 'regional-vegetation';
   }
 
-  update(x: number, z: number): void {
+  /**
+   * `radius` is in 12-tile cells: 1 (the nine nearby cells) for the overhead
+   * view, more for first person, whose fog sits much farther out.
+   */
+  update(x: number, z: number, radius = 1): void {
     const cx = Math.floor(x / 12), cz = Math.floor(z / 12);
-    if (this.cell === `${cx},${cz}`) return;
-    this.cell = `${cx},${cz}`;
+    if (this.cell === `${cx},${cz},${radius}`) return;
+    this.cell = `${cx},${cz},${radius}`;
     const live = new Set<string>();
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) for (let dx = -radius; dx <= radius; dx++) {
       const key = `${cx + dx},${cz + dz}`; live.add(key);
       if (this.cells.has(key)) continue;
       const root = new THREE.Group(); root.name = `vegetation:${key}`; this.root.add(root);

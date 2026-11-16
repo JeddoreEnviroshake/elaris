@@ -23,6 +23,12 @@ add variety without moving saved doors or building footprints.
   brass, with a bedroll, satchel and folded embroidered cloak. Shape the torso,
   shoulders, hands and boots rather than stacking generic blocks. NPC palettes
   reuse the same outfit; background people use fewer surface subdivisions.
+- First-person hands reuse the warden's teal sleeves, stitched leather bracers,
+  linen and brass. Show the equipped tool and its material tier. Gathering,
+  sword strikes, bow draws and casting follow the accepted action's progress;
+  idle, walking and sprinting add no hand sway or camera movement. Reduced
+  motion keeps steady hand poses. A separate foreground depth pass prevents
+  nearby scenery from cutting through tools, with the same scene colour grade.
 - Wildlife has coherent animal anatomy and a distinct silhouette for each
   species. Tuftle is a cotton-leaf grazer; Craghopper a stone frog with amber
   crystals; Glade Stag has dappling and branching antlers; Snarlfox has a long
@@ -76,10 +82,10 @@ add variety without moving saved doors or building footprints.
 - Repeat scenery through instances; stream nearby planting in nine cells.
   Limit ambient creature traces to the player's surroundings and cap their
   accumulation. Shared maps remain alive across room and region changes.
-  The hidden 2D camera stops drawing while its simulation continues to run.
+  The shared simulation runs without a second renderer or hidden world sprites.
 
-The following sprite rules document the retained 2D fallback. They do not
-override the primary 3D material, lighting or interface treatment above.
+Historical sprite notes below remain as palette references. The game renders
+only in 3D; these notes do not define an alternate renderer.
 
 ## Character motion
 

@@ -94,13 +94,17 @@ describe('authoritative landscape', () => {
     state.player.x = (shore.landX + 0.5) * TILE_SIZE;
     state.player.y = 70.5 * TILE_SIZE;
 
-    stepMovement(state, { x: 1, y: 0, slow: false }, 1_000, movement);
-    expect(state.player.x).toBe((shore.landX + 0.5) * TILE_SIZE);
+    // On foot the collision box stops at the shoreline and never enters water.
+    for (let tick = 0; tick < 60; tick += 1) stepMovement(state, { x: 1, y: 0, slow: false, continuous: true }, 1000 / 60, movement);
+    expect(Math.floor((state.player.x + 4) / TILE_SIZE)).toBe(shore.landX);
 
+    // Afloat the same box stops at the shoreline from the water side.
     state.rowboatOwned = true;
     state.player.traversalMode = 'boat';
-    stepMovement(state, { x: 1, y: 0, slow: false }, 1_000, movement);
-    expect(state.player.x).toBe((shore.waterX + 0.5) * TILE_SIZE);
+    state.player.x = (shore.waterX + 0.5) * TILE_SIZE;
+    for (let tick = 0; tick < 60; tick += 1) stepMovement(state, { x: -1, y: 0, slow: false, continuous: true }, 1000 / 60, movement);
+    expect(Math.floor((state.player.x - 5) / TILE_SIZE)).toBe(shore.waterX);
+    expect(state.player.x).toBeLessThan((shore.waterX + 0.5) * TILE_SIZE);
   });
 
   it('lets placed water override ground and a placed bridge override that water', () => {

@@ -6,7 +6,7 @@ import { expect, type Page } from '@playwright/test';
  * asserting a balance number cannot be broken by an admin publishing a new
  * revision — and a developer with real Firebase credentials in `.env.local`
  * gets the same result as CI, which has none. `admin` shows the Admin menu,
- * which production builds hide from public visitors.
+ * while the production Menu also includes Admin by default.
  */
 export const APP_URL = '/?localBalance=1&admin=1';
 

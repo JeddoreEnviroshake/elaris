@@ -20,19 +20,17 @@ import { applyGameBalance, applyLocalAdminUpdate, createAdminDraft, validateGame
 import { scaleByLevel } from '../simulation/enemyLevels';
 import type { Facing, GameState, GatherableResourceId, RaidTargetPriority } from '../simulation/state';
 import { startDangerPhaseNow, survivalSchedule } from '../simulation/survivalCycle';
-import type { PresentationMode } from '../three/presentationMode';
 import {
   CAMERA_TENTHS_PER_DEGREE, ELARIS_CAMERA_DEFAULT_TENTHS, ELARIS_CAMERA_PITCH_RANGE, ELARIS_CAMERA_YAW_RANGE,
   cameraOrientationFromTenths,
   type ElarisCameraOrientation, type ElarisCameraTenths,
 } from '../three/cameraControls';
 import { BLUEPRINT_ITEM_IDS } from '../simulation/blueprintKnowledge';
-import { RAIL_BOTTOMS, div, railButton, uiButton, wireDisclosure } from './controls';
+import { div, uiButton, wireDisclosure } from './controls';
+import type { InventoryPanel } from './inventoryPanel';
 
 /** System-level controls the Admin menu hosts (previously top-of-screen chrome). */
 export interface AdminSystemControls {
-  /** Read/switch the 2D/3D world presentation. */
-  presentation?: { get: () => PresentationMode; set: (mode: PresentationMode) => void };
   /**
    * Preview the live 3D overworld camera while a Global Values slider moves.
    * The published angles are the authority; this only shows an edit in flight.
@@ -80,8 +78,9 @@ export class AdminPanel {
   private readonly openDetails = new Set<string>();
   private offlineDot: HTMLDivElement | undefined;
   private offlineLabel: HTMLSpanElement | undefined;
-  private presentationToggle: HTMLButtonElement | undefined;
   private raidButton: HTMLButtonElement | undefined;
+  private menu: InventoryPanel | undefined;
+  private firebaseAccessCard: HTMLDivElement | undefined;
 
   constructor(
     parent: HTMLElement,
@@ -92,8 +91,11 @@ export class AdminPanel {
   ) {
     this.draft = createAdminDraft(state);
     this.root = div({ position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '30' });
-    this.button = railButton('gear', 'Admin', () => this.toggle());
-    this.button.style.bottom = RAIL_BOTTOMS.admin;
+    this.button = uiButton('Admin', () => {
+      this.menu?.close();
+      this.toggle();
+    });
+    this.button.style.minHeight = '44px';
     this.button.style.background = 'rgba(99,56,32,0.96)';
 
     this.overlay = div({
@@ -155,14 +157,18 @@ export class AdminPanel {
       this.hideWhilePeeking.push({ element: section, display: section.style.display });
     }
     this.overlay.appendChild(this.panel);
-    // Public visitors get the game without the Admin rail button (see adminAccess.ts).
-    if (adminMenuEnabled()) this.root.append(this.button);
     this.root.append(this.overlay);
     parent.appendChild(this.root);
     this.overlay.addEventListener('click', (event) => { if (event.target === this.overlay) this.close(); });
   }
 
   get open(): boolean { return this.overlay.style.display !== 'none'; }
+  get worldPreviewActive(): boolean { return this.peekSource !== undefined; }
+
+  attachToMenu(menu: InventoryPanel): void {
+    this.menu = menu;
+    if (adminMenuEnabled()) menu.addHeaderAction(this.button);
+  }
 
   toggle(): void { if (this.open) this.close(); else this.openPanel(); }
 
@@ -179,7 +185,7 @@ export class AdminPanel {
       this.systemTimer = window.setInterval(() => this.syncSystemBar(), 1000);
     }
     void this.globalBalance.waitForAuth().then(() => {
-      if (this.open && this.activeView === 'global') this.render();
+      if (this.open && this.activeView === 'global') this.renderFirebaseAccess();
     });
   }
 
@@ -196,7 +202,7 @@ export class AdminPanel {
   }
 
   /**
-   * Build the system strip once: offline-readiness status, the 2D/3D toggle, and
+   * Build the system strip once: offline-readiness status and
    * the immediate raid trigger. Built rather than re-rendered because the strip
    * refreshes on a one-second poll, and replacing a live button every second
    * would drop the press the user is in the middle of making.
@@ -213,19 +219,6 @@ export class AdminPanel {
       this.offlineLabel = document.createElement('span');
       status.append(this.offlineDot, this.offlineLabel);
       this.systemBar.appendChild(status);
-    }
-
-    if (this.system.presentation) {
-      const presentation = this.system.presentation;
-      const toggle = uiButton('2D WORLD', () => {
-        presentation.set(presentation.get() === '3d' ? '2d' : '3d');
-        this.syncSystemBar();
-      });
-      toggle.dataset.testid = 'presentation-mode-toggle';
-      toggle.setAttribute('aria-label', 'Switch world presentation');
-      toggle.style.minHeight = '42px';
-      this.presentationToggle = toggle;
-      this.systemBar.appendChild(toggle);
     }
 
     // Skip the wait for the next danger minute. Testing raids, turrets, or wall
@@ -260,11 +253,6 @@ export class AdminPanel {
       const ready = this.system.getOfflineReady();
       this.offlineDot.style.background = ready ? '#4cc07f' : '#c9a227';
       this.offlineLabel.textContent = ready ? 'Ready offline' : 'Online only';
-    }
-    if (this.presentationToggle && this.system.presentation) {
-      const is3d = this.system.presentation.get() === '3d';
-      this.presentationToggle.textContent = is3d ? '3D WORLD' : '2D WORLD';
-      this.presentationToggle.setAttribute('aria-pressed', String(is3d));
     }
     if (this.raidButton) {
       const timer = survivalSchedule(this.state);
@@ -606,6 +594,7 @@ export class AdminPanel {
     this.renderRaidValues();
     this.renderCreatureValues();
     this.renderBlueprintValues();
+    this.renderOutlandsValues();
 
     this.content.append(this.heading('Resource objects'));
     const help = div({ margin: '6px 0 10px', opacity: '0.76', fontSize: '12px', lineHeight: '1.45' });
@@ -894,6 +883,33 @@ export class AdminPanel {
       this.numberField('Odds a cache holds one (bps)', blueprints.stormCacheBlueprintBps, (v) => { blueprints.stormCacheBlueprintBps = v; }, 0, 10_000),
     );
     this.content.appendChild(caches);
+  }
+
+  /**
+   * Field sites: the guarded ruins that are the only source of salvage. The
+   * refill rhythm is in survival cycles so a player learns one clock, and the
+   * search times are in ticks (60 a second).
+   */
+  private renderOutlandsValues(): void {
+    const outlands = this.draft.gameBalance.outlands;
+    this.content.append(this.heading('Field sites'));
+    const help = div({ margin: '0 0 10px', opacity: '0.76', fontSize: '12px', lineHeight: '1.45' });
+    help.textContent = 'Sites refill every N survival cycles. Searching takes the ticks below (60 = 1 s) and is '
+      + 'interrupted by moving or taking damage. Guards return with the loot, never before. Changing sites per '
+      + 'area moves no existing site; it adds or hides the highest-numbered ones.';
+    this.content.appendChild(help);
+    const grid = this.grid();
+    grid.append(
+      this.numberField('Cycles between refills', outlands.restockCycles, (v) => { outlands.restockCycles = v; }, 1),
+      this.numberField('Sites per area', outlands.sitesPerArea, (v) => { outlands.sitesPerArea = v; }, 0, 6),
+      this.numberField('Search ticks', outlands.searchTicks, (v) => { outlands.searchTicks = v; }, 1),
+      this.numberField('Strongbox search ticks', outlands.strongboxSearchTicks, (v) => { outlands.strongboxSearchTicks = v; }, 1),
+      this.numberField('Guards per site', outlands.guardsPerSite, (v) => { outlands.guardsPerSite = v; }, 0, 6),
+      this.numberField('Guard leash (tiles)', outlands.guardLeashTiles, (v) => { outlands.guardLeashTiles = v; }, 1),
+      this.numberField('Strongbox blueprint odds (bps)', outlands.strongboxBlueprintBps, (v) => { outlands.strongboxBlueprintBps = v; }, 0, 10_000),
+      this.numberField('Danger bonus loot rolls', outlands.dangerBonusRolls, (v) => { outlands.dangerBonusRolls = v; }, 0),
+    );
+    this.content.appendChild(grid);
   }
 
   /**
@@ -1193,7 +1209,17 @@ export class AdminPanel {
       });
       form.append(email.wrapper, password.wrapper, signIn); card.appendChild(form);
     }
-    this.content.appendChild(card);
+    const previous = this.firebaseAccessCard;
+    if (previous?.isConnected) {
+      const hiddenDisplay = this.hiddenContent.get(previous);
+      if (hiddenDisplay !== undefined) {
+        this.hiddenContent.delete(previous);
+        this.hiddenContent.set(card, hiddenDisplay);
+        card.style.display = 'none';
+      }
+      previous.replaceWith(card);
+    } else this.content.prepend(card);
+    this.firebaseAccessCard = card;
   }
 
   /**
@@ -1350,6 +1376,7 @@ export class AdminPanel {
   destroy(): void {
     if (this.systemTimer !== undefined) window.clearInterval(this.systemTimer);
     if (this.peekTimer !== undefined) window.clearTimeout(this.peekTimer);
+    this.button.remove();
     this.root.remove();
   }
 }

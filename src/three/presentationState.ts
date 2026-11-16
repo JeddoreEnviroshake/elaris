@@ -1,7 +1,7 @@
 import type { InteriorDefinition } from '../content/interiors';
 import type { InteriorPose, InteriorTransition } from '../presentation/interiorSession';
 import type { GatherAssistancePresentation } from '../presentation/followerCreatures';
-import type { BoundaryEdge, BuildingDefinitionId, EnvironmentKind } from '../simulation/state';
+import type { BoundaryEdge, BuildingDefinitionId, EnvironmentKind, ResourceNodeKind } from '../simulation/state';
 
 /** Read-only placement state shared with alternate world renderers. */
 export interface BuildPlacementPresentation {
@@ -19,7 +19,7 @@ export interface BuildPlacementPresentation {
   readonly blockedCells: readonly { tileX: number; tileY: number; reason: string }[];
 }
 
-export type InteractionTargetKind = 'resource' | 'drop' | 'creature' | 'facility' | 'garden' | 'woodlot' | 'door';
+export type InteractionTargetKind = 'resource' | 'drop' | 'creature' | 'facility' | 'garden' | 'woodlot' | 'door' | 'site-container';
 
 /** The same context-action target selected by WorldScene for the HUD. */
 export interface InteractionTargetPresentation {
@@ -33,7 +33,10 @@ export interface InteractionTargetPresentation {
 }
 
 export interface ThreePresentationState {
+  /** Interpolated world pose in source pixels, shared with the 2D renderer. */
+  readonly playerPosition?: { readonly x: number; readonly y: number };
   readonly journalOpen?:boolean;
+  readonly worldBackdrop?: boolean;
   readonly batchPlacements?: readonly BuildPlacementPresentation[];
   readonly shelterGuide?: { tileX: number; tileY: number } | null;
   readonly journeyWaypoint?: { tileX: number; tileY: number; label: string } | null;
@@ -42,6 +45,8 @@ export interface ThreePresentationState {
   readonly selection: BuildPlacementPresentation | null;
   readonly target: InteractionTargetPresentation | null;
   readonly gathering: boolean;
+  /** Retain the hit's resource even when depletion or a turn changes the target. */
+  readonly gatherKind?: ResourceNodeKind | null;
   readonly gatherProgress?: number;
   readonly playerAction?:{readonly id:number;readonly arrowTracked:boolean;readonly kind:'melee'|'ranged'|'magic';readonly progress:number;readonly x:number;readonly y:number}|null;
   readonly gatherAssistance?: GatherAssistancePresentation | null;

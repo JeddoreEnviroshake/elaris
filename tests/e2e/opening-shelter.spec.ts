@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
 import { openMenuTab } from './menu';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
@@ -23,6 +23,7 @@ async function loadBuilder(page: Page) {
   const site = state.onboarding.shelterPlan!;
   state.player.x = (site.tileX + 1.5) * 16; state.player.y = (site.tileY + 3) * 16;
   state.inventory.fiber = 100; state.inventory.wood = 100; state.inventory.stone = 100;
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -45,7 +46,7 @@ async function loadBuilder(page: Page) {
 test('3D shelter guide previews grouped costs, undoes floors, and saves a protected home', async ({ page, isMobile }, testInfo) => {
   const site = await loadBuilder(page);
   await page.getByRole('button', { name: 'Shelter guide', exact: true }).click();
-  await expect(page.getByLabel('Shelter checklist and layout')).toContainText('33 fiber');
+  await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText('33 fiber');
   await page.getByRole('button', { name: 'Collect building supplies', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Building supplies collected', exact: true })).toBeDisabled();
   const counts = [8, 4, 3, 2, 2, 1, 1, 1];
@@ -76,13 +77,13 @@ test('3D shelter guide previews grouped costs, undoes floors, and saves a protec
     await expect.poll(async () => Math.floor((await saved(page)).player.y / 16)).toBeLessThan(site.tileY + 2);
   } finally { await page.keyboard.up('w'); }
   await openMenuTab(page, 'Shelter');
-  await expect(page.getByLabel('Shelter checklist and layout')).toContainText('Shelter ready');
-  await expect(page.getByLabel('Shelter checklist and layout')).toContainText('You are protected here.');
+  await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText('Shelter ready');
+  await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText('You are protected here.');
   await page.screenshot({ path: `tmp/opening-shelter-${testInfo.project.name}.png` });
   const before = await saved(page);
   await page.reload();
   await openMenuTab(page, 'Shelter');
-  await expect(page.getByLabel('Shelter checklist and layout')).toContainText('Shelter ready');
+  await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText('Shelter ready');
   const after = await saved(page);
   expect(after.onboarding.shelterHome).toEqual(before.onboarding.shelterHome);
   expect(after.onboarding.completedMilestoneIds).toContain('build-shelter');

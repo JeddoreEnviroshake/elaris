@@ -1,7 +1,5 @@
 import { TILE_SIZE } from '../config/platform';
-import { TERRAIN_CHUNK_TILES } from './terrainChunks';
-
-export const ENTITY_CHUNK_SIZE_PX = TERRAIN_CHUNK_TILES * TILE_SIZE;
+export const ENTITY_CHUNK_SIZE_PX = 32 * TILE_SIZE;
 
 export interface ChunkViewRect {
   left: number;
@@ -19,6 +17,15 @@ export function entityChunkKey(x: number, y: number, chunkSizePx = ENTITY_CHUNK_
   validateChunkSize(chunkSizePx);
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('entity coordinates must be finite');
   return `${Math.floor(x / chunkSizePx)},${Math.floor(y / chunkSizePx)}`;
+}
+
+/**
+ * A square view around a point. The overhead camera sees roughly a rectangle
+ * around the player; first person sees out to its fog in every direction, so
+ * both describe their view as a radius here rather than a camera rectangle.
+ */
+export function chunkViewRectAround(x: number, y: number, radiusPx: number): ChunkViewRect {
+  return { left: x - radiusPx, right: x + radiusPx, top: y - radiusPx, bottom: y + radiusPx };
 }
 
 /** Chunk keys intersecting the camera plus whole-chunk activation margins. */
@@ -53,6 +60,8 @@ export class EntityChunkIndex {
   get size(): number {
     return this.chunkById.size;
   }
+
+  chunkOf(id: string): string | undefined { return this.chunkById.get(id); }
 
   upsert(id: string, x: number, y: number): void {
     const nextKey = entityChunkKey(x, y);

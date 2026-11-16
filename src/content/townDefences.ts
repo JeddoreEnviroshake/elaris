@@ -55,10 +55,10 @@ export function isWithinPermanentPurifierWorldPosition(worldX: number, worldY: n
     && Math.abs(tileY - PERMANENT_AIR_PURIFIER.y) <= PERMANENT_PURIFIER_RADIUS_TILES;
 }
 
-const WEST_GATE_TOP = { x: 62, y: 83 } as const;
-const WEST_GATE_BOTTOM = { x: 62, y: 84 } as const;
-const NORTH_GATE_LEFT = { x: 104, y: 70 } as const;
-const NORTH_GATE_RIGHT = { x: 105, y: 70 } as const;
+const WEST_GATE_TOP = { x: 62, y: 82.5 } as const;
+const WEST_GATE_BOTTOM = { x: 62, y: 84.5 } as const;
+const NORTH_GATE_LEFT = { x: 103.5, y: 70 } as const;
+const NORTH_GATE_RIGHT = { x: 105.5, y: 70 } as const;
 const EAST_GATE_TOP = { x: 110, y: 84 } as const;
 const EAST_GATE_BOTTOM = { x: 110, y: 86 } as const;
 
@@ -100,8 +100,8 @@ function subdivide(start: TownPerimeterPoint, end: TownPerimeterPoint): TownPeri
   const kind = isGate(start, end) ? 'gate' : 'fence';
   // Municipal fences use the same two-grid-space footprint as player-built
   // fences. The old one-space subdivision placed a full two-space model at
-  // every point, so adjacent models occupied the same half-space. Gates keep
-  // their authored one-space openings; a final short fence is only needed
+  // every point, so adjacent models occupied the same half-space. Gates have
+  // two-space openings; a final short fence is only needed
   // where an odd-length run meets a corner or gate.
   const run = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
   const count = kind === 'gate' ? 1 : Math.max(1, Math.ceil(run / 2));

@@ -144,7 +144,8 @@ describe('roaming hostiles', () => {
       advanceRoamers(state);
     }
 
-    expect(state.raiders.filter((raider) => raider.roaming)).toHaveLength(quota);
+    // Site guards are a separate population and never count toward the quota.
+    expect(state.raiders.filter((raider) => raider.roaming && !raider.siteId)).toHaveLength(quota);
   });
 
   it('does not spawn roamers in Elaris', () => {

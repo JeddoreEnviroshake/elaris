@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { GameState } from '../../src/simulation/state';
 import { openApp } from './app';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 
 test.setTimeout(60_000);
 
@@ -91,6 +91,7 @@ test('an existing v81 save keeps its progress and does not receive the new intro
   await openApp(page, 'render=3d');
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
   await expect.poll(async () => Boolean(await saved(page))).toBe(true);
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);

@@ -1,4 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
+import { releaseSaveWriter } from './save';
+
+/** Admin lives in the Menu header and opens its own focused editor. */
+export async function openAdmin(page: Page): Promise<void> {
+  const admin = page.getByRole('button', { name: 'Admin', exact: true });
+  if (!(await admin.isVisible())) await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await admin.click();
+}
 
 /**
  * Shared navigation for the gameplay menu. Craft and Build merged into one tab,
@@ -41,6 +49,7 @@ export function blueprintTile(page: Page, displayName: string): Locator {
  */
 export async function grantBlueprints(page: Page, ...ids: string[]): Promise<void> {
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    await releaseSaveWriter(page);
     const known = await page.evaluate(async (wanted) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const request = indexedDB.open('elaris:default', 1);

@@ -44,6 +44,7 @@ export function reconcileResourceStacks(state: GameState, resource: ResourceId):
     'tuftle-down': [], 'craghopper-shell': [], 'stag-antler': [], 'snarlfox-pelt': [],
     'masonmole-claw': [], 'boar-tusk': [], 'quillfinch-quill': [], 'mistmoth-scale': [],
     'slingtail-stone': [],
+    'scrap-iron': [], 'clockwork': [], 'lens': [], 'arcane-dust': [], 'construct-core': [], 'ancient-alloy': [], 'sealed-satchel': [], 'vault-key': [], 'recall-flare': [],
   };
   state.inventoryStacks[resource] = stacks;
   return stacks;

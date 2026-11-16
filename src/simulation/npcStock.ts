@@ -14,6 +14,10 @@ import { removeCarriedBlueprint } from './carriedBlueprints';
 import { creditCoins, spendCoins } from './coins';
 import { tryAddResource, type CommandResult } from './gameplayCommands';
 import { containerLabel } from './worldContainers';
+import { currentSiteProgress, liveAreaSites } from './sites';
+import { siteKind } from '../content/sites';
+import { isWithinWorldBounds } from '../content/world';
+import { WORLD_PX } from '../config/platform';
 import type { GameState, ResourceId } from './state';
 
 /**
@@ -109,10 +113,33 @@ export { RUMOUR_COST, ARCANE_STUDY_BASE_COST, SAFEGUARD_CHARM_COST };
 
 export function rumourBlockedReason(state: GameState): string | null {
   if (state.coins < RUMOUR_COST) return `Need ${RUMOUR_COST - state.coins} more coins`;
-  if (!state.containers.some((container) => !container.opened)) {
+  if (!state.containers.some((container) => !container.opened) && !sitesWithUnsearched(state).length) {
     return 'Bram knows of nothing left unopened in this region';
   }
   return null;
+}
+
+/**
+ * Live sites with at least one container still sealed this refill, in this
+ * region and the eight around it. Bram's tavern stands in Elaris, which has no
+ * ruins of its own, so a rumour has to reach next door to be worth the coin.
+ * Positions are in this region's pixel frame, so a site next door lies off the
+ * edge in the direction of its region.
+ */
+function sitesWithUnsearched(state: GameState): Array<{ x: number; y: number; label: string; sealed: number }> {
+  const found: Array<{ x: number; y: number; label: string; sealed: number }> = [];
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const areaX = state.currentArea.x + dx;
+      const areaY = state.currentArea.y + dy;
+      if (!isWithinWorldBounds(areaX, areaY)) continue;
+      for (const site of liveAreaSites(state, `${areaX},${areaY}`)) {
+        const sealed = site.containers.length - currentSiteProgress(state, site.id).searched.length;
+        if (sealed > 0) found.push({ x: site.x + dx * WORLD_PX, y: site.y + dy * WORLD_PX, label: siteKind(site.kind).label, sealed });
+      }
+    }
+  }
+  return found;
 }
 
 /**
@@ -124,22 +151,27 @@ export function buyRumour(state: GameState): CommandResult {
   const blocked = rumourBlockedReason(state);
   if (blocked) return { ok: false, message: blocked };
 
-  let nearest = null as null | { container: (typeof state.containers)[number]; distance: number };
+  // The nearest of either kind of find: a one-shot cache, or a field site
+  // with something still sealed in it this refill.
+  let nearest = null as null | { x: number; y: number; distance: number; describe: (bearing: string, paces: number) => string };
+  const consider = (x: number, y: number, describe: (bearing: string, paces: number) => string) => {
+    const distance = Math.hypot(x - state.player.x, y - state.player.y);
+    if (!nearest || distance < nearest.distance) nearest = { x, y, distance, describe };
+  };
   for (const container of state.containers) {
     if (container.opened) continue;
-    const distance = Math.hypot(container.x - state.player.x, container.y - state.player.y);
-    if (!nearest || distance < nearest.distance) nearest = { container, distance };
+    consider(container.x, container.y, (bearing, paces) => `Bram leans in: a ${containerLabel(container.kind)} lies ${bearing}, about ${paces} paces off.`);
+  }
+  for (const site of sitesWithUnsearched(state)) {
+    consider(site.x, site.y, (bearing, paces) => `Bram leans in: there's a ${site.label} ${bearing}, about ${paces} paces off, with ${site.sealed} ${site.sealed === 1 ? 'crate' : 'crates'} still sealed. Mind the guards.`);
   }
   if (!nearest) return { ok: false, message: 'Bram knows of nothing left unopened in this region' };
 
   const transaction = spendCoins(state, RUMOUR_COST, '');
   if (!transaction.ok) return transaction;
-  const { container, distance } = nearest;
-  const bearing = compassBearing(container.x - state.player.x, container.y - state.player.y);
-  return {
-    ok: true,
-    message: `Bram leans in: a ${containerLabel(container.kind)} lies ${bearing}, about ${Math.round(distance)} paces off.`,
-  };
+  const found = nearest as { x: number; y: number; distance: number; describe: (bearing: string, paces: number) => string };
+  const bearing = compassBearing(found.x - state.player.x, found.y - state.player.y);
+  return { ok: true, message: found.describe(bearing, Math.round(found.distance)) };
 }
 
 /** Eight-point compass in screen space, where +y is south. */

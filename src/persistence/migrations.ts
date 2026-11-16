@@ -2179,6 +2179,44 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Road masks now own crossings and scenery clearance. Saved entities and
   // property are retained; the normal load/area reconciliation clears scenery.
   88: (raw) => ({ ...raw, meta: { ...asRecord(raw['meta']), saveVersion: 89, contentVersion: 67, worldGenVersion: 13 } }),
+  // v89 -> v90: salvage and field sites. All nine salvage items arrive at once
+  // (three stay unused until later phases) so the bag, the boxes and the
+  // weights are widened in one step. Sites are derived from the world seed, so
+  // nothing about the world changes; every save simply starts with no site
+  // records and no search under way, and the areas it has already visited
+  // gain their ruins the next time they are drawn.
+  89: (raw) => {
+    const meta = asRecord(raw['meta']); const state = asRecord(raw['state']);
+    const inventory = asRecord(state['inventory']);
+    const inventoryStacks = asRecord(state['inventoryStacks']);
+    for (const salvage of SALVAGE_IDS) {
+      if (typeof inventory[salvage] !== 'number') inventory[salvage] = 0;
+      if (!Array.isArray(inventoryStacks[salvage])) inventoryStacks[salvage] = [];
+    }
+    const balance = asRecord(state['gameBalance']);
+    const defaults = createDefaultGameBalance();
+    const bagWeight = asRecord(balance['bagWeight']);
+    const itemHundredths = asRecord(bagWeight['itemHundredths']);
+    for (const salvage of SALVAGE_IDS) {
+      if (typeof itemHundredths[salvage] !== 'number') itemHundredths[salvage] = defaults.bagWeight.itemHundredths[salvage];
+    }
+    return {
+      ...raw,
+      meta: { ...meta, saveVersion: 90, contentVersion: 68 },
+      state: {
+        ...state,
+        inventory,
+        inventoryStacks,
+        siteProgress: isRecord(state['siteProgress']) ? state['siteProgress'] : {},
+        activeSearch: null,
+        gameBalance: {
+          ...balance,
+          bagWeight: { ...bagWeight, itemHundredths },
+          outlands: { ...defaults.outlands, ...asRecord(balance['outlands']) },
+        },
+      },
+    };
+  },
 };
 
 /**
@@ -2293,16 +2331,25 @@ const FACINGS: ReadonlySet<string> = new Set<Facing>(['up', 'down', 'left', 'rig
 const AREA_TIER_VALUES = new Set<number>([0, ...AREA_TIERS.map((tier) => tier.area)]);
 /** Ids validated field-by-field; kept beside the validator they gate. */
 const GATHERABLE_RESOURCE_IDS = ['wood', 'stone', 'fiber', 'iron-ore', 'iron-ingot'] as const;
+// Draft Parchment arrived at v73 (inventory and stacks backfilled there) but
+// was never listed here, so a ground drop or death cache holding it failed
+// validation and the save would not load.
 const CRAFTED_SUPPLY_IDS = [
-  'taming-snare', 'reinforced-snare', 'berry', 'arrow', 'cloth-mask', 'safeguard-charm',
+  'taming-snare', 'reinforced-snare', 'berry', 'arrow', 'cloth-mask', 'safeguard-charm', 'draft-parchment',
 ] as const;
 const CREATURE_TROPHY_IDS = [
   'tuftle-down', 'craghopper-shell', 'stag-antler', 'snarlfox-pelt',
   'masonmole-claw', 'boar-tusk', 'quillfinch-quill', 'mistmoth-scale', 'slingtail-stone',
 ] as const;
+const SALVAGE_IDS = [
+  'scrap-iron', 'clockwork', 'lens', 'arcane-dust', 'construct-core', 'ancient-alloy',
+  'sealed-satchel', 'vault-key', 'recall-flare',
+] as const;
 const BAG_ITEM_ID_SET: ReadonlySet<string> = new Set<string>([
-  ...GATHERABLE_RESOURCE_IDS, ...CRAFTED_SUPPLY_IDS, ...CREATURE_TROPHY_IDS,
+  ...GATHERABLE_RESOURCE_IDS, ...CRAFTED_SUPPLY_IDS, ...CREATURE_TROPHY_IDS, ...SALVAGE_IDS,
 ]);
+const OUTLANDS_POSITIVE_FIELDS = ['restockCycles', 'searchTicks', 'strongboxSearchTicks', 'guardLeashTiles'] as const;
+const OUTLANDS_NON_NEGATIVE_FIELDS = ['sitesPerArea', 'guardsPerSite', 'strongboxBlueprintBps', 'dangerBonusRolls'] as const;
 const WORLD_CONTAINER_KINDS: ReadonlySet<string> = new Set([
   'hollow-log', 'supply-cache', 'collapsed-cellar',
   // Transient: only ever present in a save written mid-storm.
@@ -2413,9 +2460,10 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
   requireNonNegativeInteger(inventory, 'iron-ore');
   requireNonNegativeInteger(inventory, 'iron-ingot');
   for (const item of CRAFTED_SUPPLY_IDS) requireNonNegativeInteger(inventory, item);
+  for (const item of SALVAGE_IDS) requireNonNegativeInteger(inventory, item);
   const inventoryStacks = state['inventoryStacks'];
   if (!isRecord(inventoryStacks)) throw new SaveValidationError('missing inventoryStacks');
-  for (const resource of [...GATHERABLE_RESOURCE_IDS, ...CRAFTED_SUPPLY_IDS]) {
+  for (const resource of [...GATHERABLE_RESOURCE_IDS, ...CRAFTED_SUPPLY_IDS, ...SALVAGE_IDS]) {
     const stacks = inventoryStacks[resource];
     if (!Array.isArray(stacks) || stacks.some((amount) => !Number.isInteger(amount) || amount <= 0 || amount > RESOURCE_STACK_SIZE)) {
       throw new SaveValidationError('invalid inventory stack');
@@ -2482,6 +2530,7 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
     || pendingGrants.some((id) => unlockedItemIds.includes(id))) {
     throw new SaveValidationError('invalid pendingBlueprintGrantIds');
   }
+  validateSiteState(state);
   requireNonNegativeInteger(state, 'resourcesSold');
   const firstTamedSpeciesIds = state['firstTamedSpeciesIds'];
   if (!Array.isArray(firstTamedSpeciesIds) || firstTamedSpeciesIds.some((id) => !isSpeciesId(id)) || new Set(firstTamedSpeciesIds).size !== firstTamedSpeciesIds.length) {
@@ -2736,6 +2785,9 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
     if (raider['targetBuildingId'] !== null && typeof raider['targetBuildingId'] !== 'string') {
       throw new SaveValidationError('invalid raider target');
     }
+    if (raider['siteId'] !== undefined && typeof raider['siteId'] !== 'string') {
+      throw new SaveValidationError('invalid raider site');
+    }
   }
   validateArcaneStorm(state, entityIds);
   if (state['raidCycleIndex'] !== null) requireNonNegativeInteger(state, 'raidCycleIndex');
@@ -2948,9 +3000,13 @@ function validateGameBalance(raw: unknown): void {
   requireNonNegativeInteger(levelUp, 'spendableAttributePoints');
   requireNonNegativeInteger(levelUp, 'coins');
   requirePositiveInteger(bagWeight, 'capacityHundredths');
-  for (const item of ['taming-snare', 'berry', 'arrow', 'cloth-mask', 'wood', 'stone', 'fiber', 'iron-ingot', 'iron-ore']) {
+  for (const item of ['taming-snare', 'berry', 'arrow', 'cloth-mask', 'wood', 'stone', 'fiber', 'iron-ingot', 'iron-ore', ...SALVAGE_IDS]) {
     requireNonNegativeInteger(itemWeights, item);
   }
+  const outlands = asRecord(balance['outlands']);
+  for (const key of OUTLANDS_POSITIVE_FIELDS) requirePositiveInteger(outlands, key);
+  for (const key of OUTLANDS_NON_NEGATIVE_FIELDS) requireNonNegativeInteger(outlands, key);
+  if ((outlands['strongboxBlueprintBps'] as number) > 10_000) throw new SaveValidationError('invalid strongbox blueprint chance');
   requirePositiveInteger(hands, 'actionTicks');
   requirePositiveInteger(hands, 'rangePx');
   // Hand damage spans every strike target; only resource nodes carry an
@@ -3135,6 +3191,33 @@ function validateArcaneStorm(state: Record<string, unknown>, entityIds: Set<stri
  * An empty cache is rejected rather than tolerated: it would light a beacon
  * over nothing and hand the player a countdown to an empty patch of ground.
  */
+/**
+ * Site records are sparse and keyed by a derived site id, so an unknown key is
+ * not corrupt — it is a site from an area the player walked through. What must
+ * hold is that every number is a whole non-negative integer, because a
+ * fraction would fail the determinism canonicaliser on the next save.
+ */
+function validateSiteState(state: Record<string, unknown>): void {
+  const progress = state['siteProgress'];
+  if (!isRecord(progress)) throw new SaveValidationError('missing siteProgress');
+  for (const record of Object.values(progress)) {
+    if (!isRecord(record)) throw new SaveValidationError('invalid siteProgress');
+    requireNonNegativeInteger(record, 'restockIndex');
+    requireNonNegativeInteger(record, 'guardsDefeated');
+    const searched = record['searched'];
+    if (!Array.isArray(searched) || searched.some((index) => !Number.isSafeInteger(index) || index < 0)
+      || new Set(searched).size !== searched.length) {
+      throw new SaveValidationError('invalid siteProgress searched');
+    }
+  }
+  const search = state['activeSearch'];
+  if (search === null) return;
+  if (!isRecord(search) || typeof search['siteId'] !== 'string') throw new SaveValidationError('invalid activeSearch');
+  for (const key of ['containerIndex', 'startX', 'startY', 'hpAtStart', 'completesAtTick']) {
+    requireNonNegativeInteger(search, key);
+  }
+}
+
 function validateDeathCache(cache: unknown): void {
   if (cache === null || cache === undefined) return;
   if (!isRecord(cache) || typeof cache['id'] !== 'string') {

@@ -1,28 +1,11 @@
-import Phaser from 'phaser';
-import { TextureKeys } from '../art/proceduralTextures';
-import { buildingTextureKey, ENCLOSURE_GUIDE_WIDTH, markerTextureKey } from '../art/buildingTextures';
-import { TILE_SIZE } from '../config/platform';
+import { buildingAtWorld } from '../presentation/worldHitTests';
+
 import type { BoundaryEdge, BuildingState, EnvironmentKind, GameState } from '../simulation/state';
 import type { CommandResult } from '../simulation/gameplayCommands';
-import { boundaryCenterPx, boundarySpan, buildingCenterPx, effectiveBoundaryEdge, effectiveBuildingDimensions, effectiveDimensions, placementDimensions } from '../simulation/buildingGeometry';
-import { enclosureGaps } from '../simulation/environmentProgress';
-import { EntityChunkIndex, type EntityActivationCounts } from './entityChunks';
+import { effectiveBoundaryEdge, effectiveBuildingDimensions, effectiveDimensions, placementDimensions } from '../simulation/buildingGeometry';
+
 import type { BuildPlacementPresentation } from '../three/presentationState';
-import {
-  buildableById,
-  BUILD_RANGE_PX,
-  checkPlacement,
-  clampTileToBounds,
-  defaultGhostTile,
-  defaultBoundaryEdgeFromFacing,
-  placeBuilding,
-  placementTargetFromWorld,
-  undoBuildingPlacement,
-  type BuildableDefinition,
-  type BuildableId,
-  type PlacementCheck,
-  type PlaceResult,
-} from './buildPlacement';
+import { buildableById, checkPlacement, clampTileToBounds, defaultGhostTile, defaultBoundaryEdgeFromFacing, placeBuilding, placementTargetFromWorld, undoBuildingPlacement, type BuildableDefinition, type BuildableId, type PlacementCheck, type PlaceResult } from './buildPlacement';
 import { nearestBuilding, nextBuildingInDirection } from './deleteSelection';
 import { batchCost, checkBuildBatch, placeBuildBatch, shapedBuildRequests, undoBuildGroup, type BuildRequest, type PlacementShape } from '../simulation/batchBuilding';
 export interface BatchPreview { mode: PlacementShape; anchored: boolean; count: number; cost: ReturnType<typeof batchCost>; fixed: boolean }
@@ -46,85 +29,6 @@ export interface BuildModeCallbacks {
   onDeleteTarget: (building: BuildingState | null) => void;
 }
 
-const GHOST_DEPTH = 1_000_000;
-const VALID_TINT = 0xa5f0bd;
-const INVALID_TINT = 0xff9a9a;
-const LONG_PRESS_MS = 550;
-const LONG_PRESS_DRIFT_PX = 10;
-
-const BUILDABLE_TEXTURES: Readonly<Record<BuildableId, string>> = {
-  'thatch-floor': TextureKeys.FloorThatch,
-  'wood-floor': TextureKeys.FloorWood,
-  'stone-floor': TextureKeys.FloorWood,
-  'metal-floor': TextureKeys.FloorWood,
-  'thatch-ground': TextureKeys.GroundThatch,
-  'wood-ground': TextureKeys.GroundWood,
-  'stone-ground': TextureKeys.GroundWood,
-  'metal-ground': TextureKeys.GroundWood,
-  'thatch-wall': TextureKeys.WallThatch,
-  'wood-wall': TextureKeys.Wall,
-  'stone-wall': TextureKeys.Wall,
-  'metal-wall': TextureKeys.Wall,
-  'thatch-door': TextureKeys.DoorThatch,
-  'wood-door': TextureKeys.DoorWood,
-  'stone-door': TextureKeys.DoorWood,
-  'metal-door': TextureKeys.DoorWood,
-  'thatch-fence': TextureKeys.FenceThatch,
-  'wood-fence': TextureKeys.FenceWood,
-  'stone-fence': TextureKeys.FenceWood,
-  'metal-fence': TextureKeys.FenceWood,
-  'thatch-gate': TextureKeys.GateThatch,
-  'wood-gate': TextureKeys.GateWood,
-  'stone-gate': TextureKeys.GateWood,
-  'metal-gate': TextureKeys.GateWood,
-  'wood-bridge': TextureKeys.BridgeWood,
-  'stone-bridge': TextureKeys.BridgeStone,
-  water: TextureKeys.WaterPlaced,
-  'environment-marker': TextureKeys.Marker,
-  'field-cache': TextureKeys.FieldCache,
-  workbench: TextureKeys.Workbench,
-  warehouse: TextureKeys.FieldCache,
-  'logistics-hub': TextureKeys.Workbench,
-  furnace: TextureKeys.Furnace,
-  'farm-counter': TextureKeys.Workbench,
-  'small-pen': TextureKeys.FenceWood,
-  barn: TextureKeys.WarTable,
-  'stone-yard': TextureKeys.Furnace,
-  'cart-dock': TextureKeys.FieldCache,
-  bed: TextureKeys.Bed,
-  'air-purifier': TextureKeys.AirPurifier,
-  'garden-bed': TextureKeys.GardenBed,
-  'woodlot-planter': TextureKeys.Planter,
-  'war-table': TextureKeys.WarTable,
-  turret: TextureKeys.Turret,
-};
-
-/** Surfaces render beneath every actor; other parts y-sort like entities. */
-const SURFACE_DEPTH = -1_000;
-const LANDSCAPE_WATER_DEPTH = -1_200;
-const LANDSCAPE_BRIDGE_DEPTH = -1_100;
-
-/** Closed frame + four opening frames per door material (see proceduralTextures). */
-const OPENING_SWING_FRAMES: Readonly<Partial<Record<BuildableId, readonly string[]>>> = {
-  'wood-door': [
-    TextureKeys.DoorWood, TextureKeys.DoorWoodSwing1, TextureKeys.DoorWoodSwing2,
-    TextureKeys.DoorWoodSwing3, TextureKeys.DoorWoodSwing4,
-  ],
-  'thatch-door': [
-    TextureKeys.DoorThatch, TextureKeys.DoorThatchSwing1, TextureKeys.DoorThatchSwing2,
-    TextureKeys.DoorThatchSwing3, TextureKeys.DoorThatchSwing4,
-  ],
-  'wood-gate': [
-    TextureKeys.GateWood, TextureKeys.GateWoodSwing1, TextureKeys.GateWoodSwing2,
-    TextureKeys.GateWoodSwing3, TextureKeys.GateWoodSwing4,
-  ],
-  'thatch-gate': [
-    TextureKeys.GateThatch, TextureKeys.GateThatchSwing1, TextureKeys.GateThatchSwing2,
-    TextureKeys.GateThatchSwing3, TextureKeys.GateThatchSwing4,
-  ],
-};
-
-/** Fallback advance direction before the player has touched the d-pad. */
 const FACING_STEPS: Readonly<Record<string, { dx: number; dy: number }>> = {
   up: { dx: 0, dy: -1 },
   down: { dx: 0, dy: 1 },
@@ -132,56 +36,9 @@ const FACING_STEPS: Readonly<Record<string, { dx: number; dy: number }>> = {
   right: { dx: 1, dy: 0 },
 };
 
-/** A door starts opening once the player is within this radius of its opening. */
-const DOOR_OPEN_RADIUS = TILE_SIZE * 1.35;
-/** Full open/close swing time; deltaMs drives the eased approach each frame. */
-const DOOR_SWING_MS = 180;
-
-function applyBuildingTransform(
-  image: Phaser.GameObjects.Image,
-  building: Pick<BuildingState, 'tileX' | 'tileY' | 'boundaryEdge' | 'rotated'>,
-  def: BuildableDefinition,
-): void {
-  if (def.layer !== 'boundary') {
-    const dimensions = effectiveDimensions(def, building.rotated);
-    image
-      .setOrigin(0.5, 0.5)
-      .setAngle(building.rotated ? 90 : 0)
-      .setPosition(
-        (building.tileX + dimensions.tilesWide / 2) * TILE_SIZE,
-        (building.tileY + dimensions.tilesHigh / 2) * TILE_SIZE,
-      );
-    return;
-  }
-  const edge = effectiveBoundaryEdge(building);
-  const horizontal = edge === 'north' || edge === 'south';
-  const span = boundarySpan(def);
-  const { x, y } = boundaryCenterPx(building.tileX, building.tileY, edge, span);
-  const angle = horizontal ? 0 : 90;
-  image.setOrigin(0.5, 0.5).setScale(span, 1).setAngle(angle).setPosition(x, y);
-}
-
-/** Placed-sprite texture reflects building state (a ready Garden Bed reads at a glance). */
-function textureForBuilding(building: BuildingState): string {
-  return buildingTextureKey(building) ?? BUILDABLE_TEXTURES[building.definitionId];
-}
-
-/**
- * Owns the placement ghost and the placed-structure sprites. Placement is now
- * the authoritative simulation's (via buildPlacement.ts → gameplayCommands):
- * commands persist to `state.buildings` and enforce unlock/geometry rules, so
- * this class renders from that persisted list rather than a session-local copy.
- * Pure presentation: snap the ghost to tiles, tint it by validity, commit on
- * confirm, and keep sprites reconciled with `state.buildings`.
- */
+/** Renderer-neutral placement, selection, validation and undo for the 3D world. */
 export class BuildModeController {
-  private readonly sprites = new Map<string, Phaser.GameObjects.Image>();
-  private readonly chunks = new EntityChunkIndex();
-  private activeSpriteIds = new Set<string>();
-  /** Placed door ids and their current openness (0 closed → 1 open) for the swing. */
-  private readonly openingIds = new Set<string>();
-  private readonly openingOpenness = new Map<string, number>();
-  private ghost: Phaser.GameObjects.Image | null = null;
+
   private def: BuildableDefinition | null = null;
   private ghostTileX = 0;
   private ghostTileY = 0;
@@ -201,31 +58,10 @@ export class BuildModeController {
   /** Delete mode: the d-pad steers the red cursor and Delete is the only commit. */
   private deleting = false;
   private markerKind: EnvironmentKind = 'indoor';
-  private buildingPress: {
-    pointerId: number;
-    buildingId: string;
-    screenX: number;
-    screenY: number;
-    clientX: number;
-    clientY: number;
-    opened: boolean;
-    timer: Phaser.Time.TimerEvent;
-  } | null = null;
-  private gapOverlay: Phaser.GameObjects.Graphics | null = null;
-  private readonly placementGuide: Phaser.GameObjects.Graphics;
 
-  constructor(
-    private readonly scene: Phaser.Scene,
-    private readonly state: GameState,
-    private readonly callbacks: BuildModeCallbacks,
-  ) {
-    this.placementGuide = this.scene.add.graphics().setDepth(GHOST_DEPTH - 1).setVisible(false);
-    this.syncPlaced();
-  }
+  constructor(private readonly state: GameState, private readonly callbacks: BuildModeCallbacks) {}
 
-  get placing(): boolean {
-    return this.ghost !== null;
-  }
+  get placing(): boolean { return this.def !== null; }
 
   setShape(shape: PlacementShape): void {
     this.shape = shape; this.batchAnchor = null; this.fixedBatch = null;
@@ -238,10 +74,7 @@ export class BuildModeController {
     this.ghostTileX = requests[0]!.tileX; this.ghostTileY = requests[0]!.tileY;
     this.ghostBoundaryEdge = requests[0]!.boundaryEdge ?? null;
     this.ghostRotated = false;
-    if (this.ghost) applyBuildingTransform(this.ghost, {
-      tileX: this.ghostTileX, tileY: this.ghostTileY, rotated: false,
-      ...(this.ghostBoundaryEdge ? { boundaryEdge: this.ghostBoundaryEdge } : {}),
-    }, this.def);
+
     this.refreshValidity(true);
   }
 
@@ -269,7 +102,7 @@ export class BuildModeController {
 
   /** Alternate renderers consume this snapshot; placement rules stay authoritative here. */
   getPresentationState(): BuildPlacementPresentation | null {
-    if (!this.ghost || !this.def) return null;
+    if (!this.def) return null;
     const check = this.lastValidity ?? checkPlacement(
       this.state, this.state.buildings, this.def, this.ghostTileX, this.ghostTileY,
       this.placementOptions(),
@@ -411,28 +244,7 @@ export class BuildModeController {
     this.callbacks.onDeleteTarget(nearest);
   }
 
-  /** Mark (or unmark) a placed building as the delete-prompt target. */
-  setSelectedBuilding(buildingId: string | null): void {
-    if (this.selectedBuildingId === buildingId) return;
-    if (this.selectedBuildingId) this.sprites.get(this.selectedBuildingId)?.clearTint();
-    this.selectedBuildingId = buildingId;
-    if (buildingId) this.sprites.get(buildingId)?.setTint(INVALID_TINT);
-  }
-
-  /** White impact flash and shudder for a placed part the player just struck. */
-  flashBuildingHit(buildingId: string): void {
-    const sprite = this.sprites.get(buildingId);
-    if (!sprite) return;
-    const restX = sprite.x;
-    sprite.setTintFill(0xffffff);
-    this.scene.tweens.add({ targets: sprite, x: restX + 1, duration: 40, yoyo: true, repeat: 2 });
-    this.scene.time.delayedCall(90, () => {
-      if (!sprite.active) return;
-      sprite.x = restX;
-      if (buildingId === this.selectedBuildingId) sprite.setTint(INVALID_TINT);
-      else sprite.clearTint();
-    });
-  }
+  setSelectedBuilding(buildingId: string | null): void { this.selectedBuildingId = buildingId; }
 
   startPlacing(id: BuildableId): void {
     const history = this.placing ? [...this.placementHistory] : [];
@@ -449,28 +261,18 @@ export class BuildModeController {
     this.ghostBoundaryEdge = this.def.layer === 'boundary'
       ? defaultBoundaryEdgeFromFacing(this.state.player.facing)
       : null;
-    this.ghost = this.scene.add
-      .image(tileX * TILE_SIZE, tileY * TILE_SIZE, BUILDABLE_TEXTURES[this.def.id])
-      .setAlpha(0.65)
-      .setDepth(GHOST_DEPTH);
-    applyBuildingTransform(this.ghost, {
-      tileX, tileY,
-      rotated: this.ghostRotated,
-      ...(this.ghostBoundaryEdge ? { boundaryEdge: this.ghostBoundaryEdge } : {}),
-    }, this.def);
-    this.refreshEnclosureOverlay();
+
     this.refreshValidity(true);
   }
 
   setMarkerKind(kind: EnvironmentKind): void {
     this.markerKind = kind;
-    if (this.def?.id === 'environment-marker') this.ghost?.setTexture(markerTextureKey(kind));
     this.refreshValidity(true);
   }
 
   /** Snap the ghost to the tile under a world position (pointer move/tap). */
   moveGhostToWorld(worldX: number, worldY: number): void {
-    if (!this.ghost || !this.def) return;
+    if (!this.def) return;
     const placement = placementTargetFromWorld(
       this.state,
       this.def,
@@ -489,43 +291,25 @@ export class BuildModeController {
       this.ghostTileY = placement.tileY;
       this.ghostBoundaryEdge = placement.boundaryEdge;
       this.ghostRotated = false;
-      applyBuildingTransform(this.ghost, {
-        tileX: placement.tileX,
-        tileY: placement.tileY,
-        boundaryEdge: placement.boundaryEdge,
-        rotated: false,
-      }, this.def);
+
       this.refreshValidity();
       return;
     }
     if (placement.tileX === this.ghostTileX && placement.tileY === this.ghostTileY) return;
     this.ghostTileX = placement.tileX;
     this.ghostTileY = placement.tileY;
-    applyBuildingTransform(this.ghost, {
-      tileX: placement.tileX, tileY: placement.tileY,
-      rotated: this.ghostRotated,
-    }, this.def);
+
     this.refreshValidity();
   }
 
-  /**
-   * A world press AIMS the ghost; it never commits. Tapping used to place
-   * outright, which put a structure on the wrong tile more often than the
-   * right one — the tap now only proposes, and Place (or the d-pad plus
-   * Place) is what spends the materials.
-   */
-  handlePointerDown(pointer: Phaser.Input.Pointer): void {
-    this.handleWorldPointerDown(pointer.worldX, pointer.worldY, pointer.id);
-  }
-
-  /** 3D raycasts aim the ghost exactly like Phaser pointers do. */
+  /** Aim the placement ghost at the 3D raycast ground position. */
   handleWorldPointerDown(worldX: number, worldY: number, _pointerId = 0): void {
-    if (!this.ghost || !this.def) return;
+    if (!this.def) return;
     this.moveGhostToWorld(worldX, worldY);
   }
 
   handleWorldPointerMove(worldX: number, worldY: number, _pointerId: number | null = null): void {
-    if (!this.ghost || !this.def) return;
+    if (!this.def) return;
     this.moveGhostToWorld(worldX, worldY);
   }
 
@@ -535,7 +319,7 @@ export class BuildModeController {
    * poked at.
    */
   stepGhost(dx: number, dy: number): void {
-    if (!this.ghost || !this.def) return;
+    if (!this.def) return;
     this.lastStep = { dx, dy };
     const clamped = clampTileToBounds(
       this.ghostTileX + dx,
@@ -547,16 +331,11 @@ export class BuildModeController {
     if (clamped.tileX === this.ghostTileX && clamped.tileY === this.ghostTileY) return;
     this.ghostTileX = clamped.tileX;
     this.ghostTileY = clamped.tileY;
-    applyBuildingTransform(this.ghost, {
-      tileX: clamped.tileX,
-      tileY: clamped.tileY,
-      rotated: this.ghostRotated,
-      ...(this.ghostBoundaryEdge ? { boundaryEdge: this.ghostBoundaryEdge } : {}),
-    }, this.def);
+
     this.refreshValidity();
   }
 
-  /** Topmost placed building whose sprite is under a world point, or null. */
+  /** Topmost placed building whose footprint contains a world point, or null. */
   buildingAtWorld(worldX: number, worldY: number): BuildingState | null {
     return this.buildingAt(worldX, worldY);
   }
@@ -570,24 +349,9 @@ export class BuildModeController {
     return true;
   }
 
-  handlePointerMove(pointer: Phaser.Input.Pointer): void {
-    if (this.placing) {
-      this.handleWorldPointerMove(
-        pointer.worldX,
-        pointer.worldY,
-        pointer.isDown ? pointer.id : null,
-      );
-      return;
-    }
-    if (this.buildingPress?.pointerId === pointer.id) {
-      const drift = Math.hypot(pointer.x - this.buildingPress.screenX, pointer.y - this.buildingPress.screenY);
-      if (drift > LONG_PRESS_DRIFT_PX) this.cancelBuildingPress();
-    }
-  }
-
   toggleRotation(): void {
     if (this.fixedBatch || this.batchAnchor) return;
-    if (!this.ghost || !this.def) return;
+    if (!this.def) return;
     this.ghostRotated = !this.ghostRotated;
     const clamped = clampTileToBounds(
       this.ghostTileX, this.ghostTileY, this.def, this.ghostRotated,
@@ -595,12 +359,7 @@ export class BuildModeController {
     );
     this.ghostTileX = clamped.tileX;
     this.ghostTileY = clamped.tileY;
-    applyBuildingTransform(this.ghost, {
-      tileX: clamped.tileX,
-      tileY: clamped.tileY,
-      rotated: this.ghostRotated,
-      ...(this.ghostBoundaryEdge ? { boundaryEdge: this.ghostBoundaryEdge } : {}),
-    }, this.def);
+
     this.refreshValidity(true);
   }
 
@@ -616,7 +375,6 @@ export class BuildModeController {
     const result = group.length === 1 ? undoBuildingPlacement(this.state, group[0]!) : undoBuildGroup(this.state, group);
     if (result.ok) {
       this.syncPlaced();
-      this.refreshEnclosureOverlay();
       this.refreshValidity(true);
     }
     this.callbacks.onUndoAvailable(this.placementHistory.length > 0);
@@ -624,46 +382,8 @@ export class BuildModeController {
     return result.ok;
   }
 
-  /** Begin tracking a possible hold. Returns false when no building was hit. */
-  beginBuildingPress(pointer: Phaser.Input.Pointer): boolean {
-    if (this.placing || this.deleting) return false;
-    this.cancelBuildingPress();
-    const building = this.buildingAt(pointer.worldX, pointer.worldY);
-    if (!building) return false;
-
-    const event = pointer.event as PointerEvent | undefined;
-    const press = {
-      pointerId: pointer.id,
-      buildingId: building.id,
-      screenX: pointer.x,
-      screenY: pointer.y,
-      clientX: event?.clientX ?? pointer.x,
-      clientY: event?.clientY ?? pointer.y,
-      opened: false,
-      timer: null as unknown as Phaser.Time.TimerEvent,
-    };
-    press.timer = this.scene.time.delayedCall(LONG_PRESS_MS, () => {
-      if (this.buildingPress !== press) return;
-      const selected = this.state.buildings.find((candidate) => candidate.id === press.buildingId);
-      if (!selected) return;
-      press.opened = true;
-      this.callbacks.onBuildingLongPress(selected, press.clientX, press.clientY);
-    });
-    this.buildingPress = press;
-    return true;
-  }
-
-  /** End a tracked press. True means it was a short click, not a long press. */
-  finishBuildingPress(pointer: Phaser.Input.Pointer): boolean {
-    const press = this.buildingPress;
-    if (!press || press.pointerId !== pointer.id) return false;
-    const shortClick = !press.opened;
-    this.cancelBuildingPress();
-    return shortClick;
-  }
-
   confirm(): boolean {
-    if (!this.ghost || !this.def) return false;
+    if (!this.def) return false;
     if (this.shape !== 'single' && !this.fixedBatch && !this.batchAnchor) {
       this.batchAnchor = { tileX: this.ghostTileX, tileY: this.ghostTileY, edge: this.ghostBoundaryEdge ?? 'north' };
       this.refreshValidity(true);
@@ -673,8 +393,6 @@ export class BuildModeController {
       const result = placeBuildBatch(this.state, this.batchRequests());
       if (result.ok && result.buildings) {
         this.placementHistory.push(result.buildings.map((building) => building.id));
-        for (const building of result.buildings) this.addPlacedSprite(building);
-        this.refreshEnclosureOverlay();
         this.batchAnchor = null;
         this.callbacks.onUndoAvailable(true);
         this.refreshValidity(true);
@@ -692,8 +410,6 @@ export class BuildModeController {
     );
     if (result.ok && result.building) {
       this.placementHistory.push([result.building.id]);
-      this.addPlacedSprite(result.building);
-      this.refreshEnclosureOverlay();
       this.advanceAfterPlacement();
       this.refreshValidity(true);
       this.callbacks.onUndoAvailable(true);
@@ -724,8 +440,7 @@ export class BuildModeController {
   cancel(): void {
     this.shape = 'single'; this.batchAnchor = null; this.fixedBatch = null; this.batchCacheKey = ''; this.batchCheck = null;
     this.callbacks.onBatchPreview?.(null);
-    this.ghost?.destroy();
-    this.ghost = null;
+
     this.def = null;
     this.lastValidity = null;
     this.ghostRotated = false;
@@ -733,13 +448,11 @@ export class BuildModeController {
     this.lastStep = null;
     this.placementHistory.length = 0;
     this.callbacks.onUndoAvailable(false);
-    this.placementGuide.clear().setVisible(false);
-    this.gapOverlay?.clear().setVisible(false);
   }
 
   /** Cheap per-frame revalidation — walking changes range/overlap validity. */
   refreshValidity(force = false): void {
-    if (!this.ghost || !this.def) return;
+    if (!this.def) return;
     let check = checkPlacement(
       this.state, this.state.buildings, this.def, this.ghostTileX, this.ghostTileY,
       this.placementOptions(),
@@ -754,18 +467,6 @@ export class BuildModeController {
       check = this.batchCheck;
       this.callbacks.onBatchPreview?.({ mode: this.shape, anchored: !!this.fixedBatch || !!this.batchAnchor, count: requests.length, cost: batchCost(requests), fixed: !!this.fixedBatch });
     } else this.callbacks.onBatchPreview?.(null);
-    this.ghost.setTint(check.ok ? VALID_TINT : INVALID_TINT);
-    this.drawPlacementGuide(check);
-    for (const request of this.batchRequests()) {
-      const definition = buildableById(request.definitionId);
-      const color = check.ok ? VALID_TINT : INVALID_TINT;
-      if (definition.layer === 'surface') this.placementGuide.lineStyle(1, color, .8).strokeRect(request.tileX * TILE_SIZE, request.tileY * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      else {
-        const center = buildingCenterPx({ id: '', ...request });
-        const horizontal = request.boundaryEdge === 'north' || request.boundaryEdge === 'south';
-        this.placementGuide.lineStyle(3, color, .9).lineBetween(center.x - (horizontal ? 8 : 0), center.y - (horizontal ? 0 : 8), center.x + (horizontal ? 8 : 0), center.y + (horizontal ? 0 : 8));
-      }
-    }
     if (
       force ||
       this.lastValidity === null ||
@@ -777,176 +478,23 @@ export class BuildModeController {
     }
   }
 
-  private drawPlacementGuide(check: PlacementCheck): void {
-    if (!this.def || !this.ghost) return;
-    const graphics = this.placementGuide.clear().setVisible(true);
-    graphics.lineStyle(1, 0xffe7a0, 0.42).strokeCircle(
-      this.state.player.x,
-      this.state.player.y,
-      BUILD_RANGE_PX,
-    );
-    if (this.def.layer === 'boundary') {
-      const edge = effectiveBoundaryEdge(this.placementOptions());
-      const span = boundarySpan(this.def);
-      const center = boundaryCenterPx(this.ghostTileX, this.ghostTileY, edge, span);
-      const horizontal = edge === 'north' || edge === 'south';
-      const half = span * TILE_SIZE / 2;
-      graphics.lineStyle(3, check.ok ? VALID_TINT : INVALID_TINT, 0.9).beginPath();
-      graphics.moveTo(center.x - (horizontal ? half : 0), center.y - (horizontal ? 0 : half));
-      graphics.lineTo(center.x + (horizontal ? half : 0), center.y + (horizontal ? 0 : half));
-      graphics.strokePath();
-      return;
-    }
-    const dimensions = effectiveDimensions(this.def, this.ghostRotated);
-    const blocked = new Map((check.blockedCells ?? []).map((cell) => [`${cell.tileX},${cell.tileY}`, cell]));
-    for (let y = this.ghostTileY; y < this.ghostTileY + dimensions.tilesHigh; y += 1) {
-      for (let x = this.ghostTileX; x < this.ghostTileX + dimensions.tilesWide; x += 1) {
-        const isBlocked = blocked.has(`${x},${y}`);
-        const color = isBlocked ? INVALID_TINT : check.ok ? VALID_TINT : 0xffd27a;
-        graphics.fillStyle(color, isBlocked ? 0.34 : 0.15).fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        graphics.lineStyle(isBlocked ? 2 : 1, color, 0.95).strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      }
-    }
-  }
-
-  /** Reconcile sprites with `state.buildings` — renders saves on load, drops removed, and swaps state-driven textures. */
   syncPlaced(): void {
-    for (const [id, sprite] of this.sprites) {
-      if (!this.state.buildings.some((building) => building.id === id)) {
-        sprite.destroy();
-        this.sprites.delete(id);
-        this.chunks.delete(id);
-        this.activeSpriteIds.delete(id);
-        this.openingIds.delete(id);
-        this.openingOpenness.delete(id);
-        if (this.selectedBuildingId === id) this.selectedBuildingId = null;
-      }
-    }
-    for (const building of this.state.buildings) {
-      const sprite = this.sprites.get(building.id);
-      if (!sprite) this.addPlacedSprite(building);
-      // Doors and gates own their texture via the swing updater.
-      else if (!this.openingIds.has(building.id) && sprite.texture.key !== textureForBuilding(building)) {
-        sprite.setTexture(textureForBuilding(building));
-      }
-    }
-    if (this.placing) this.refreshEnclosureOverlay();
+    if (this.selectedBuildingId && !this.state.buildings.some(building => building.id === this.selectedBuildingId)) this.selectedBuildingId = null;
   }
 
-  /** Replace area-owned structure sprites without rebuilding the controller. */
+  /** Reset area-owned selection without rebuilding the controller. */
   resetForArea(): void {
-    this.clearAreaSprites();
+    this.clearPlacementState();
     this.syncPlaced();
   }
 
-  /** Clear old-area sprites before the scene destroys its remaining children. */
+  /** Clear placement and selection before an area swap. */
   clearForAreaSwap(): void {
-    this.clearAreaSprites();
-  }
-
-  /** Activate only placed structures in camera-adjacent chunks. */
-  updateChunkActivation(activeChunks: ReadonlySet<string>): EntityActivationCounts {
-    const nextActiveIds = this.chunks.idsInChunks(activeChunks);
-    for (const id of this.activeSpriteIds) {
-      if (!nextActiveIds.has(id)) this.sprites.get(id)?.setActive(false).setVisible(false);
-    }
-    for (const id of nextActiveIds) {
-      if (!this.activeSpriteIds.has(id)) this.sprites.get(id)?.setActive(true).setVisible(true);
-    }
-    this.activeSpriteIds = nextActiveIds;
-    return { active: nextActiveIds.size, total: this.chunks.size };
-  }
-
-  private addPlacedSprite(building: BuildingState): void {
-    if (this.sprites.has(building.id)) return;
-    const def = buildableById(building.definitionId);
-    const sprite = this.scene.add
-      .image(building.tileX * TILE_SIZE, building.tileY * TILE_SIZE, textureForBuilding(building))
-      .setDepth(def.landscapeKind === 'water' ? LANDSCAPE_WATER_DEPTH
-        : def.landscapeKind === 'bridge' ? LANDSCAPE_BRIDGE_DEPTH
-          : def.layer === 'surface' ? SURFACE_DEPTH
-            : (building.tileY + effectiveBuildingDimensions(building).tilesHigh) * TILE_SIZE)
-      .setActive(false)
-      .setVisible(false);
-    applyBuildingTransform(sprite, building, def);
-    if (building.id === this.selectedBuildingId) sprite.setTint(INVALID_TINT);
-    this.sprites.set(building.id, sprite);
-    if (def.boundaryClass === 'door' || def.boundaryClass === 'gate') this.openingIds.add(building.id);
-    this.chunks.upsert(building.id, sprite.x, sprite.y);
-  }
-
-  /**
-   * Swing placed doors and gates open as the player approaches and shut again as they
-   * leave. Openness eases toward its target each frame and maps to the nearest
-   * procedural swing frame; culled doors snap shut so they never reappear ajar.
-   */
-  updateOpeningAnimations(playerX: number, playerY: number, deltaMs: number): void {
-    if (this.openingIds.size === 0) return;
-    const step = deltaMs / DOOR_SWING_MS;
-    for (const id of this.openingIds) {
-      const sprite = this.sprites.get(id);
-      const building = this.state.buildings.find((candidate) => candidate.id === id);
-      if (!sprite || !building) continue;
-      if (!sprite.visible) {
-        this.openingOpenness.set(id, 0);
-        continue;
-      }
-      const { x: centerX, y: centerY } = buildingCenterPx(building);
-      const target = Math.hypot(playerX - centerX, playerY - centerY) <= DOOR_OPEN_RADIUS ? 1 : 0;
-      const current = this.openingOpenness.get(id) ?? 0;
-      const next = target > current
-        ? Math.min(target, current + step)
-        : Math.max(target, current - step);
-      this.openingOpenness.set(id, next);
-
-      const frames = OPENING_SWING_FRAMES[building.definitionId as BuildableId];
-      if (!frames) continue;
-      const frame = frames[Math.round(next * (frames.length - 1))] ?? frames[0]!;
-      if (sprite.texture.key !== frame) sprite.setTexture(frame);
-    }
+    this.clearPlacementState();
   }
 
   private buildingAt(worldX: number, worldY: number): BuildingState | null {
-    // Newer/topmost parts win when layers overlap (for example, a facility on a floor).
-    for (let index = this.state.buildings.length - 1; index >= 0; index -= 1) {
-      const building = this.state.buildings[index]!;
-      const sprite = this.sprites.get(building.id);
-      if (!sprite?.visible) continue;
-      const bounds = sprite.getBounds();
-      if (
-        worldX >= bounds.x - 4 && worldX <= bounds.right + 4 &&
-        worldY >= bounds.y - 4 && worldY <= bounds.bottom + 4
-      ) return building;
-    }
-    return null;
-  }
-
-  private cancelBuildingPress(): void {
-    this.buildingPress?.timer.remove(false);
-    this.buildingPress = null;
-  }
-
-  /**
-   * Red marks on every unclosed perimeter edge, drawn in the world where the
-   * hole actually is. The HUD used to also count them in a banner, which was
-   * noise stacked on top of the same information.
-   */
-  private refreshEnclosureOverlay(): void {
-    if (!this.placing) return;
-    const gaps = enclosureGaps(this.state.buildings);
-    if (!this.gapOverlay) this.gapOverlay = this.scene.add.graphics().setDepth(GHOST_DEPTH - 1);
-    const graphics = this.gapOverlay.clear().setVisible(true);
-    graphics.lineStyle(ENCLOSURE_GUIDE_WIDTH, 0xff4d4d, 1).fillStyle(0xffd166, 1);
-    for (const gap of gaps) {
-      const left = gap.tileX * TILE_SIZE;
-      const top = gap.tileY * TILE_SIZE;
-      const x1 = gap.edge === 'east' ? left + TILE_SIZE : left;
-      const y1 = gap.edge === 'south' ? top + TILE_SIZE : top;
-      const x2 = gap.edge === 'north' || gap.edge === 'south' ? left + TILE_SIZE : x1;
-      const y2 = gap.edge === 'west' || gap.edge === 'east' ? top + TILE_SIZE : y1;
-      graphics.lineBetween(x1, y1, x2, y2);
-      graphics.fillCircle((x1 + x2) / 2, (y1 + y2) / 2, 1.75);
-    }
+    return buildingAtWorld(this.state.buildings, worldX, worldY);
   }
 
   private placementOptions() {
@@ -957,23 +505,7 @@ export class BuildModeController {
     };
   }
 
-  destroy(): void {
-    this.clearAreaSprites();
-    this.placementGuide.destroy();
-  }
+  destroy(): void { this.clearPlacementState(); }
 
-  private clearAreaSprites(): void {
-    this.stopDeleting();
-    this.cancelBuildingPress();
-    this.cancel();
-    for (const sprite of this.sprites.values()) sprite.destroy();
-    this.sprites.clear();
-    this.chunks.clear();
-    this.activeSpriteIds.clear();
-    this.openingIds.clear();
-    this.openingOpenness.clear();
-    this.selectedBuildingId = null;
-    this.gapOverlay?.destroy();
-    this.gapOverlay = null;
-  }
+  private clearPlacementState(): void { this.stopDeleting(); this.cancel(); this.selectedBuildingId = null; }
 }

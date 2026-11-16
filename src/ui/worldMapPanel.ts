@@ -16,7 +16,8 @@ import { hasDiscoveredRegionalLandmark, regionalContractView, regionalMasteryVie
 import { waystoneDestinations, waystoneOriginView, type WaystoneTravelResult } from '../simulation/waystones';
 import { areaDisplayName, hasElarisFallen } from '../simulation/elarisFall';
 import { deathCacheView, type DeathCacheView } from '../simulation/deathCache';
-import { BEACON_COLOR, drawBeaconMarker } from './mapMarkers';
+import { BEACON_COLOR, drawBeaconMarker, drawSiteMarker } from './mapMarkers';
+import { discoveredSitesByArea, type SiteView } from '../presentation/siteViews';
 
 const CANVAS_SIZE = 560;
 const MAP_INSET = 34;
@@ -306,6 +307,7 @@ export class WorldMapPanel {
       if (area.key !== '0,0') this.drawSettlement(area, discovered.has(area.key));
     }
     for (const region of REGIONAL_IDENTITIES) this.drawRegionalLandmark(region.areaKey, discovered.has(region.areaKey));
+    for (const [areaKey, views] of discoveredSitesByArea(this.state)) this.drawSites(areaKey, views);
     const journey = questViews(this.state).find((quest) => !quest.complete && quest.mapAreaKey);
     if (journey?.mapAreaKey) this.drawQuestDestination(journey.mapAreaKey);
     const beds = this.bedMarkers();
@@ -592,6 +594,24 @@ export class WorldMapPanel {
     ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+  }
+
+  /** Discovered field sites in one area, each labelled with its refill state. */
+  private drawSites(areaKey: string, views: readonly SiteView[]): void {
+    const [areaX, areaY] = areaKey.split(',').map((part) => Number.parseInt(part, 10));
+    if (!Number.isFinite(areaX) || !Number.isFinite(areaY)) return;
+    if (areaX! < WORLD_BOUNDS.minX || areaX! > WORLD_BOUNDS.maxX || areaY! < WORLD_BOUNDS.minY || areaY! > WORLD_BOUNDS.maxY) return;
+    const ctx = this.context;
+    for (const view of views) {
+      const x = this.areaLeft(areaX!) + view.x / WORLD_PX * CELL_WIDTH;
+      const y = this.areaTop(areaY!) + view.y / WORLD_PX * CELL_HEIGHT;
+      drawSiteMarker(ctx, x, y, 4, view.color, view.searchedCount >= view.containerCount);
+      ctx.fillStyle = '#f5ecd6';
+      ctx.font = '700 8px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(view.status, x, y + 6);
+    }
   }
 
   /** The cache you dropped when you died, wherever in the world it lies. */

@@ -1,3 +1,4 @@
+import { openAdmin } from './menu';
 import { expect, test, type Locator } from '@playwright/test';
 import { openApp } from './app';
 
@@ -27,7 +28,7 @@ async function expectWholeNumber(field: Locator): Promise<number> {
 
 test('Admin exposes raid timing, wave size, and exposure tuning', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await page.getByRole('tab', { name: 'Global Values' }).click();
 
   // Every danger element carries its own length, and each one has to be reachable.
@@ -52,7 +53,7 @@ test('Admin exposes raid timing, wave size, and exposure tuning', async ({ page 
 
 test('Admin exposes per-raider, defence, structure, and creature stats', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await page.getByRole('tab', { name: 'Global Values' }).click();
 
   await page.getByText(/^Breaker ·/).click();

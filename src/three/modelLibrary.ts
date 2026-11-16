@@ -112,15 +112,29 @@ export class ModelLibrary {
   async instantiate(key: ModelAssetKey, options: ModelInstanceOptions = {}): Promise<THREE.Group> {
     const asset = modelAsset(key);
     const source = await this.source(key);
-    const content = source.clone(true);
+    // The authored gate includes fixed fence sections. Only the named leaf
+    // belongs on a hinge; two of these panels form the two-tile opening.
+    const content = key === 'town.fence-gate' ? new THREE.Group() : source.clone(true);
+    if (key === 'town.fence-gate') {
+      const leaf = source.getObjectByName('gate');
+      if (!leaf) throw new Error('Missing gate leaf in town.fence-gate');
+      const orientedLeaf = new THREE.Group();
+      orientedLeaf.rotation.y = asset.rotationY ?? 0;
+      orientedLeaf.add(leaf.clone(true));
+      content.add(orientedLeaf);
+    }
     this.cloneMaterials(content, options.tint, asset.author === 'Kenney');
     // Asset-space calibration belongs here rather than at every placement.
     // The Kenney fence and gate are authored 90 degrees off Elaris' boundary
     // axis, so their registry correction now applies to town and player builds.
-    content.rotation.y = asset.rotationY ?? 0;
-    this.normalize(content, options.targetHeight ?? asset.targetHeight);
+    content.rotation.y = key === 'town.fence-gate' ? 0 : asset.rotationY ?? 0;
+    this.normalize(content, options.targetHeight ?? asset.targetHeight, key === 'town.fence-gate' ? 1 : undefined);
     content.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
+      // Architectural sheets must still exist when viewed from below or behind.
+      if (/wall|roof|dormer|balcony/.test(key)) {
+        for (const material of Array.isArray(child.material) ? child.material : [child.material]) material.side = THREE.DoubleSide;
+      }
       child.castShadow = true;
       child.receiveShadow = true;
       // GLB clones share immutable geometry with the cached source.
@@ -180,13 +194,19 @@ export class ModelLibrary {
     });
   }
 
-  private normalize(group: THREE.Group, targetHeight: number): void {
+  private normalize(group: THREE.Group, targetHeight: number, targetWidth?: number): void {
     group.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(group);
     const size = box.getSize(new THREE.Vector3());
     const scale = targetHeight / Math.max(0.001, size.y);
     group.scale.setScalar(scale);
     group.updateMatrixWorld(true);
+
+    if (targetWidth !== undefined) {
+      const width = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).x;
+      group.scale.x *= targetWidth / Math.max(0.001, width);
+      group.updateMatrixWorld(true);
+    }
 
     const scaledBox = new THREE.Box3().setFromObject(group);
     const center = scaledBox.getCenter(new THREE.Vector3());

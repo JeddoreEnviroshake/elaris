@@ -1,3 +1,4 @@
+import { openAdmin } from './menu';
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 
@@ -9,7 +10,7 @@ import { openApp } from './app';
  */
 test('accepts hotbar-bound digits typed into an Admin number field', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
 
   const coins = page.getByLabel('Coins', { exact: true });
   await expect(coins).toBeVisible();

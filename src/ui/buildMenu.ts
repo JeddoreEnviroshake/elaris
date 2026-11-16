@@ -155,6 +155,7 @@ export class BuildMenu {
   private readonly buttonCluster: HTMLDivElement;
   private readonly placingTitle: HTMLDivElement;
   private readonly quickRow: HTMLDivElement;
+  private quickRowSignature = '';
   private readonly hint: HTMLDivElement;
   private readonly placeButton: HTMLButtonElement;
   private readonly rotateButton: HTMLButtonElement;
@@ -522,6 +523,13 @@ export class BuildMenu {
       return material ? candidateMaterial === material : candidateMaterial === null && paletteCategory(candidate) === category;
     });
 
+    const signature = JSON.stringify([id, siblings.map((sibling) => [
+      sibling.id, missingCost(this.state, sibling.cost), stockedCostText(this.state, sibling.cost),
+    ])]);
+    // HUD refreshes run every frame. Keep the buttons stable while their state
+    // is unchanged so a pointer press or keyboard focus can finish normally.
+    if (signature === this.quickRowSignature) return;
+    this.quickRowSignature = signature;
     this.quickRow.textContent = '';
     this.quickRow.style.display = siblings.length > 1 ? 'flex' : 'none';
     if (siblings.length <= 1) return;

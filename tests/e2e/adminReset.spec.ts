@@ -1,3 +1,4 @@
+import { openAdmin } from './menu';
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { expectSavedState, readSavedState } from './save';
@@ -20,7 +21,7 @@ async function stagePlayerX(page: import('@playwright/test').Page): Promise<void
 
 test('cancelling the confirm leaves the game untouched', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await stagePlayerX(page);
 
   page.once('dialog', (dialog) => { void dialog.dismiss(); });
@@ -33,7 +34,7 @@ test('cancelling the confirm leaves the game untouched', async ({ page }) => {
 
 test('confirming Reset Game wipes the save and closes the panel', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await stagePlayerX(page);
 
   page.once('dialog', (dialog) => { void dialog.accept(); });

@@ -1,33 +1,28 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
-import { gatherStarterTree } from './gather';
+import { openAdmin } from './menu';
+import { outsideDoorTile, townBuildingById } from '../../src/content/townBuildings';
 
 test('walks into the Market, sells a resource inside, and leaves safely', async ({ page }) => {
   await openApp(page);
-  await gatherStarterTree(page);
-
-  await page.keyboard.down('s');
+  await openAdmin(page);
+  const door = outsideDoorTile(townBuildingById('market'));
+  await page.getByLabel('X', { exact: true }).fill(String((door.tileX + .5) * 16));
+  await page.getByLabel('Y', { exact: true }).fill(String((door.tileY + .5) * 16));
+  await page.getByLabel('Wood', { exact: true }).fill('4');
+  await page.getByRole('button', { name: 'Push Local Values' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   const interior = page.getByRole('dialog', { name: 'Market service' });
+  await expect(page.getByRole('button', { name: 'Enter Market' })).toBeVisible();
+  await page.keyboard.press('e');
+  await expect(page.getByRole('button', { name: 'Leave the Market', exact: true })).toBeVisible();
+
+  // Walk down the clear aisle until Tavi can be reached, before the counter.
+  await page.keyboard.down('s');
   try {
-    await expect(page.getByRole('button', { name: 'Enter Market' })).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole('button', { name: 'Talk to Tavi' })).toBeVisible({ timeout: 10_000 });
   } finally {
     await page.keyboard.up('s');
-  }
-  await page.keyboard.press('e');
-  await expect(page.locator('[data-testid="playable-interior"]')).toBeVisible();
-
-  // Walk around the counter to Tavi's service hotspot.
-  await page.keyboard.down('a');
-  await page.waitForTimeout(350);
-  await page.keyboard.up('a');
-  await page.keyboard.down('s');
-  await page.waitForTimeout(1_800);
-  await page.keyboard.up('s');
-  await page.keyboard.down('d');
-  try {
-    await expect(page.getByRole('button', { name: 'Talk to Tavi' })).toBeVisible({ timeout: 2_000 });
-  } finally {
-    await page.keyboard.up('d');
   }
   await page.keyboard.press('e');
   const conversation = page.getByRole('dialog', { name: 'Conversation with Tavi' });
@@ -47,8 +42,8 @@ test('walks into the Market, sells a resource inside, and leaves safely', async 
 
   await interior.getByRole('button', { name: 'Return to Elaris Market Hall' }).click();
   await expect(interior).toBeHidden();
-  await expect(page.locator('[data-testid="playable-interior"]')).toBeVisible();
+  await expect(page.locator('#elaris-three-canvas')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.locator('[data-testid="playable-interior"]')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Talk to Tavi', exact: true })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Enter Market' })).toBeVisible();
 });

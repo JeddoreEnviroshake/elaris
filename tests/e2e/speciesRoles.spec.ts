@@ -3,7 +3,7 @@ import { createCartDockState, createInitialState, createWorkerHousingState, crea
 import { enclosedEnvironment } from '../unit/helpers/buildings';
 import { openApp } from './app';
 import { tapWorld } from './interact';
-import { expectSavedState } from './save';
+import { releaseSaveWriter, expectSavedState } from './save';
 
 test('runs Craghopper and Glade Stag facilities through the primary 3D UI', async ({ page }) => {
   await openApp(page);
@@ -54,6 +54,7 @@ test('runs Craghopper and Glade Stag facilities through the primary 3D UI', asyn
   ];
   state.nextEntityId = 500;
 
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixtureState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -83,7 +84,7 @@ test('runs Craghopper and Glade Stag facilities through the primary 3D UI', asyn
   const collect = facility.getByRole('button', { name: 'Collect worker stone' });
   await expect(collect).toBeEnabled();
   await collect.click();
-  await facility.getByRole('button', { name: 'Close' }).click();
+  await facility.getByRole('button', { name: 'Close', exact: true }).click();
 
   await tapWorld(page, { x: 86 * 16, y: 79 * 16 }, state.player);
   await expect(facility.getByText('Cart Dock', { exact: true })).toBeVisible();

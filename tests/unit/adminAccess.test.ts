@@ -12,9 +12,9 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe('admin menu access', () => {
-  it('is hidden from a public visitor', () => {
-    expect(adminMenuEnabled('', memoryStorage(), false)).toBe(false);
-    expect(adminMenuEnabled('?render=3d', memoryStorage(), false)).toBe(false);
+  it('is available by default in the public Menu', () => {
+    expect(adminMenuEnabled('', memoryStorage(), false)).toBe(true);
+    expect(adminMenuEnabled('?render=3d', memoryStorage(), false)).toBe(true);
   });
 
   it('turns on with ?admin=1 and is remembered in this browser', () => {
@@ -42,7 +42,7 @@ describe('admin menu access', () => {
       removeItem: () => { throw new Error('blocked'); },
     };
     expect(adminMenuEnabled('?admin=1', blocked, false)).toBe(true);
-    expect(adminMenuEnabled('', blocked, false)).toBe(false);
-    expect(adminMenuEnabled('', undefined, false)).toBe(false);
+    expect(adminMenuEnabled('', blocked, false)).toBe(true);
+    expect(adminMenuEnabled('', undefined, false)).toBe(true);
   });
 });

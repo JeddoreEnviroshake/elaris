@@ -3,7 +3,7 @@ import { createInitialState, createWorkerHousingState } from '../../src/simulati
 import { enclosedEnvironment } from '../unit/helpers/buildings';
 import { openApp } from './app';
 import { tapWorld } from './interact';
-import { expectSavedState } from './save';
+import { releaseSaveWriter, expectSavedState } from './save';
 
 test('orders, houses, works, and collects a Tuftle through the 3D facility flow', async ({ page }) => {
   await openApp(page);
@@ -26,6 +26,7 @@ test('orders, houses, works, and collects a Tuftle through the 3D facility flow'
   ];
   state.nextEntityId = 100;
 
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixtureState) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -56,13 +57,13 @@ test('orders, houses, works, and collects a Tuftle through the 3D facility flow'
   await expect(order).toBeEnabled();
   await order.click();
 
-  await facility.getByRole('button', { name: 'Close' }).click();
+  await facility.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('tab', { name: 'Creatures', exact: true }).click();
   const work = page.getByRole('button', { name: 'Work selected creature' });
   await expect(work).toBeEnabled();
   await work.click();
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
 
   // One deterministic Tuftle producer cycle is 15 seconds.
   await page.waitForTimeout(16_000);

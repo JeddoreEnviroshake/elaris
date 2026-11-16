@@ -7,6 +7,7 @@ import type { GameState } from '../simulation/state';
 import type { ModelAssetKey } from './assetRegistry';
 import { ModelLibrary, type ModelPlacement } from './modelLibrary';
 import { isInsideBufferedFootprint, type EnvironmentFootprint } from './environmentComposition';
+import { addRoofUnderside } from './buildingUndersides';
 
 // The legacy hash's last XOR returns a signed 32-bit value. Normalize locally
 // without changing existing world generation or save compatibility.
@@ -280,6 +281,7 @@ export class TownEntrance {
     }
     add('entrance.door',width/8,.015,depth/2+.04,1.64);
     add('entrance.roof',0,wallHeight-.05,0,2.1,0,{width:width+.65,depth:depth+.7});
+    const lining = addRoofUnderside(group, width + .63, depth + .68, wallHeight - .06);
     add('entrance.chimney',1.9,2.65,-.75,2.8);
     add('entrance.vine',-width/2-.08,.3,.55,1.7,-Math.PI/2);
     add('entrance.crate',-2.5,0,2.48,.52);
@@ -314,6 +316,7 @@ export class TownEntrance {
     }
     const models = await Promise.allSettled(jobs);
     const materials = new Set<THREE.Material>();
+    lining.traverse(child => { if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) materials.add(child.material); });
     for (const result of models) {
       if(result.status==='rejected') { console.warn('[3d] Unable to load forge module', result.reason); continue; }
       result.value.traverse(child=>{

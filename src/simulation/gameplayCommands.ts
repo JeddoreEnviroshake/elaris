@@ -56,6 +56,7 @@ import { advanceWorkerProduction, assignCreatureHousing, availableHousing } from
 import { creatureWorksiteOperationGate, activeFollowerGatherAssistance } from './creatureRoles';
 import { recordOpeningGatherAssistance } from './onboardingProgress';
 import { isCreatureAway } from './expeditions';
+import { liveSiteBlockingRect, SITE_HALF_TILES } from './sites';
 
 export interface CommandResult {
   ok: boolean;
@@ -169,6 +170,16 @@ export function validatePlacement(state: GameState, _placed: readonly BuildingSt
         }
       }
     }
+  }
+  // Field sites are derived ruins: building over one would delete a refilling
+  // loot source the player cannot get back.
+  const ruin = liveSiteBlockingRect(state, tileX, tileY, dimensions.tilesWide, dimensions.tilesHigh);
+  if (ruin) {
+    return blockedPlacement(
+      'Ruins are in the way',
+      Math.min(Math.max(tileX, ruin.anchorTileX - SITE_HALF_TILES), tileX + dimensions.tilesWide - 1),
+      Math.min(Math.max(tileY, ruin.anchorTileY - SITE_HALF_TILES), tileY + dimensions.tilesHigh - 1),
+    );
   }
   for (let y = tileY; y < tileY + dimensions.tilesHigh; y += 1) {
     for (let x = tileX; x < tileX + dimensions.tilesWide; x += 1) {
@@ -286,6 +297,7 @@ export function placeBuilding(state: GameState, placed: BuildingState[], def: Bu
         'tuftle-down': 0, 'craghopper-shell': 0, 'stag-antler': 0, 'snarlfox-pelt': 0,
         'masonmole-claw': 0, 'boar-tusk': 0, 'quillfinch-quill': 0, 'mistmoth-scale': 0,
         'slingtail-stone': 0,
+        'scrap-iron': 0, 'clockwork': 0, 'lens': 0, 'arcane-dust': 0, 'construct-core': 0, 'ancient-alloy': 0, 'sealed-satchel': 0, 'vault-key': 0, 'recall-flare': 0,
       },
       storageStacks: {
         wood: [], stone: [], fiber: [], 'iron-ore': [], 'iron-ingot': [],
@@ -293,6 +305,7 @@ export function placeBuilding(state: GameState, placed: BuildingState[], def: Bu
         'tuftle-down': [], 'craghopper-shell': [], 'stag-antler': [], 'snarlfox-pelt': [],
         'masonmole-claw': [], 'boar-tusk': [], 'quillfinch-quill': [], 'mistmoth-scale': [],
         'slingtail-stone': [],
+        'scrap-iron': [], 'clockwork': [], 'lens': [], 'arcane-dust': [], 'construct-core': [], 'ancient-alloy': [], 'sealed-satchel': [], 'vault-key': [], 'recall-flare': [],
       },
       storedTools: [],
     } : {}),
@@ -986,14 +999,24 @@ export function withdrawToolFromFieldCache(state: GameState, toolId: string, cac
 
 /** Resolve one context-gather command after atomically revalidating state. */
 export function gatherNearest(state: GameState): CommandResult {
+  return gatherNode(state, nearestLiveNode(state, strikeReachPx(state)));
+}
+
+/** An explicit aim or lock must never silently strike another resource. */
+export function gatherResource(state: GameState, nodeId: string): CommandResult {
+  return gatherNode(state, state.resourceNodes.find(node => node.id === nodeId) ?? null);
+}
+
+function gatherNode(state: GameState, node: ResourceNodeState | null): CommandResult {
   if (state.tick < state.actionCooldownUntilTick) {
     return { ok: false, message: 'Not ready yet' };
   }
 
   // Reach is the equipped tool's Range, so a long-reach tool gathers from as
   // far as it fights rather than from an unrelated fixed distance.
-  const node = nearestLiveNode(state, strikeReachPx(state));
-  if (!node) return { ok: false, message: 'Move closer to a resource' };
+  if (!node || node.hp <= 0 || Math.hypot(node.x - state.player.x, node.y - state.player.y) > strikeReachPx(state)) {
+    return { ok: false, message: 'Move closer to a resource' };
+  }
   const costShortfall = strikeCostShortfall(state);
   if (costShortfall) return { ok: false, message: costShortfall, targetId: node.id };
 

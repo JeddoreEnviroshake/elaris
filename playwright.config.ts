@@ -14,10 +14,12 @@ const PORT = 4173;
  * forty-minute wait.
  */
 const DEV_PORT = 5173;
-const DEV_HANDLES = /(?:three-mode|character-models|character-animations|combat-effects|ui-overhaul|town-entrance|world-style|feature5|interior-polish|arcane-storm|creatureWander|workerCreatureAmble|enemyLevels)\.spec\.ts/;
+const DEV_HANDLES = /(?:three-mode|first-person-polish|first-person-hands|character-models|character-animations|combat-effects|ui-overhaul|town-entrance|world-style|feature5|interior-polish|arcane-storm|creatureWander|workerCreatureAmble|enemyLevels|movement-performance|three-only-saves)\.spec\.ts/;
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   // Each browser runs a live Phaser simulation. Serial CI execution prevents
@@ -26,7 +28,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'on-first-retry',
   },
   projects: [
@@ -34,7 +36,7 @@ export default defineConfig({
     { name: 'mobile-chrome', use: { ...devices['Pixel 7'] }, testIgnore: DEV_HANDLES },
     {
       name: 'dev-chrome',
-      use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${DEV_PORT}` },
+      use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${DEV_PORT}` },
       testMatch: DEV_HANDLES,
     },
   ],
@@ -45,13 +47,13 @@ export default defineConfig({
       // dist must already be built (CI builds before this step; locally run
       // `npm run build` first). Preview enables the service worker + offline path.
       command: `node ./node_modules/vite/bin/vite.js preview --port ${PORT} --strictPort`,
-      url: `http://localhost:${PORT}`,
+      url: `http://127.0.0.1:${PORT}`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
     {
       command: `node ./node_modules/vite/bin/vite.js dev --port ${DEV_PORT} --strictPort`,
-      url: `http://localhost:${DEV_PORT}`,
+      url: `http://127.0.0.1:${DEV_PORT}`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

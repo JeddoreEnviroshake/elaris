@@ -8,6 +8,26 @@
  */
 
 /** The one colour the beacon is, everywhere it is drawn. */
+/**
+ * A field site: a small diamond in the kind's colour, hollowed once every
+ * container has been searched this refill.
+ */
+export function drawSiteMarker(
+  ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, color: string, emptied: boolean,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x, y - radius);
+  ctx.lineTo(x + radius, y);
+  ctx.lineTo(x, y + radius);
+  ctx.lineTo(x - radius, y);
+  ctx.closePath();
+  ctx.fillStyle = emptied ? 'rgba(20,28,22,0.85)' : color;
+  ctx.fill();
+  ctx.strokeStyle = emptied ? color : '#141c16';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
 export const BEACON_COLOR = '#8fd9ff';
 export const BEACON_GLOW = 'rgba(143, 217, 255, 0.35)';
 

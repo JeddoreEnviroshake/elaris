@@ -30,9 +30,9 @@ describe('Elaris town defences', () => {
     }
     expect(TOWN_PERIMETER_SEGMENTS.at(-1)!.end).toEqual(TOWN_PERIMETER_SEGMENTS[0]!.start);
     expect(TOWN_PERIMETER_SEGMENTS.filter((segment) => segment.kind === 'gate')).toEqual([
-      { start: { x: 104, y: 70 }, end: { x: 105, y: 70 }, kind: 'gate' },
+      { start: { x: 103.5, y: 70 }, end: { x: 105.5, y: 70 }, kind: 'gate' },
       { start: { x: 110, y: 84 }, end: { x: 110, y: 86 }, kind: 'gate' },
-      { start: { x: 62, y: 84 }, end: { x: 62, y: 83 }, kind: 'gate' },
+      { start: { x: 62, y: 84.5 }, end: { x: 62, y: 82.5 }, kind: 'gate' },
     ]);
   });
 
@@ -76,6 +76,23 @@ describe('Elaris town defences', () => {
     expect(resolveTownMovement(state, px(100.5), px(69.5), px(100.5), px(70.5)).y).toBe(px(69.5));
     expect(resolveTownMovement(state, px(104.5), px(69.5), px(104.5), px(70.5)).y).toBe(px(70.5));
     expect(resolveTownMovement(state, px(109.5), px(85), px(110.5), px(85)).x).toBe(px(110.5));
+  });
+
+  it('clears both panel lanes at every gate while keeping adjacent fences solid', () => {
+    for (const gate of TOWN_PERIMETER_SEGMENTS.filter(segment => segment.kind === 'gate')) {
+      const dx = gate.end.x - gate.start.x, dy = gate.end.y - gate.start.y;
+      expect(Math.hypot(dx, dy)).toBe(2);
+      for (const fraction of [.125, .375, .625, .875]) {
+        const x = gate.start.x + dx * fraction, y = gate.start.y + dy * fraction;
+        const nx = dy / 4, ny = -dx / 4;
+        expect(townFenceBlocksWorldMove(px(x - nx), px(y - ny), px(x + nx), px(y + ny))).toBe(false);
+        expect(townFenceBlocksWorldMove(px(x + nx), px(y + ny), px(x - nx), px(y - ny))).toBe(false);
+      }
+      for (const fraction of [-.1, 1.1]) {
+        const x = gate.start.x + dx * fraction, y = gate.start.y + dy * fraction;
+        expect(townFenceBlocksWorldMove(px(x - dy / 4), px(y + dx / 4), px(x + dy / 4), px(y - dx / 4))).toBe(true);
+      }
+    }
   });
 
   it('lets normal player movement cross both gates in either direction', () => {

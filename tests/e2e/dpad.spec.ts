@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
+import { openAppInStarterGrove } from './gather';
 import { readSavedState } from './save';
 
 /**
@@ -57,7 +58,7 @@ test('shows the d-pad arrows outside Build mode', async ({ page }) => {
 });
 
 test('moves the character exactly one tile per d-pad tap', async ({ page }) => {
-  await openApp(page);
+  await openAppInStarterGrove(page);
   await expect(page.getByRole('button', { name: 'Gather' })).toBeVisible();
 
   const { before, after } = await tapUntilMoved(page);

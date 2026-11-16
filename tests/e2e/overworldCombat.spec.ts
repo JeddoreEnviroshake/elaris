@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
 
@@ -43,6 +44,7 @@ async function seedRoamerFight(
   await openApp(page);
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await page.waitForTimeout(500);
+  await releaseSaveWriter(page);
   await page.evaluate(async ({ player, hostile: kind, loadout: gear }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);

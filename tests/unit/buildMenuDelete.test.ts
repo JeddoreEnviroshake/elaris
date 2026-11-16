@@ -28,6 +28,29 @@ const deleteMode = (): HTMLButtonElement => document.querySelector('[data-delete
 const deleteButton = (): HTMLButtonElement => document.querySelector('[data-delete-structure]')!;
 
 describe('build palette delete mode', () => {
+  it('keeps related-part controls stable across HUD refreshes and reprices after spending', () => {
+    const state = createInitialState(1);
+    state.inventory.wood = 20;
+    state.inventory.fiber = 20;
+    const actions = noopActions();
+    const menu = new BuildMenu(document.body, state, actions);
+    menu.beginPlacement('thatch-wall');
+    const row = document.querySelector('[aria-label="Related parts"]')!;
+    const floor = Array.from(row.querySelectorAll('button')).find((button) => button.textContent === 'Floor')!;
+    expect(floor).toBeDefined();
+    floor.focus();
+    for (let index = 0; index < 10; index += 1) menu.refreshAffordability();
+    expect(floor.isConnected).toBe(true);
+    expect(document.activeElement).toBe(floor);
+    floor.click();
+    expect(actions.onStartPlacing).toHaveBeenLastCalledWith('thatch-floor');
+    state.inventory.fiber = 0;
+    menu.refreshAffordability();
+    expect(row.textContent).toContain('Wall');
+    expect(Array.from(row.querySelectorAll('button')).find((button) => button.textContent === 'Wall')!.disabled).toBe(true);
+    menu.destroy();
+  });
+
   it('swaps Place for Delete and asks the scene to light a target', () => {
     const actions = noopActions();
     const menu = new BuildMenu(document.body, createInitialState(1), actions);

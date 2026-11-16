@@ -9,6 +9,7 @@ import { TILE_SIZE } from '../../src/config/platform';
 import { beginPlayerDefeat } from '../../src/simulation/survivalCycle';
 import { CREATURE_DEFINITIONS } from '../../src/content/creatures';
 import { isWithinTownSafeZoneWorldPosition } from '../../src/content/townDefences';
+import { createInitialState as createFreshState } from '../../src/simulation/state';
 
 function v0Save() {
   return {
@@ -33,6 +34,7 @@ describe('migrateToCurrent', () => {
       'tuftle-down': 0, 'craghopper-shell': 0, 'stag-antler': 0, 'snarlfox-pelt': 0,
       'masonmole-claw': 0, 'boar-tusk': 0, 'quillfinch-quill': 0, 'mistmoth-scale': 0,
       'slingtail-stone': 0,
+      'scrap-iron': 0, 'clockwork': 0, 'lens': 0, 'arcane-dust': 0, 'construct-core': 0, 'ancient-alloy': 0, 'sealed-satchel': 0, 'vault-key': 0, 'recall-flare': 0,
     });
     expect(save.state.groundDrops).toEqual([]);
     expect(save.state.highestAreaTierEver).toBe(0);
@@ -595,6 +597,8 @@ describe('migrateToCurrent', () => {
         'tuftle-down': 25, 'craghopper-shell': 150, 'stag-antler': 100, 'snarlfox-pelt': 75,
         'masonmole-claw': 100, 'boar-tusk': 125, 'quillfinch-quill': 25, 'mistmoth-scale': 25,
         'slingtail-stone': 200,
+        'scrap-iron': 200, clockwork: 150, lens: 100, 'arcane-dust': 50, 'construct-core': 400,
+        'ancient-alloy': 500, 'sealed-satchel': 300, 'vault-key': 25, 'recall-flare': 100,
       },
     });
     expect(migrated.meta).toMatchObject({ saveVersion: SAVE_VERSION, contentVersion: CONTENT_VERSION });
@@ -1212,5 +1216,75 @@ describe('v79 -> v80: the death cache', () => {
     };
     expect(() => migrateToCurrent({ ...save, state: { ...save.state, deathCache: backwards } }))
       .toThrow(SaveValidationError);
+  });
+});
+
+describe('v89 -> v90 salvage and field sites', () => {
+  function v89Save() {
+    const state = createFreshState(31) as unknown as Record<string, unknown>;
+    const inventory = state['inventory'] as Record<string, number>;
+    const stacks = state['inventoryStacks'] as Record<string, number[]>;
+    const balance = state['gameBalance'] as Record<string, unknown>;
+    const weights = (balance['bagWeight'] as { itemHundredths: Record<string, number> }).itemHundredths;
+    for (const id of ['scrap-iron', 'clockwork', 'lens', 'arcane-dust', 'construct-core', 'ancient-alloy', 'sealed-satchel', 'vault-key', 'recall-flare']) {
+      delete inventory[id]; delete stacks[id]; delete weights[id];
+    }
+    delete balance['outlands'];
+    delete state['siteProgress'];
+    delete state['activeSearch'];
+    inventory['wood'] = 9;
+    return { meta: { saveVersion: 89, contentVersion: 67, worldGenVersion: 13, appVersion: 'test', savedAt: 1 }, state };
+  }
+
+  it('adds the nine salvage items, their weights, the outlands balance and empty site state', () => {
+    const { save, migrated } = migrateToCurrent(v89Save());
+    expect(migrated).toBe(true);
+    expect(save.meta).toMatchObject({ saveVersion: SAVE_VERSION, contentVersion: CONTENT_VERSION });
+    expect(save.state.inventory.wood).toBe(9);
+    expect(save.state.inventory['scrap-iron']).toBe(0);
+    expect(save.state.inventoryStacks['recall-flare']).toEqual([]);
+    expect(save.state.gameBalance.bagWeight.itemHundredths['ancient-alloy']).toBe(500);
+    expect(save.state.gameBalance.outlands).toEqual({
+      restockCycles: 2, sitesPerArea: 2, searchTicks: 120, strongboxSearchTicks: 180,
+      guardsPerSite: 2, guardLeashTiles: 8, strongboxBlueprintBps: 3500, dangerBonusRolls: 1,
+    });
+    expect(save.state.siteProgress).toEqual({});
+    expect(save.state.activeSearch).toBeNull();
+  });
+
+  it('rejects a fractional site record', () => {
+    const { save } = migrateToCurrent(v89Save());
+    const broken = { ...save, state: { ...save.state, siteProgress: { '1,0:site-1': { restockIndex: 1.5, searched: [], guardsDefeated: 0 } } } };
+    expect(() => migrateToCurrent(broken)).toThrow(SaveValidationError);
+  });
+});
+
+describe('draft parchment in the world', () => {
+  function currentSave(mutate: (state: ReturnType<typeof createFreshState>) => void) {
+    const state = createFreshState(41);
+    mutate(state);
+    return { meta: { saveVersion: SAVE_VERSION, contentVersion: CONTENT_VERSION, worldGenVersion: WORLD_GEN_VERSION, appVersion: 'test', savedAt: 1 }, state };
+  }
+
+  it('accepts parchment lying on the ground', () => {
+    const save = currentSave((state) => {
+      state.groundDrops.push({ id: 'drop-parchment', resource: 'draft-parchment', amount: 2, x: 400, y: 400, expiresAtTick: null });
+    });
+    expect(() => migrateToCurrent(save)).not.toThrow();
+  });
+
+  it('accepts parchment in a death cache', () => {
+    const save = currentSave((state) => {
+      state.deathCache = {
+        id: 'cache-parchment', areaKey: '0,0', areaName: 'Elaris', areaX: 0, areaY: 0, x: 400, y: 400,
+        resources: { 'draft-parchment': 1 }, tools: [], createdAtTick: 0, expiresAtTick: 36_000,
+      };
+    });
+    expect(() => migrateToCurrent(save)).not.toThrow();
+  });
+
+  it('still rejects a fractional parchment count in the bag', () => {
+    const save = currentSave((state) => { state.inventory['draft-parchment'] = 1.5; });
+    expect(() => migrateToCurrent(save)).toThrow(SaveValidationError);
   });
 });

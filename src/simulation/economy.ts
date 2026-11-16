@@ -28,6 +28,9 @@ import { assignCreatureHousing, availableHousing, releaseCreature } from './work
 export function sellResource(state: GameState, resource: ResourceId, amount: number): CommandResult {
   if (!Number.isSafeInteger(amount) || amount <= 0) return { ok: false, message: 'Choose a positive whole amount' };
   if (state.inventory[resource] < amount) return { ok: false, message: `Only ${state.inventory[resource]} ${resource} available` };
+  // A zero price marks a quest or key item (Sealed Satchel, Vault Key, Recall
+  // Flare). Selling one would destroy it for nothing, so the trade is refused.
+  if (SELL_PRICES[resource] <= 0) return { ok: false, message: 'Nobody will buy that' };
   const proceeds = SELL_PRICES[resource] * amount;
   const transaction = creditCoins(state, proceeds, `Sold ${amount} ${resource} for ${proceeds} coins`);
   if (!transaction.ok) return transaction;

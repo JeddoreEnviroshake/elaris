@@ -1,7 +1,7 @@
 import type {
   AreaThemeId,
   BagItemId, BuildingDefinitionId, DangerThreat, EditableArcaneStormBalance, EditableBlueprintBalance,
-  EditableResourceBalance,
+  EditableOutlandsBalance, EditableResourceBalance,
   GameBalanceState, GameState,
   GatherableResourceId, RaidTargetPriority, RaiderKindId, RaiderState, ResourceId, ResourceNodeKind,
   EditableWorldBalance, SpeciesId, StructureFacilityId, ToolDefinitionId,
@@ -50,6 +50,7 @@ export const BAG_ITEM_IDS: readonly BagItemId[] = [
   'wood', 'stone', 'fiber', 'iron-ingot', 'iron-ore',
   'tuftle-down', 'craghopper-shell', 'stag-antler', 'snarlfox-pelt',
   'masonmole-claw', 'boar-tusk', 'quillfinch-quill', 'mistmoth-scale', 'slingtail-stone',
+  'scrap-iron', 'clockwork', 'lens', 'arcane-dust', 'construct-core', 'ancient-alloy', 'sealed-satchel', 'vault-key', 'recall-flare',
 ];
 /** Display names for every Bag item; ids stay kebab-case in the simulation. */
 export const BAG_ITEM_LABELS: Readonly<Record<BagItemId, string>> = {
@@ -62,6 +63,9 @@ export const BAG_ITEM_LABELS: Readonly<Record<BagItemId, string>> = {
   'masonmole-claw': 'Masonmole Claw', 'boar-tusk': 'Boar Tusk',
   'quillfinch-quill': 'Quillfinch Quill', 'mistmoth-scale': 'Mistmoth Scale',
   'slingtail-stone': 'Slingtail Stone',
+  'scrap-iron': 'Scrap Iron', clockwork: 'Clockwork', lens: 'Glass Lens', 'arcane-dust': 'Arcane Dust',
+  'construct-core': 'Construct Core', 'ancient-alloy': 'Ancient Alloy',
+  'sealed-satchel': 'Sealed Satchel', 'vault-key': 'Vault Key', 'recall-flare': 'Recall Flare',
 };
 export const DEFAULT_ITEM_WEIGHT_HUNDREDTHS: Readonly<Record<BagItemId, number>> = {
   'taming-snare': 100,
@@ -89,6 +93,18 @@ export const DEFAULT_ITEM_WEIGHT_HUNDREDTHS: Readonly<Record<BagItemId, number>>
   'quillfinch-quill': 25,
   'mistmoth-scale': 25,
   'slingtail-stone': 200,
+  // Salvage is what a run is weighed in. Scrap is the bulk of a haul and heavy
+  // enough that two sites fill a good share of the bag; the rare pieces are
+  // heavier still, so carrying one home is a decision.
+  'scrap-iron': 200,
+  clockwork: 150,
+  lens: 100,
+  'arcane-dust': 50,
+  'construct-core': 400,
+  'ancient-alloy': 500,
+  'sealed-satchel': 300,
+  'vault-key': 25,
+  'recall-flare': 100,
 };
 
 export const RESOURCE_BALANCE: Readonly<Record<ResourceNodeKind, EditableResourceBalance>> = {
@@ -961,8 +977,25 @@ export function createDefaultGameBalance(): GameBalanceState {
     }])) as GameBalanceState['creatures'],
     world: { ...DEFAULT_WORLD_BALANCE },
     blueprints: structuredClone(BLUEPRINT_BALANCE) as GameBalanceState['blueprints'],
+    outlands: { ...OUTLANDS_BALANCE },
   };
 }
+
+/**
+ * Field sites. Every number a player can feel about a run lives here so it can
+ * be retuned from the Admin panel without a build. Starting values are chosen
+ * so two ordinary sites fill roughly 40% of the base carry limit.
+ */
+export const OUTLANDS_BALANCE: Readonly<EditableOutlandsBalance> = {
+  restockCycles: 2,
+  sitesPerArea: 2,
+  searchTicks: 120,
+  strongboxSearchTicks: 180,
+  guardsPerSite: 2,
+  guardLeashTiles: 8,
+  strongboxBlueprintBps: 3500,
+  dangerBonusRolls: 1,
+};
 
 /** Immutable raider identity plus the save-backed numbers the Admin panel edits. */
 export function gameRaiderDefinition(state: GameState, kindId: RaiderKindId): RaiderDefinition {

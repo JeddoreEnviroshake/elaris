@@ -143,6 +143,11 @@ The shared slice is `seed`, `rngState`, `tick`, `visitedAreas`, `resourceNodes`,
 `dangerExposureStartedAtTick`, `gameBalance`, `highestAreaTierEver`,
 `highestRatingEverTenths`. Everything else is per-member.
 
+Field sites (outlands plan, Phase 1) straddle the line: `siteProgress` must be
+split when a world is shared, with `guardsDefeated` and the live guards (raiders
+carrying a `siteId`) in the shared slice, and `searched` per member so
+co-op partners each get the loot. `activeSearch` is per member.
+
 This is a **projection** — `splitGameState` / `joinGameState` — not a rewrite of
 `GameState`. Solo worlds keep using `GameState` exactly as today, so
 `migrations.ts` and every existing test stay valid, and the split only runs when
@@ -155,14 +160,20 @@ a world is shared.
   the socket with a "refresh required" reason rather than desyncing.
 - **Client → server**: intents only, never state. `MoveIntent`, gather, build,
   place, strike, snare, craft, dialogue. Each carries a client sequence number.
-- **Server → client**: snapshots at **12 Hz**, not 60. Movement is tile-locked
-  grid movement, so a 12 Hz snapshot plus client-side interpolation of the
-  in-progress tile move is visually smooth. Personal state is sent only to its
-  owner; shared state is sent to everyone in the world.
+- **Server → client**: snapshots at **12 Hz**, not 60. Overworld movement is
+  free analog movement in whole pixels (see `first-person-view-plan.md`), so
+  remote players interpolate position-to-position between the last two
+  snapshots rather than along an in-progress tile move. Personal state is sent
+  only to its owner; shared state is sent to everyone in the world.
 - **Interest management**: a client receives only its current area. Areas are
   already the natural partition (`currentArea` / `visitedAreas`).
 - **Prediction**: the client keeps running its local `FixedStepLoop` for its own
-  movement and reconciles against the authoritative snapshot. Everything
+  movement and reconciles against the authoritative snapshot. A `MoveIntent`
+  crosses the wire already quantised (`quantizeDirection` in
+  `src/simulation/commands.ts`) so both sides step identical integers, and
+  reconciliation must carry the transient sub-pixel remainder
+  (`GridMovementState.subX`/`subY`) alongside the position, or a replayed
+  walk drifts by up to a pixel per correction. Everything
   else — gathering, building, combat, loot — waits for the server, because those
   are the actions worth validating.
 - **Desync detection**: the server includes a truncated `hashGameState` of the

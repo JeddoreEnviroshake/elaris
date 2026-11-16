@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readyGarden } from '../helpers/openingJourney';
 import { openApp } from './app';
+import { stepDpad } from './routeInput';
 import { openMenuTab } from './menu';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 import { openingGardenBuildRequest, openingGardenTarget, registerOpeningDiscovery } from '../../src/simulation/openingGarden';
 import { reconcileQuestProgress } from '../../src/simulation/progression';
 import { supplyRunRoute } from '../../src/simulation/openingSupplyRun';
@@ -25,6 +26,7 @@ async function loadFixture(page: Page, prepare?: (state: GameState) => void, old
     state.onboarding.completedMilestoneIds = state.onboarding.completedMilestoneIds.filter((id) => !['register-discovery', 'build-garden', 'harvest-garden'].includes(id));
     delete (state.onboarding as Partial<typeof state.onboarding>).garden;
   }
+  await releaseSaveWriter(page);
   await page.evaluate(async ({ fixture, old }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
@@ -47,22 +49,17 @@ async function coordinates(page: Page) {
 }
 /** Drive ordinary one-tile input, using the visible minimap for every step. */
 async function walkTo(page: Page, model: GameState, target: { tileX: number; tileY: number }) {
-  await page.keyboard.down('Shift');
-  try {
-    for (let step = 0; step < 220; step++) {
-      const current = await coordinates(page);
-      if (current.tileX === target.tileX && current.tileY === target.tileY) return;
-      // Re-read the live tile after each key release; rendering can show a tile before its movement finishes.
-      const route = supplyRunRoute({ ...model, player: { ...model.player, x: (current.tileX + .5) * 16, y: (current.tileY + .5) * 16 } }, target);
-      expect(route).not.toBeNull(); const next = route![1]!;
-      const key = next.tileX < current.tileX ? 'a' : next.tileX > current.tileX ? 'd' : next.tileY < current.tileY ? 'w' : 's';
-      await page.keyboard.down(key);
-      try { await expect.poll(() => coordinates(page), { timeout: 4000, intervals: [25, 25, 50] }).not.toEqual(current); }
-      finally { await page.keyboard.up(key); }
-      await page.waitForTimeout(200);
-    }
-    throw new Error('The visible walking route did not reach its destination');
-  } finally { await page.keyboard.up('Shift'); }
+  for (let step = 0; step < 220; step++) {
+    const current = await coordinates(page);
+    if (current.tileX === target.tileX && current.tileY === target.tileY) return;
+    const route = supplyRunRoute({ ...model, player: { ...model.player, x: (current.tileX + .5) * 16, y: (current.tileY + .5) * 16 } }, target);
+    expect(route).not.toBeNull(); const next = route![1]!;
+    const direction = next.tileX < current.tileX ? 'left' : next.tileX > current.tileX ? 'right' : next.tileY < current.tileY ? 'up' : 'down';
+    await stepDpad(page, direction);
+    await expect.poll(() => coordinates(page), { timeout: 4000, intervals: [50, 100] }).toEqual(next);
+    await page.waitForTimeout(200);
+  }
+  throw new Error('The visible walking route did not reach its destination');
 }
 
 test('3D journey returns home, registers, builds and harvests a real garden, then saves a next direction', async ({ page, isMobile }, testInfo) => {
@@ -95,7 +92,7 @@ test('3D journey returns home, registers, builds and harvests a real garden, the
   await expect(page.getByLabel('Garden growth and harvest', { exact: true })).toContainText('No creature assignment is needed');
   const harvest = page.getByRole('button', { name: 'Collect garden fiber', exact: true }); await expect(harvest).toBeDisabled();
   await harvest.scrollIntoViewIfNeeded();
-  const panel = page.getByLabel('Garden and journey', { exact: true });
+  const panel = page.getByRole('tabpanel', { name: 'Garden', exact: true });
   const scrollTop = await panel.evaluate((element) => element.scrollTop); expect(scrollTop).toBeGreaterThan(0);
   await expect.poll(async () => (await saved(page)).buildings.find((bed) => bed.id === planted.onboarding.garden!.bedId)!.garden!.progressTicks, { timeout: 20_000 }).toBeGreaterThanOrEqual(300);
   expect(await panel.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(scrollTop - 5);

@@ -40,11 +40,10 @@ real deploy).
 
 ## Primary 3D presentation
 
-Elaris is now a fixed-camera 3D game. The authoritative deterministic
-simulation, saves, input, collision, and accessible UI remain renderer-neutral.
-The older 2D renderer is retained as an Admin/testing fallback, not the primary
-player experience. Use the **3D WORLD / 2D WORLD** toggle in the **Admin** menu
-to switch at runtime, or append `?render=2d` / `?render=3d` for testing.
+Elaris is a fixed-camera 3D game. Three.js is the only world and arena renderer.
+Phaser runs without a renderer for keyboard input, timing and scene lifecycle;
+the shared deterministic simulation and existing saves retain their contracts.
+Legacy 2D URL flags and stored display preferences are ignored.
 
 The 3D scene uses a curated CC0 subset of Kenney's Nature, Fantasy Town,
 Survival, and Mini Characters kits plus original swappable low-poly assemblies
@@ -66,8 +65,7 @@ painted sage terrain, depth-blended teal water, individually colored roofs,
 dormers and pointed towers, rounded character details, cutaway interiors with
 woven rugs, and expanded battle scenery. Soft contact shadows and a restrained
 color grade finish the scene; the HUD uses forest ink, leather and brass.
-The hidden 2D camera stops drawing in 3D mode, ambient creature traces stay near
-the player, and phone-sized displays use a smaller rendering budget. See
+Ambient creature traces stay near the player, and phone-sized displays use a smaller rendering budget. See
 [`docs/art-direction.md`](docs/art-direction.md) for the visual guidelines.
 
 The player and all nine creatures now use original vertex-painted woodland
@@ -84,6 +82,13 @@ distinct local timelines; riders can gather, shoot and cast while seated.
 Wild 3D creatures follow their simulated movement and turn toward travel.
 Animation affects presentation only, with stable reduced-motion poses and
 matching animated shadows.
+
+Movement uses elapsed frame time from startup and after refocusing, with a
+single frame loop for simulation and 3D presentation. The 3D renderer uses
+the interpolated player pose; held walking and sprinting preserve travel time
+across tile boundaries, while d-pad taps remain single-tile moves. Routine
+simulation changes use debounced autosaves and refresh visuals once per frame.
+The minimap caches its terrain layer until travel or landscaping changes it.
 
 Wild encounters remain deterministic but render as a dedicated 3D arena with
 articulated combatants, movement, melee/ranged/magic attacks, companion support,
@@ -238,8 +243,7 @@ loses state.
 
 ### Town buildings and NPC services
 
-Town services are playable rooms in both the primary 3D presentation and the
-2D/Admin fallback. Stand at a named doorway and use the context action (`E`,
+Town services are playable 3D rooms. Stand at a named doorway and use the context action (`E`,
 `Space`, primary click, or the touch action button) to enter; walking across a
 door does not open a menu automatically.
 
@@ -342,12 +346,11 @@ Hosting is **Firebase Hosting**, deployed from **GitHub Actions** (project
 src/
   audio/             Semantic interior soundscape routing and Web Audio lifecycle
   main.ts            Boot: build save layer, load, then start the Phaser game
-  scenes/            Phaser scenes (render state, translate input to intents)
+  scenes/            Shared gameplay orchestration and input intents
   simulation/        Phaser-independent core: state, commands, fixedStep, rng, clock
   config/            Tunable values: platform, versions (balance lands in M1)
   platform/          PWA registration/updates, build info, responsive layout
   persistence/       SaveRepository, IndexedDbSaveRepository, migrations, export/import
-  art/               Procedural placeholder textures (generated at boot)
   ui/                App chrome (status/diagnostics), touch controls
 scripts/             Build-time asset generation (PWA icons)
 tests/unit/          Deterministic unit tests
@@ -355,7 +358,7 @@ public/icons/        Generated original PWA icons
 ```
 
 Design principle: the simulation, content definitions, persistence interfaces,
-and formulas stay **independent of Phaser**. Scenes render state and turn input
+and formulas stay **independent of Phaser**. Three.js renders state; scenes turn input
 into validated commands. All tunable values live in typed config modules — no
 scattered magic numbers.
 

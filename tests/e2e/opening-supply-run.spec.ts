@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { readySupplyRun } from '../helpers/openingJourney';
 import { openApp } from './app';
 import { openMenuTab } from './menu';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 import { inventoryCapacity } from '../../src/simulation/characterProgression';
 import { usedInventorySlots } from '../../src/simulation/gameplayCommands';
 import { RESOURCE_STACK_SIZE } from '../../src/config/balance';
@@ -21,6 +21,7 @@ async function loadFixture(page: Page, fullBag = false) {
     state.inventory.wood = (inventoryCapacity(state) - usedInventorySlots(state)) * RESOURCE_STACK_SIZE;
     expect(usedInventorySlots(state)).toBe(inventoryCapacity(state));
   }
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
@@ -91,7 +92,7 @@ test('3D supply discovery waits through a full bag and reload until a real space
   expect((await saved(page)).onboarding.supplyRun!.blueprintClaimed).toBe(false);
   expect((await saved(page)).carriedBlueprints).toHaveLength(0);
   await page.reload(); await openMenuTab(page, 'Supply Run');
-  await expect(page.getByLabel('Supply run directions and discovery', { exact: true })).toContainText('waiting safely');
+  await expect(page.getByRole('tabpanel', { name: 'Supply Run', exact: true })).toContainText('waiting safely');
   await openMenuTab(page, 'Bag');
   await page.getByRole('button', { name: /^Wood stack,/ }).first().click();
   await page.getByRole('dialog', { name: 'Wood stack actions', exact: true }).getByRole('button', { name: 'Drop', exact: true }).click();

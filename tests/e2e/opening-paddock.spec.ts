@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
 import { openMenuTab } from './menu';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { actOpeningTrust, beginOpeningTrust } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
@@ -40,6 +40,7 @@ async function loadFixture(page: Page, prepare?: (state: GameState) => void) {
   await expect.poll(() => readSavedState(page)).not.toBeNull();
   const state = fixture();
   prepare?.(state);
+  await releaseSaveWriter(page);
   await page.evaluate(async (next) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -60,7 +61,7 @@ test('3D paddock builds, produces with the original Tuftle, collects once and sa
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message));
   const initial = await loadFixture(page);
   await page.getByRole('button', { name: 'Paddock guide', exact: true }).click();
-  await expect(page.getByLabel('Paddock and Tuftle assignment')).toContainText('19 fiber');
+  await expect(page.getByRole('tabpanel', { name: 'Paddock', exact: true })).toContainText('19 fiber');
   await page.getByRole('button', { name: 'Collect paddock supplies', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Paddock supplies collected', exact: true })).toBeDisabled();
   let total = 22; const counts = [8, 2, 1, 1, 1, 1, 1];
@@ -96,7 +97,7 @@ test('3D paddock builds, produces with the original Tuftle, collects once and sa
   await expect(collect).toBeDisabled();
   await page.getByRole('button', { name: 'Bring Tuftle along · Follow', exact: true }).click();
   await expect.poll(async () => (await saved(page)).onboarding.completedMilestoneIds).toContain('return-to-follow');
-  await expect(page.getByLabel('Paddock and Tuftle assignment')).toContainText('Ready to travel together');
+  await expect(page.getByRole('tabpanel', { name: 'Paddock', exact: true })).toContainText('Ready to travel together');
   await page.screenshot({ path: `tmp/opening-paddock-complete-${testInfo.project.name}.png` });
   await page.reload();
   await openMenuTab(page, 'Paddock');
@@ -131,7 +132,7 @@ test('3D paddock recovery preserves output and housing through a broken fence', 
   await page.getByRole('button', { name: 'Paddock guide', exact: true }).click();
   await expect(page.getByRole('button', { name: 'House Tuftle and start Work', exact: true })).toBeEnabled();
   const follow = page.getByRole('button', { name: 'Bring Tuftle along · Follow', exact: true });
-  const [followBox, panelBox] = await Promise.all([follow.boundingBox(), page.getByLabel('Paddock and Tuftle assignment', { exact: true }).boundingBox()]);
+  const [followBox, panelBox] = await Promise.all([follow.boundingBox(), page.getByRole('tabpanel', { name: 'Paddock', exact: true }).boundingBox()]);
   expect(followBox!.y + followBox!.height).toBeLessThanOrEqual(panelBox!.y + panelBox!.height);
   await page.screenshot({ path: `tmp/opening-paddock-repaired-${testInfo.project.name}.png` });
   await follow.click();

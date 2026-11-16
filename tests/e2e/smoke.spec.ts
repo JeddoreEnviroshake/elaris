@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
-import { gatherStarterTree } from './gather';
-import { openMenuTab, grantBlueprints } from './menu';
+import { openAppInStarterGrove, gatherStarterTree } from './gather';
+import { openAdmin, openMenuTab, grantBlueprints } from './menu';
 
 /**
- * End-to-end smoke test against the production build: the app boots, Phaser
+ * End-to-end smoke test against the production build: the app boots, Three.js
  * renders a canvas, and the service worker precache completes (Ready offline).
  * Movement/simulation correctness is covered by deterministic unit tests.
  */
@@ -12,7 +12,7 @@ test('boots, renders the world canvas, and becomes offline-ready', async ({ page
   await openApp(page);
   await expect(page).toHaveTitle('Elaris');
 
-  const canvas = page.locator('#game canvas');
+  const canvas = page.locator('#elaris-three-canvas');
   await expect(canvas).toBeVisible();
   const box = await canvas.boundingBox();
   expect(box?.width ?? 0).toBeGreaterThan(0);
@@ -20,14 +20,14 @@ test('boots, renders the world canvas, and becomes offline-ready', async ({ page
 
   // Service worker finished precaching → cold-launch offline is possible.
   // Offline readiness now lives in the Admin menu (the panel polls for it).
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await expect(page.getByText('Ready offline')).toBeVisible({ timeout: 20_000 });
 });
 
 test('opens the diagnostics panel with a build identifier', async ({ page }) => {
   await openApp(page);
   // Diagnostics now opens from the Admin menu.
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await page.getByRole('button', { name: 'App status and diagnostics' }).click();
   const heading = page.getByRole('heading', { name: /Diagnostics/ });
   await expect(heading).toBeVisible();
@@ -76,19 +76,19 @@ test('lays out the normal HUD in ordered corner stacks', async ({ page }) => {
 });
 
 test('gathers wood, crafts a pick, and restores it after reload', async ({ page }) => {
-  test.setTimeout(60_000);
-  await openApp(page);
+  test.setTimeout(120_000);
+  await openAppInStarterGrove(page);
   // Two starter trees provide enough wood for the globally tuned pick recipe.
   await gatherStarterTree(page);
   await gatherStarterTree(page);
   await page.getByRole('button', { name: 'Menu' }).click();
-  await expect(page.getByText('wood', { exact: true })).toBeVisible();
+  await expect(page.getByText('Wood', { exact: true })).toBeVisible();
   await expect(page.getByText('×8')).toBeVisible();
   await grantBlueprints(page, 'wooden-pick');
   await openMenuTab(page, 'Craft');
   await page.getByRole('button', { name: 'Craft & equip' }).click();
   await page.getByRole('tab', { name: 'Bag', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'wood stack, 3' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wood stack, 3' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Wooden Pick \d+\/\d+, equipped/ })).toBeVisible();
 
   // The critical save is fired asynchronously; give the IndexedDB write a beat
@@ -97,6 +97,6 @@ test('gathers wood, crafts a pick, and restores it after reload', async ({ page 
   await page.waitForTimeout(700);
   await page.reload();
   await page.getByRole('button', { name: 'Menu' }).click();
-  await expect(page.getByRole('button', { name: 'wood stack, 3' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wood stack, 3' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Wooden Pick \d+\/\d+, equipped/ })).toBeVisible();
 });

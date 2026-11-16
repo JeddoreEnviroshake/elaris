@@ -10,11 +10,22 @@ export class SceneFinish {
   readonly stats = {drawCalls:0,triangles:0};
   private readonly composer: EffectComposer;
   private readonly output = new OutputPass();
+  private readonly renderPass: RenderPass;
+  private readonly foregroundPass: RenderPass;
 
-  constructor(private readonly renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+  constructor(private readonly renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera,
+    foreground: { scene: THREE.Scene; camera: THREE.Camera }) {
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 });
     this.composer = new EffectComposer(renderer, target);
-    this.composer.addPass(new RenderPass(scene, camera));
+    this.renderPass = new RenderPass(scene, camera);
+    this.composer.addPass(this.renderPass);
+    // Composite hands into the same graded image, retaining their own depth so
+    // nearby walls cannot slice a tool in half. No extra framebuffer is needed.
+    this.foregroundPass = new RenderPass(foreground.scene, foreground.camera);
+    this.foregroundPass.clear = false;
+    this.foregroundPass.clearDepth = true;
+    this.foregroundPass.enabled = false;
+    this.composer.addPass(this.foregroundPass);
     // Grade linear light in the output pass, before its standard tone mapping.
     // This avoids a separate full-screen pass and its framebuffer bandwidth.
     this.output.material.fragmentShader = this.output.material.fragmentShader.replace(
@@ -28,9 +39,15 @@ export class SceneFinish {
           c*=1.-.2*smoothstep(.12,.65,dot(p,p));
           gl_FragColor=vec4(max(c,vec3(0.)),frame.a);`);
     this.composer.addPass(this.output);
+    // Keep the existing colour-pass budget comparable across views, adding
+    // the hands' draw cost when their foreground pass actually runs.
     scene.onAfterRender = () => {
-      this.stats.drawCalls=renderer.info.render.calls+1;
-      this.stats.triangles=renderer.info.render.triangles+2;
+      this.stats.drawCalls = renderer.info.render.calls + 1;
+      this.stats.triangles = renderer.info.render.triangles + 2;
+    };
+    foreground.scene.onAfterRender = () => {
+      this.stats.drawCalls += renderer.info.render.calls;
+      this.stats.triangles += renderer.info.render.triangles;
     };
   }
 
@@ -38,6 +55,10 @@ export class SceneFinish {
     this.composer.setPixelRatio(this.renderer.getPixelRatio());
     this.composer.setSize(width, height);
   }
+
+  /** Draw through a different camera (first person swaps in a perspective one). */
+  setCamera(camera: THREE.Camera): void { this.renderPass.camera = camera; }
+  setForegroundEnabled(enabled: boolean): void { this.foregroundPass.enabled = enabled; }
 
   render(): void { this.renderer.info.reset(); this.composer.render(); }
   dispose(): void { this.output.dispose(); this.composer.dispose(); }
@@ -62,9 +83,9 @@ export class ContactShadows {
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   }
 
-  update(state: GameState, actors: readonly THREE.Object3D[] = []): void {
+  update(state: GameState, actors: readonly THREE.Object3D[] = [], playerPosition: Pick<GameState['player'], 'x' | 'y'> = state.player): void {
     this.index=0;
-    this.add(state.player.x/TILE_SIZE,state.player.y/TILE_SIZE,.7,.46);
+    this.add(playerPosition.x/TILE_SIZE,playerPosition.y/TILE_SIZE,.7,.46);
     for(const node of state.resourceNodes) if(node.hp>0) this.add(node.x/TILE_SIZE,node.y/TILE_SIZE,
       node.kind==='tree'?1.35:node.kind==='stone'||node.kind==='metal'?1.25:.65,node.kind==='tree'?.8:.55);
     for(const creature of state.wildCreatures) this.add(creature.x/TILE_SIZE,creature.y/TILE_SIZE,.95,.65);

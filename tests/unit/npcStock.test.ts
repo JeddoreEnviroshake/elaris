@@ -28,6 +28,7 @@ import { SELL_PRICES, BLACKSMITH_UPGRADE_COSTS, WORLD_BLACKSMITH_MAX_RANK } from
 import { beginPlayerDefeat } from '../../src/simulation/survivalCycle';
 import { isBagOverweight } from '../../src/simulation/bagWeight';
 import { npcServiceModel } from '../../src/presentation/npcServiceModel';
+import { liveAreaSites, siteRestockIndex, type SiteDefinition } from '../../src/simulation/sites';
 
 function rich(coins = 100_000): GameState {
   const state = createInitialState(4321);
@@ -253,6 +254,19 @@ describe('arcane study', () => {
 });
 
 describe('tavern rumour', () => {
+  function searchAllNearbySites(state: GameState): SiteDefinition[] {
+    const sites: SiteDefinition[] = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      sites.push(...liveAreaSites(state, `${state.currentArea.x + dx},${state.currentArea.y + dy}`));
+    }
+    for (const site of sites) state.siteProgress[site.id] = {
+      restockIndex: siteRestockIndex(state),
+      searched: site.containers.map(container => container.index),
+      guardsDefeated: site.guardPosts.length,
+    };
+    return sites;
+  }
+
   it('names a bearing to an unopened container', () => {
     const state = rich();
     const result = buyRumour(state);
@@ -261,12 +275,39 @@ describe('tavern rumour', () => {
     expect(state.coins).toBe(100_000 - RUMOUR_COST);
   });
 
-  it('refuses without charging once every container here is opened', () => {
+  it('refuses without charging once local caches and all nearby site containers are searched', () => {
     const state = rich();
     for (const container of state.containers) container.opened = true;
+    expect(searchAllNearbySites(state).length).toBeGreaterThan(0);
     expect(rumourBlockedReason(state)).not.toBeNull();
     expect(buyRumour(state).ok).toBe(false);
     expect(state.coins).toBe(100_000);
+  });
+
+  it('still sells a rumour when one nearby site crate remains after the town caches are opened', () => {
+    const state = rich();
+    for (const container of state.containers) container.opened = true;
+    const [site] = searchAllNearbySites(state);
+    expect(site).toBeDefined();
+    state.siteProgress[site!.id]!.searched.pop();
+    expect(rumourBlockedReason(state)).toBeNull();
+    const result = buyRumour(state);
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/with 1 crate still sealed/);
+    expect(state.coins).toBe(100_000 - RUMOUR_COST);
+  });
+
+  it('offers rumours again when exhausted field sites refill', () => {
+    const state = rich();
+    for (const container of state.containers) container.opened = true;
+    expect(searchAllNearbySites(state).length).toBeGreaterThan(0);
+    expect(buyRumour(state).ok).toBe(false);
+    expect(state.coins).toBe(100_000);
+    const restock = siteRestockIndex(state);
+    while (siteRestockIndex(state) === restock) state.tick += 600;
+    expect(rumourBlockedReason(state)).toBeNull();
+    expect(buyRumour(state).ok).toBe(true);
+    expect(state.coins).toBe(100_000 - RUMOUR_COST);
   });
 });
 

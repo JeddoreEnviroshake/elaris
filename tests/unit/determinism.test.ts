@@ -114,6 +114,10 @@ function reorderedCopy(state: GameState): GameState {
       'quillfinch-quill': state.inventory['quillfinch-quill'],
       'mistmoth-scale': state.inventory['mistmoth-scale'],
       'slingtail-stone': state.inventory['slingtail-stone'],
+      'recall-flare': state.inventory['recall-flare'], 'vault-key': state.inventory['vault-key'],
+      'sealed-satchel': state.inventory['sealed-satchel'], 'ancient-alloy': state.inventory['ancient-alloy'],
+      'construct-core': state.inventory['construct-core'], 'arcane-dust': state.inventory['arcane-dust'],
+      lens: state.inventory.lens, clockwork: state.inventory.clockwork, 'scrap-iron': state.inventory['scrap-iron'],
     },
     inventoryStacks: structuredClone(state.inventoryStacks),
     expeditions: state.expeditions.map((expedition) => ({
@@ -132,6 +136,8 @@ function reorderedCopy(state: GameState): GameState {
     blueprintDrops: state.blueprintDrops.map((drop) => ({ ...drop })),
     toolDrops: state.toolDrops.map((drop) => ({ ...drop, tool: { ...drop.tool } })),
     blueprintProgress: structuredClone(state.blueprintProgress),
+    activeSearch: state.activeSearch ? { ...state.activeSearch } : null,
+    siteProgress: structuredClone(state.siteProgress),
     coins: state.coins,
     resourcesSold: state.resourcesSold,
     firstTamedSpeciesIds: [...state.firstTamedSpeciesIds],
@@ -268,6 +274,17 @@ describe('canonical deterministic state hashing', () => {
     expect(() => canonicalizeGameState(invalid)).toThrowError(
       `Unsupported canonical value at $.invalid: ${reason}`,
     );
+  });
+
+  it('hashes a state mid-search and changes as the search advances', async () => {
+    const state = createInitialState(808);
+    state.activeSearch = { siteId: '1,0:site-1', containerIndex: 2, startX: 400, startY: 512, hpAtStart: 20, completesAtTick: 180 };
+    state.siteProgress = { '1,0:site-1': { restockIndex: 0, searched: [0, 1], guardsDefeated: 1 } };
+    expect(() => canonicalizeGameState(state)).not.toThrow();
+    await expect(hashGameState(reorderedCopy(state))).resolves.toBe(await hashGameState(state));
+    const later = structuredClone(state);
+    later.siteProgress['1,0:site-1']!.searched.push(2);
+    expect(await hashGameState(later)).not.toBe(await hashGameState(state));
   });
 
   it('clearly rejects cyclic objects', () => {

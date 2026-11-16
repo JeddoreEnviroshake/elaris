@@ -105,6 +105,15 @@ export const STORM_CACHE_BLUEPRINT_POOL: readonly string[] = pool(
 );
 
 /**
+ * What a site's strongbox may carry: the workshop and haulage pieces a base
+ * needs once it starts spending salvage. Capped at Rare by the source ceiling.
+ */
+export const SITE_BLUEPRINT_POOL: readonly string[] = pool(
+  'workbench', 'furnace', 'cart-dock', 'warehouse', 'logistics-hub', 'stone-yard',
+  'field-cache', 'turret', 'air-purifier', tier('reinforced-'),
+);
+
+/**
  * A species drops the blueprints for the utilities it can work at.
  *
  * Derived from the species' own `work.eligibleWorksites` rather than tabled
@@ -129,7 +138,7 @@ export const BLUEPRINT_DROPPING_SPECIES: readonly SpeciesId[] = CREATURE_DEFINIT
  * long you gather, because the answer to wanting one is to go somewhere
  * dangerous rather than to keep swinging.
  */
-export type BlueprintSourceKind = 'node' | 'raider' | 'creature' | 'storm-cache' | 'cellar';
+export type BlueprintSourceKind = 'node' | 'raider' | 'creature' | 'storm-cache' | 'cellar' | 'site';
 
 export const SOURCE_QUALITY_CEILING: Readonly<Record<BlueprintSourceKind, BlueprintQuality>> = {
   node: 'rare',
@@ -141,6 +150,9 @@ export const SOURCE_QUALITY_CEILING: Readonly<Record<BlueprintSourceKind, Bluepr
   // below Legendary instead of owning a slice — which is also what keeps a
   // player who never fights a raider from being locked out of the metal tier.
   cellar: 'epic',
+  // A strongbox is the reward for a run, not for surviving a storm: it can hand
+  // over a Rare but never an Epic, which stays with raiders and creatures.
+  site: 'rare',
 };
 
 const QUALITY_RANK: Readonly<Record<BlueprintQuality, number>> = {
@@ -165,6 +177,8 @@ export function sourceBlueprintPool(
         ? (context.speciesId ? creatureBlueprintPool(context.speciesId) : [])
         : kind === 'storm-cache'
           ? STORM_CACHE_BLUEPRINT_POOL
+          : kind === 'site'
+          ? SITE_BLUEPRINT_POOL
           // The cellar's pool *is* its ceiling — see SOURCE_QUALITY_CEILING.
           : ceilingBlueprintPool('cellar');
   return base.filter((id) => withinCeiling(id, SOURCE_QUALITY_CEILING[kind]));

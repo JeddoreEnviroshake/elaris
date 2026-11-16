@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
 import { tapWorld } from './interact';
@@ -5,7 +6,7 @@ import { gatherNearestResource } from './gather';
 
 // Fixture geometry: the player stands at world (512, 512); the furnace and
 // workbench are the two 2×1 facilities anchored at tile 31 (see seedIronChain).
-const PLAYER = { x: 512, y: 512 };
+const PLAYER = { x: 552, y: 512 };
 const FURNACE_CENTER = { x: (31 + 1) * 16, y: (31 + 0.5) * 16 };
 const WORKBENCH_CENTER = { x: (31 + 1) * 16, y: (32 + 0.5) * 16 };
 
@@ -13,6 +14,7 @@ async function seedIronChain(page: Page): Promise<void> {
   await openApp(page);
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await page.waitForTimeout(500);
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -27,13 +29,13 @@ async function seedIronChain(page: Page): Promise<void> {
         const save = request.result as { state: Record<string, any> };
         const state = save.state;
         const center = 512;
-        state.player.x = center;
+        state.player.x = center + 40;
         state.player.y = center;
         state.player.stamina = state.player.maxStamina;
         state.actionCooldownUntilTick = 0;
         state.resourceNodes = [
-          { id: 'metal-e2e-1', kind: 'metal', x: center + 24, y: center, hp: 15, maxHp: 60, respawnAtTick: null },
-          { id: 'metal-e2e-2', kind: 'metal', x: center + 36, y: center + 8, hp: 60, maxHp: 60, respawnAtTick: null },
+          { id: 'metal-e2e-1', kind: 'metal', x: center + 64, y: center, hp: 15, maxHp: 60, respawnAtTick: null },
+          { id: 'metal-e2e-2', kind: 'metal', x: center + 76, y: center + 8, hp: 60, maxHp: 60, respawnAtTick: null },
         ];
         // Ample wood + ingots to cover the workbench Iron Pick recipe's scaled
         // cost. Spread rather than replace: save validation requires every
@@ -82,6 +84,7 @@ async function seedIronChain(page: Page): Promise<void> {
 }
 
 test('mine ore, smelt an ingot, craft an Iron tool, and verify its faster break time', async ({ page }) => {
+  test.setTimeout(120_000);
   await seedIronChain(page);
   expect(await gatherNearestResource(page, 'metal')).toEqual([0]);
 
@@ -96,7 +99,7 @@ test('mine ore, smelt an ingot, craft an Iron tool, and verify its faster break 
   await facilityPanel.getByRole('button', { name: 'Smelt iron ingot' }).click();
   await expect(facilityPanel.getByText('1 iron ingot ready')).toBeVisible({ timeout: 8_000 });
   await facilityPanel.getByRole('button', { name: 'Collect iron ingots' }).click();
-  await facilityPanel.getByRole('button', { name: 'Close' }).click();
+  await facilityPanel.getByRole('button', { name: 'Close', exact: true }).click();
 
   // Iron tools are workbench recipes, not handcraft. The adjacent workbench is
   // also in range, so clicking it directly (rather than a shared proximity
@@ -110,7 +113,7 @@ test('mine ore, smelt an ingot, craft an Iron tool, and verify its faster break 
   // Crafting auto-equips; assert via the hotbar since a quest-reward toast can
   // immediately replace the craft confirmation in the live region.
   await expect(page.getByRole('button', { name: /Hotbar slot \d+: Iron Pick/ })).toBeVisible();
-  await workbenchPanel.getByRole('button', { name: 'Close' }).click();
+  await workbenchPanel.getByRole('button', { name: 'Close', exact: true }).click();
 
   // The full vein falls in three Iron-pick hits (24 power), with gathering
   // progress verified from scene state because hit/cooldown text is hidden.

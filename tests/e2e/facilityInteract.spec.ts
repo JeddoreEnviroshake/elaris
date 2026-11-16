@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { tapCanvasCenter } from './interact';
@@ -15,6 +16,7 @@ test('clicking an in-range workbench opens its recipe panel', async ({ page }) =
   // floored workbench on the player's own tile.
   await page.waitForTimeout(500);
 
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -58,7 +60,7 @@ test('clicking an in-range workbench opens its recipe panel', async ({ page }) =
   await page.getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('tab', { name: 'Craft', exact: true }).click();
   await expect(page.getByText(/Best enclosed area: .*Workbench target: Shelter \(8 tiles\)/)).toBeVisible();
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
 
   // Clicking the workbench itself opens its focused panel.
   await tapCanvasCenter(page);

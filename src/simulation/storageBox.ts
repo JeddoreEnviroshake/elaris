@@ -5,7 +5,11 @@ import type {
 
 export const STORAGE_RESOURCE_IDS: readonly ResourceId[] = [
   'wood', 'stone', 'fiber', 'iron-ore', 'iron-ingot', 'taming-snare', 'berry', 'arrow', 'cloth-mask',
+  // Salvage is hauled home to be stored and spent, so every box takes it.
+  'scrap-iron', 'clockwork', 'lens', 'arcane-dust', 'construct-core', 'ancient-alloy', 'sealed-satchel', 'vault-key', 'recall-flare',
 ];
+
+const SALVAGE_STORAGE_IDS = ['scrap-iron', 'clockwork', 'lens', 'arcane-dust', 'construct-core', 'ancient-alloy', 'sealed-satchel', 'vault-key', 'recall-flare'] as const;
 
 export interface StorageBoxContents {
   inventory: InventoryState;
@@ -36,6 +40,7 @@ export function storageBoxContents(box: BuildingState): StorageBoxContents {
   box.storage.berry ??= 0;
   box.storage.arrow ??= 0;
   box.storage['cloth-mask'] ??= 0;
+  for (const salvage of SALVAGE_STORAGE_IDS) box.storage[salvage] ??= 0;
   box.storageStacks ??= {};
   box.storedTools ??= [];
   box.storedBlueprints ??= [];

@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 
@@ -13,6 +14,7 @@ test('a character past the last safe level finds Elaris in ruins', async ({ page
   // The initial snapshot is written on first load; give it a beat, then age the
   // character past the level that keeps the town standing.
   await page.waitForTimeout(500);
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);

@@ -17,6 +17,8 @@ import { BEACON_COLOR, drawBeaconMarker } from './mapMarkers';
 import { regionalIdentityForArea } from '../content/regions';
 import { hasDiscoveredRegionalLandmark, regionalContractView, regionalMasteryView } from '../simulation/regionalProgress';
 import type { WaystoneTravelResult } from '../simulation/waystones';
+import { siteViewsForArea } from '../presentation/siteViews';
+import { drawSiteMarker } from './mapMarkers';
 
 const MAP_SIZE = 112;
 /** Outer width of the mini map panel: canvas + 5px padding + the 2px elaris-panel border. */
@@ -54,6 +56,8 @@ export class WorldNavigator {
   private readonly gardenButton: HTMLButtonElement;
   private readonly regionalActivity: HTMLDivElement;
   private lastDrawAt = 0;
+  private terrainLayer: HTMLCanvasElement | null = null;
+  private terrainSignature = '';
   private collapsed = false;
   private questsExpanded = true;
   private battleMode = false;
@@ -385,9 +389,21 @@ export class WorldNavigator {
     this.worldMap.show(this.worldMapButton);
   };
 
-  private draw(): void {
-    const ctx = this.context;
-    ctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
+  /** Rebuild static terrain only when the area or player landscaping changes. */
+  private cachedTerrain(): HTMLCanvasElement {
+    const area = this.state.currentArea;
+    const landscape = this.state.buildings.filter((building) => building.definitionId === 'water'
+      || building.definitionId === 'wood-bridge' || building.definitionId === 'stone-bridge');
+    const signature = JSON.stringify([this.state.seed, area.key, area.seed, area.theme,
+      area.landClearingTiles, landscape.map((building) => [building.definitionId, building.tileX, building.tileY, building.rotated])]);
+    if (this.terrainLayer && signature === this.terrainSignature) return this.terrainLayer;
+    const layer = this.terrainLayer ?? document.createElement('canvas');
+    layer.width = MAP_SIZE;
+    layer.height = MAP_SIZE;
+    const ctx = layer.getContext('2d');
+    if (!ctx) throw new Error('Mini map terrain context is unavailable');
+    this.terrainLayer = layer;
+    this.terrainSignature = signature;
     ctx.fillStyle = areaPalette(this.state.currentArea.theme).minimap;
     ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
 
@@ -418,6 +434,13 @@ export class WorldNavigator {
       ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(MAP_SIZE, p); ctx.stroke();
     }
 
+    return layer;
+  }
+
+  private draw(): void {
+    const ctx = this.context;
+    ctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
+    ctx.drawImage(this.cachedTerrain(), 0, 0);
     for (const node of this.state.resourceNodes) this.drawNode(node);
     for (const building of this.state.buildings) {
       ctx.fillStyle = building.definitionId === 'water' ? '#4a9ca0'
@@ -437,6 +460,7 @@ export class WorldNavigator {
     for (const raider of this.state.raiders) this.dot(raider.x, raider.y, '#ff4136', 3);
     this.drawWaterTemple();
     this.drawRegionalLandmark();
+    this.drawSites();
     this.drawDeathBeacon();
     const target = openingGardenAvailable(this.state) ? openingGardenTarget(this.state) : supplyRunTarget(this.state);
     if (target) {
@@ -482,6 +506,21 @@ export class WorldNavigator {
     ctx.stroke();
     ctx.fillStyle = '#62ddd5';
     ctx.fillRect(x - 1, y, 2, 4);
+  }
+
+  /** Discovered field sites in this region, each with its refill state. */
+  private drawSites(): void {
+    for (const view of siteViewsForArea(this.state)) {
+      if (!view.discovered) continue;
+      const x = Math.round(view.x / WORLD_PX * MAP_SIZE);
+      const y = Math.round(view.y / WORLD_PX * MAP_SIZE);
+      drawSiteMarker(this.context, x, y, 4, view.color, view.searchedCount >= view.containerCount);
+      this.context.fillStyle = '#f5ecd6';
+      this.context.font = '700 7px system-ui, sans-serif';
+      this.context.textAlign = 'center';
+      this.context.textBaseline = 'top';
+      this.context.fillText(view.status, x, y + 6);
+    }
   }
 
   private drawRegionalLandmark(): void {

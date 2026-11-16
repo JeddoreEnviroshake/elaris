@@ -430,6 +430,7 @@ describe('danger exposure and Bed respawn', () => {
       'tuftle-down': 0, 'craghopper-shell': 0, 'stag-antler': 0, 'snarlfox-pelt': 0,
       'masonmole-claw': 0, 'boar-tusk': 0, 'quillfinch-quill': 0, 'mistmoth-scale': 0,
       'slingtail-stone': 0,
+      'scrap-iron': 0, 'clockwork': 0, 'lens': 0, 'arcane-dust': 0, 'construct-core': 0, 'ancient-alloy': 0, 'sealed-satchel': 0, 'vault-key': 0, 'recall-flare': 0,
     });
     expect(state.inventoryStacks).toEqual({
       wood: [], stone: [], fiber: [], 'iron-ore': [], 'iron-ingot': [],
@@ -438,6 +439,7 @@ describe('danger exposure and Bed respawn', () => {
       'tuftle-down': [], 'craghopper-shell': [], 'stag-antler': [], 'snarlfox-pelt': [],
       'masonmole-claw': [], 'boar-tusk': [], 'quillfinch-quill': [], 'mistmoth-scale': [],
       'slingtail-stone': [],
+      'scrap-iron': [], 'clockwork': [], 'lens': [], 'arcane-dust': [], 'construct-core': [], 'ancient-alloy': [], 'sealed-satchel': [], 'vault-key': [], 'recall-flare': [],
     });
     expect(state.tools).toEqual([]);
     expect(state.equippedToolId).toBeNull();

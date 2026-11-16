@@ -1,8 +1,10 @@
+import { tapWorld } from './interact';
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
 import { gatherStarterTree, openAppInStarterGrove } from './gather';
 import { buildPalette, openMenuTab, grantBlueprints } from './menu';
-import { expectSavedState, readSavedState } from './save';
+import { releaseSaveWriter, expectSavedState, readSavedState } from './save';
+import { blueprintsGrantedAtLevel } from '../../src/content/blueprintGates';
 
 /** Build is a section of the merged Craft tab; the palette itself is scoped. */
 async function openBuildTab(page: Page): Promise<void> {
@@ -32,6 +34,7 @@ async function loadRichBuilder(page: Page): Promise<void> {
 }
 
 async function patchRichSave(page: Page): Promise<void> {
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -76,7 +79,8 @@ test('Blueprints masks what is undiscovered and only known ones reach the Build 
   await openApp(page);
   await openMenuTab(page, 'Blueprints');
   const blueprints = page.getByLabel('Blueprints');
-  await expect(blueprints.getByText(/0\/\d+ blueprints known/)).toBeVisible();
+  const initialKnown = blueprintsGrantedAtLevel(1).length;
+  await expect(blueprints.getByText(new RegExp(`^${initialKnown}/\\d+ blueprints known$`))).toBeVisible();
 
   // Undiscovered entries give up their names, and nothing is for sale.
   await expect(page.getByRole('button', { name: /^Wood Wall,/ })).toBeHidden();
@@ -87,7 +91,7 @@ test('Blueprints masks what is undiscovered and only known ones reach the Build 
 
   await grantBlueprints(page, 'field-cache');
   await openMenuTab(page, 'Blueprints');
-  await expect(blueprints.getByText(/1\/\d+ blueprints known/)).toBeVisible();
+  await expect(blueprints.getByText(new RegExp(`^${initialKnown + 1}/\\d+ blueprints known$`))).toBeVisible();
   await expect(page.getByRole('button', { name: /^Storage Box \(small\),/ })).toBeVisible();
   await openBuildTab(page);
   // Known, so it is listed — and still disabled, because the bag lacks wood.
@@ -102,15 +106,14 @@ test('R rotates and a world click only aims the ghost until Place is pressed', a
 
   const place = page.getByRole('button', { name: 'Place' });
   await expect(place).toBeEnabled();
-  const canvas = page.locator('#game canvas');
-  const box = await canvas.boundingBox();
-  if (!box) throw new Error('Game canvas is not visible');
-  const zoom = box.width > 700 ? 3 : 2;
 
   await page.keyboard.press('r');
 
   // Aiming is not building: the click moves the 1x2 ghost and spends nothing.
-  await page.mouse.click(box.x + box.width / 2 + 16 * zoom, box.y + box.height / 2 + 24 * zoom);
+  await tapWorld(page, {x:81.5*16,y:81.5*16}, {x:80*16,y:80*16});
+  await expect(place).toBeDisabled();
+  await tapWorld(page, {x:80.5*16,y:81.5*16}, {x:80*16,y:80*16});
+  await expect(place).toBeEnabled();
   await expect(place).toBeVisible();
   expect((await readSavedState(page))!.buildings.some((b) => b.definitionId === 'workbench')).toBe(false);
 
@@ -179,12 +182,8 @@ test('tapping the d-pad walks the ghost up-screen before Place commits it', asyn
 
   // The pad rests 16px in and 32px up from the corner with a 56px radius; the
   // up arrow sits near the top of that circle.
-  const viewport = page.viewportSize();
-  if (!viewport) throw new Error('No viewport');
-  const centerX = 16 + 56;
-  const centerY = viewport.height - (32 + 56);
   for (let taps = 0; taps < 3; taps += 1) {
-    await page.mouse.click(centerX, centerY - 40);
+    await page.locator('[data-dpad-arrow="up"]').click();
   }
   await page.getByRole('button', { name: 'Place' }).click();
 

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { DEFAULT_WORLD_SEED } from '../../src/config/platform';
 import { beginOpeningTrust, actOpeningTrust, nameOpeningCompanion } from '../../src/simulation/onboarding';
@@ -22,6 +22,7 @@ test('3D assisted harvest shows the partner contribution and saves shelter knowl
   state.gameBalance.objects.plant.yieldMax = 4;
   state.gameBalance.objects.plant.maxHp = 1;
   state.resourceNodes = [{ id: 'assisted-plant', kind: 'plant', x: state.player.x + 16, y: state.player.y, hp: 1, maxHp: 1, respawnAtTick: null }];
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);

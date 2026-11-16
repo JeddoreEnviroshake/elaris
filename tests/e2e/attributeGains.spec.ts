@@ -1,3 +1,4 @@
+import { openAdmin } from './menu';
 import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 
@@ -9,7 +10,7 @@ import { openApp } from './app';
  */
 test('edits the per-point value an attribute grants', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await page.getByRole('tab', { name: 'Global Values' }).click();
 
   const speed = page.locator('[data-testid="admin-attribute-gains-speed"]');
@@ -32,7 +33,7 @@ test('edits the per-point value an attribute grants', async ({ page }) => {
  */
 test('tunes health regeneration in decimals', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Admin' }).click();
+  await openAdmin(page);
   await page.getByRole('tab', { name: 'Global Values' }).click();
 
   const regen = page.locator('[data-testid="admin-attribute-gains-healthRegen"]');

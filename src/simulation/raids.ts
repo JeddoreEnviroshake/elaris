@@ -12,6 +12,7 @@ import { creditCoins } from './coins';
 import { rollRaiderBlueprint } from './blueprintFinds';
 import { blueprintWaveBonus, effectiveAggroRangePx } from './blueprintHeat';
 import { createRng } from './rng';
+import { currentSiteProgress, ensureSiteProgress, liveAreaSites } from './sites';
 import { snarlfoxDetectionMultiplierBps } from './creatureRoles';
 import { rangedDamageBonus } from './characterProgression';
 import {
@@ -739,10 +740,13 @@ export function advanceRoamers(state: GameState): RaidAdvanceResult {
   let changed = false;
   if (!areaAcceptsRoamers(state)) return { changed };
   if (spawnRoamersIfShort(state)) changed = true;
+  if (spawnSiteGuardsIfShort(state)) changed = true;
 
   const balance = state.gameBalance.defense;
   const safetyBps = snarlfoxDetectionMultiplierBps(state, state.player.x, state.player.y);
-  const leashSq = (balance.roamerLeashTiles * TILE_SIZE) ** 2;
+  const roamerLeashSq = (balance.roamerLeashTiles * TILE_SIZE) ** 2;
+  // Guards hold a shorter tether: they defend a ruin, they do not hunt a region.
+  const guardLeashSq = (state.gameBalance.outlands.guardLeashTiles * TILE_SIZE) ** 2;
   const huntable = playerIsHuntable(state);
 
   // Copied so defeat can stop hostility immediately without carrying on
@@ -751,6 +755,7 @@ export function advanceRoamers(state: GameState): RaidAdvanceResult {
     if (!roamer.roaming) continue;
     const definition = leveledRaiderDefinition(state, roamer);
     const home = { x: roamer.homeX ?? roamer.x, y: roamer.homeY ?? roamer.y };
+    const leashSq = roamer.siteId ? guardLeashSq : roamerLeashSq;
     const leashed = squaredDistance(roamer.x, roamer.y, home.x, home.y) > leashSq;
     // Per kind, so a Drifter is something to walk past and a Poacher something
     // that comes for you. The zone stays at its base size however high the
@@ -788,7 +793,8 @@ export function advanceRoamers(state: GameState): RaidAdvanceResult {
 function spawnRoamersIfShort(state: GameState): boolean {
   const balance = state.gameBalance.defense;
   if (ROAMER_KIND_IDS.length === 0) return false;
-  const alive = state.raiders.filter((raider) => raider.roaming).length;
+  // Site guards are their own population: they never use up the roamer quota.
+  const alive = state.raiders.filter((raider) => raider.roaming && !raider.siteId).length;
   if (alive >= balance.roamersPerArea) return false;
   if (state.tick % Math.max(1, balance.roamerRespawnTicks) !== 0) return false;
 
@@ -827,6 +833,60 @@ function spawnRoamersIfShort(state: GameState): boolean {
   });
   state.nextEntityId += 1;
   return true;
+}
+
+/** Phase 1 guards are existing kinds, posted in this order around each site. */
+const SITE_GUARD_KINDS: readonly RaiderKindId[] = ['poacher', 'drifter'];
+/** How often guard posts are checked, in ticks: once a second is plenty for a post. */
+const SITE_GUARD_CHECK_TICKS = 60;
+
+/**
+ * Keep every live site in the area guarded: `guardsPerSite` less the guards
+ * already killed this refill, less those standing. Killed guards therefore come
+ * back with the loot and never before. A post the player is standing near is
+ * skipped rather than filled in their face; it fills once they step away.
+ */
+function spawnSiteGuardsIfShort(state: GameState): boolean {
+  if (state.tick % SITE_GUARD_CHECK_TICKS !== 0) return false;
+  const perSite = Math.max(0, Math.floor(state.gameBalance.outlands.guardsPerSite));
+  if (perSite === 0) return false;
+  const minimumDistance = widestRoamerAggroPx(state) + TILE_SIZE * 2;
+  let changed = false;
+  for (const site of liveAreaSites(state)) {
+    const wanted = perSite - currentSiteProgress(state, site.id).guardsDefeated;
+    let standing = state.raiders.filter((raider) => raider.siteId === site.id).length;
+    for (let slot = standing; slot < wanted; slot += 1) {
+      const post = site.guardPosts[slot % site.guardPosts.length]!;
+      if (squaredDistance(post.x, post.y, state.player.x, state.player.y) < minimumDistance * minimumDistance) continue;
+      const kindId = SITE_GUARD_KINDS[slot % SITE_GUARD_KINDS.length]!;
+      // A level above the ground it stands on: a guarded site is the harder
+      // fight in its area, which is what the loot is paying for.
+      const level = Math.min(
+        Math.max(1, Math.floor(state.gameBalance.world.maxEnemyLevel)),
+        spawnLevel(state.currentArea.key, post.x, post.y, state.gameBalance.world) + 1,
+      );
+      const definition = leveledRaiderDefinition(state, { kindId, level });
+      state.raiders.push({
+        id: `site-guard-${state.nextEntityId}`,
+        kindId,
+        x: post.x,
+        y: post.y,
+        hp: definition.maxHp,
+        maxHp: definition.maxHp,
+        level,
+        targetBuildingId: null,
+        nextAttackTick: state.tick + definition.attackCooldownTicks,
+        roaming: true,
+        homeX: post.x,
+        homeY: post.y,
+        siteId: site.id,
+      });
+      state.nextEntityId += 1;
+      standing += 1;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -873,6 +933,8 @@ export function damageRaider(state: GameState, raider: RaiderState, amount: numb
   const bounty = raiderBounty(definition);
   const index = state.raiders.indexOf(raider);
   if (index >= 0) state.raiders.splice(index, 1);
+  // A fallen guard stays fallen until the site refills.
+  if (raider.siteId) ensureSiteProgress(state, raider.siteId).guardsDefeated += 1;
   // Loot lands on the ground rather than in the bag: a kill during a fight must
   // never fail because the player was carrying too much to pick it up yet.
   // Loot scales with the level that made the fight longer, the same way the

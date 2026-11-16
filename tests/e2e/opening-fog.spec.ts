@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openApp } from './app';
 import { openMenuTab } from './menu';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { actOpeningTrust, beginOpeningTrust } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
@@ -35,6 +35,7 @@ function fogFixture() {
 }
 
 async function putFixture(page: Page, state: GameState) {
+  await releaseSaveWriter(page);
   await page.evaluate(async (fixture) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -131,6 +132,6 @@ test('3D fog protection text fits and a broken wall explains exposure', async ({
   await expect(timer).toHaveAttribute('aria-label', /Poison fog.*exposed/);
   await openMenuTab(page, 'Shelter');
   await expect(page.getByLabel('First fog lesson')).toContainText('You are exposed');
-  await expect(page.getByLabel('Shelter checklist and layout')).toContainText(`Close the north edge at X ${wall.tileX}, Y ${wall.tileY}`);
+  await expect(page.getByRole('tabpanel', { name: 'Shelter', exact: true })).toContainText(`Close the north edge at X ${wall.tileX}, Y ${wall.tileY}`);
   await page.screenshot({ path: `tmp/opening-fog-broken-wall-${testInfo.project.name}.png` });
 });

@@ -400,6 +400,23 @@ export function validateGameBalance(balance: GameBalanceState): string | null {
     + blueprints.stormCacheTierWeights.epic + blueprints.stormCacheTierWeights.legendary;
   if (cacheWeightTotal <= 0) return 'Arcane cache tier weights cannot all be zero';
 
+  const outlands = balance.outlands;
+  if (!outlands) return 'Field site values are missing';
+  for (const [label, value] of [
+    ['Cycles between refills', outlands.restockCycles],
+    ['Search ticks', outlands.searchTicks],
+    ['Strongbox search ticks', outlands.strongboxSearchTicks],
+    ['Guard leash tiles', outlands.guardLeashTiles],
+  ] as const) if (!positiveInteger(value)) return `${label} must be a positive whole number`;
+  for (const [label, value] of [
+    ['Sites per area', outlands.sitesPerArea],
+    ['Guards per site', outlands.guardsPerSite],
+    ['Danger bonus rolls', outlands.dangerBonusRolls],
+  ] as const) if (!nonNegativeInteger(value)) return `${label} must be a non-negative whole number`;
+  if (!nonNegativeInteger(outlands.strongboxBlueprintBps) || outlands.strongboxBlueprintBps > 10_000) {
+    return 'Strongbox blueprint odds must be a whole number of basis points from 0 to 10000';
+  }
+
   const world = balance.world;
   for (const [label, value] of [
     ['Tiles per level band', world.levelBandTiles],

@@ -1,3 +1,4 @@
+import { releaseSaveWriter } from './save';
 import { expect, test, type Page } from '@playwright/test';
 import { openApp, waitForDebugHandles } from './app';
 
@@ -26,6 +27,7 @@ async function seedRoamer(page: Page, offsetX: number, level: number): Promise<v
   await openApp(page);
   await waitForDebugHandles(page);
   await page.evaluate(async () => { await (globalThis as any).__controller.flushAndRelease(); });
+  await releaseSaveWriter(page);
   await page.evaluate(async ({ player, offset, roamerLevel }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -72,8 +74,8 @@ async function readRoamer(page: Page): Promise<{ x: number; level: number; plate
     const scene = (globalThis as any).__game.scene.getScene('world');
     const roamer = scene.state.raiders.find((candidate: any) => candidate.id === 'roamer-level-e2e');
     if (!roamer) return null;
-    const plate = scene.levelPlates.get('roamer-level-e2e');
-    return { x: roamer.x, level: roamer.level, plate: plate ? plate.text : null };
+    const plate = (globalThis as any).__renderer3d.raiderVisuals.get('roamer-level-e2e')?.rig.root.getObjectByName('level-plate');
+    return { x: roamer.x, level: roamer.level, plate: plate ? `Lv ${plate.userData.level}` : null };
   });
 }
 

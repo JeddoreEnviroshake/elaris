@@ -121,7 +121,16 @@ export type CreatureTrophyId =
   | 'tuftle-down' | 'craghopper-shell' | 'stag-antler' | 'snarlfox-pelt'
   /** The homestead-defence roster's trophies; see CREATURE_DEFINITIONS. */
   | 'masonmole-claw' | 'boar-tusk' | 'quillfinch-quill' | 'mistmoth-scale' | 'slingtail-stone';
-export type ResourceId = GatherableResourceId | CraftedSupplyId | CreatureTrophyId;
+/**
+ * Salvage: the material family found only in the field, at guarded sites that
+ * refill (see content/sites). Nothing at a base produces any of these — no
+ * facility, worker or expedition — which is the whole reason to leave.
+ * Sealed Satchel, Vault Key and Recall Flare are unused until later phases.
+ */
+export type SalvageId =
+  | 'scrap-iron' | 'clockwork' | 'lens' | 'arcane-dust' | 'construct-core' | 'ancient-alloy'
+  | 'sealed-satchel' | 'vault-key' | 'recall-flare';
+export type ResourceId = GatherableResourceId | CraftedSupplyId | CreatureTrophyId | SalvageId;
 export type BagItemId = ResourceId;
 export type MaterialId = GatherableResourceId | 'iron';
 export type ResourceNodeKind = 'tree' | 'stone' | 'metal' | 'plant' | 'berry-bush';
@@ -150,6 +159,15 @@ export interface InventoryState {
   'quillfinch-quill': number;
   'mistmoth-scale': number;
   'slingtail-stone': number;
+  'scrap-iron': number;
+  'clockwork': number;
+  'lens': number;
+  'arcane-dust': number;
+  'construct-core': number;
+  'ancient-alloy': number;
+  'sealed-satchel': number;
+  'vault-key': number;
+  'recall-flare': number;
 }
 
 /** Persisted resource-stack boundaries. Totals remain authoritative in inventory. */
@@ -177,6 +195,15 @@ export interface StorageInventoryState extends BasicInventoryState {
   'quillfinch-quill'?: number;
   'mistmoth-scale'?: number;
   'slingtail-stone'?: number;
+  'scrap-iron'?: number;
+  'clockwork'?: number;
+  'lens'?: number;
+  'arcane-dust'?: number;
+  'construct-core'?: number;
+  'ancient-alloy'?: number;
+  'sealed-satchel'?: number;
+  'vault-key'?: number;
+  'recall-flare'?: number;
 }
 
 /** Lifetime gathered resources; progression remains complete after spending. */
@@ -485,6 +512,12 @@ export interface RaiderState {
   /** Spawn point a roamer returns to once it loses interest; absent on raiders. */
   homeX?: number;
   homeY?: number;
+  /**
+   * Present on site guards: the derived site this roamer stands watch over.
+   * Guards post at the site, leash at `outlands.guardLeashTiles`, sit outside
+   * the roamer quota, and a kill counts toward that site's `guardsDefeated`.
+   */
+  siteId?: string;
 }
 
 /** Present only on Turrets. Ammunition is arrows loaded by the player. */
@@ -891,6 +924,7 @@ export interface GameBalanceState {
   creatures: Record<SpeciesId, EditableCreatureBalance>;
   world: EditableWorldBalance;
   blueprints: EditableBlueprintBalance;
+  outlands: EditableOutlandsBalance;
 }
 
 /**
@@ -901,6 +935,45 @@ export interface GameBalanceState {
  * until the next one" is the entire experience. A find that arrives twice as
  * often is a different game, and finding that out should not need a build.
  */
+/** Field sites: refill rhythm, search times and guards. See content/sites. */
+export interface EditableOutlandsBalance {
+  /** Survival cycles between refills. */
+  restockCycles: number;
+  /** Ordinary sites generated per area. */
+  sitesPerArea: number;
+  /** Ticks to search an ordinary container. */
+  searchTicks: number;
+  /** Ticks to search a site's strongbox. */
+  strongboxSearchTicks: number;
+  /** Guards posted at an ordinary site. */
+  guardsPerSite: number;
+  /** How far, in tiles, a guard chases from its post. */
+  guardLeashTiles: number;
+  /** Basis-point chance a strongbox carries a blueprint this refill. */
+  strongboxBlueprintBps: number;
+  /** Extra uncommon loot entries when a container is searched in a danger phase. */
+  dangerBonusRolls: number;
+}
+
+export interface SiteProgress {
+  /** The refill this record describes. */
+  restockIndex: number;
+  /** Container indices searched this refill, ascending. */
+  searched: number[];
+  /** Guards killed this refill. */
+  guardsDefeated: number;
+}
+
+export interface ActiveSearch {
+  siteId: string;
+  containerIndex: number;
+  /** Whole pixels where the search began; moving more than 4 px cancels it. */
+  startX: number;
+  startY: number;
+  hpAtStart: number;
+  completesAtTick: number;
+}
+
 export interface EditableBlueprintBalance {
   /**
    * Nodes of each kind depleted per blueprint, before jitter. The counter is
@@ -1243,6 +1316,15 @@ export interface GameState {
    * than a full matrix of every theme against every node kind.
    */
   blueprintProgress: Record<string, BlueprintProgress>;
+  /**
+   * Per-site search and guard records, keyed by derived site id. Sparse: a
+   * record appears when the player first comes within range of a site, which
+   * is also what marks the site discovered. A record whose `restockIndex` is
+   * behind the current one describes a refill that has already turned over.
+   */
+  siteProgress: Record<string, SiteProgress>;
+  /** The container search under way, or null. Cancelled by movement or damage. */
+  activeSearch: ActiveSearch | null;
   /** Single fixed-point Phase 1 currency. One integer unit is one coin. */
   coins: number;
   /** Lifetime units sold, used by economy objectives and diagnostics. */
@@ -1329,6 +1411,7 @@ export function createInitialState(seed: number, suppliedBalance?: GameBalanceSt
       'tuftle-down': 0, 'craghopper-shell': 0, 'stag-antler': 0, 'snarlfox-pelt': 0,
       'masonmole-claw': 0, 'boar-tusk': 0, 'quillfinch-quill': 0, 'mistmoth-scale': 0,
       'slingtail-stone': 0,
+      'scrap-iron': 0, 'clockwork': 0, 'lens': 0, 'arcane-dust': 0, 'construct-core': 0, 'ancient-alloy': 0, 'sealed-satchel': 0, 'vault-key': 0, 'recall-flare': 0,
     },
     inventoryStacks: {
       wood: [], stone: [], fiber: [], 'iron-ore': [], 'iron-ingot': [],
@@ -1337,6 +1420,7 @@ export function createInitialState(seed: number, suppliedBalance?: GameBalanceSt
       'tuftle-down': [], 'craghopper-shell': [], 'stag-antler': [], 'snarlfox-pelt': [],
       'masonmole-claw': [], 'boar-tusk': [], 'quillfinch-quill': [], 'mistmoth-scale': [],
       'slingtail-stone': [],
+      'scrap-iron': [], 'clockwork': [], 'lens': [], 'arcane-dust': [], 'construct-core': [], 'ancient-alloy': [], 'sealed-satchel': [], 'vault-key': [], 'recall-flare': [],
     },
     packRanks: 0,
     arcaneStudyPurchases: 0,
@@ -1348,6 +1432,8 @@ export function createInitialState(seed: number, suppliedBalance?: GameBalanceSt
     blueprintDrops: [],
     toolDrops: [],
     blueprintProgress: {},
+    siteProgress: {},
+    activeSearch: null,
     coins: 0,
     resourcesSold: 0,
     firstTamedSpeciesIds: [],

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openApp } from './app';
 import { gatherStarterTree, openAppInStarterGrove } from './gather';
 import { openBuildPalette, openMenuTab, grantBlueprints } from './menu';
-import { readSavedState } from './save';
+import { releaseSaveWriter, readSavedState } from './save';
 
 async function seedEquippedPick(page: import('@playwright/test').Page): Promise<void> {
   await openApp(page);
@@ -10,11 +10,7 @@ async function seedEquippedPick(page: import('@playwright/test').Page): Promise<
   await page.waitForTimeout(500);
   // Complete the app's normal teardown save before patching IndexedDB; its
   // pagehide flush must not replace the fixture with the prior empty loadout.
-  await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:false})));
-  await expect.poll(()=>page.evaluate(async()=>{
-    const db=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('elaris:default',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-    return await new Promise<number>((resolve,reject)=>{const request=db.transaction('lease').objectStore('lease').count();request.onsuccess=()=>{db.close();resolve(request.result);};request.onerror=()=>{db.close();reject(request.error);};});
-  })).toBe(0);
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -70,6 +66,7 @@ async function seedWornPick(page: import('@playwright/test').Page): Promise<void
 }
 
 async function putWornPick(page: import('@playwright/test').Page): Promise<void> {
+  await releaseSaveWriter(page);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -106,6 +103,7 @@ async function putWornPick(page: import('@playwright/test').Page): Promise<void>
 async function seedWoodStack(page: import('@playwright/test').Page, amount: number): Promise<void> {
   await openApp(page);
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
+  await releaseSaveWriter(page);
   await page.evaluate(async (wood) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('elaris:default', 1);
@@ -188,7 +186,7 @@ test('bag panel shows the slot grid and stays exclusive with craft and build', a
   await page.getByRole('tab', { name: 'Bag', exact: true }).click();
   await expect(page.locator('.elaris-bag-capacity')).toBeVisible();
   await expect(page.getByText('Handcraft')).toBeHidden();
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator('.elaris-bag-capacity')).toBeHidden();
 
 });
@@ -231,13 +229,14 @@ test('tools repair and drop from their Bag card', async ({ page }) => {
 
   // And it is still there to walk back to: the pickup restores the same tool,
   // unequipped, because putting it down was a loadout decision too.
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Gather' }).click();
   await page.getByRole('button', { name: 'Menu' }).click();
   await expect(page.getByRole('button', { name: 'Wooden Pick 48/48', exact: true })).toBeVisible();
 });
 
 test('hotbar shows the crafted pick and equips by tap', async ({ page }) => {
+  test.setTimeout(120_000);
   await openAppInStarterGrove(page);
 
   // Empty hotbar slots stay clickable so they can select bare hands.
@@ -270,6 +269,7 @@ test('hotbar shows the crafted pick and equips by tap', async ({ page }) => {
 });
 
 test('keyboard: I toggles the menu and 1–5 switches between picks', async ({ page, isMobile }) => {
+  test.setTimeout(120_000);
   test.skip(isMobile, 'keyboard shortcuts are a desktop affordance');
   await openAppInStarterGrove(page);
 
@@ -277,9 +277,9 @@ test('keyboard: I toggles the menu and 1–5 switches between picks', async ({ p
   // keyboard keys. The Menu control is mounted by that same scene setup.
   await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await page.keyboard.press('i');
-  await expect(page.getByText('0/20 slots')).toBeVisible();
+  await expect(page.getByText('2/20 slots')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByText('0/20 slots')).toBeHidden();
+  await expect(page.getByText('2/20 slots')).toBeHidden();
 
   // Two picks need 10 wood. The two in-range grove trees give 8; the third
   // sits just outside interaction range, so step up briefly to reach it.

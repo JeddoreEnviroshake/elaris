@@ -214,6 +214,7 @@
   [data-ui-panel=npc-dialogue]>div:first-child {width:44px!important;height:44px!important;font-size:18px!important}
 }
 @media(orientation:landscape) and (max-height:500px){
+  [data-view-toggle]{top:calc(var(--ui-safe-top) + 9px)!important;bottom:auto!important;min-height:48px!important}
   .elaris-menu {width:calc(100vw - 24px)!important;height:calc(100dvh - 16px)!important;max-height:calc(100dvh - 16px)!important;grid-template-columns:155px minmax(0,1fr);grid-template-rows:66px minmax(0,1fr) 29px;grid-template-areas:'header header' 'nav body' 'footer footer'}
   .elaris-menu-header {min-height:0;padding:9px 16px!important;gap:12px!important}.elaris-journal-crest{height:44px;width:37px}.elaris-journal-crest svg{height:26px}.elaris-menu-title{font-size:23px}.elaris-menu-subtitle{display:none}
   .elaris-menu-nav {flex-direction:column;overflow-x:hidden!important;overflow-y:auto!important;padding:7px!important;touch-action:pan-y!important;border-right:1px solid #a7916355!important}
