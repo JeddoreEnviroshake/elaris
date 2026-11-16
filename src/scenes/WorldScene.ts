@@ -1,7 +1,7 @@
 import { entityAtWorld } from '../presentation/worldHitTests';
 import Phaser from 'phaser';
 
-import { gameToolDefinition, INTERACTION_RANGE_PX, TAMING_RANGE_PX } from '../config/balance';
+import { gameToolDefinition, INTERACTION_RANGE_PX, SNARE_THROW_RANGE_PX, TAMING_RANGE_PX } from '../config/balance';
 import { DEFAULT_WORLD_SEED, FIXED_STEP_MS } from '../config/platform';
 
 import type { MoveIntent } from '../simulation/commands';
@@ -13,7 +13,9 @@ import {
 } from '../simulation/commands';
 import { FixedStepLoop } from '../simulation/fixedStep';
 import { buildableById, FACILITY_INTERACTION_RANGE_PX, attackFacedWall, collectNearestGroundDrop, depositResourceStackInFieldCache, depositToolInFieldCache, dropResourceStack, selectCompanionAbility, setBattleCompanion, setCreatureRole, craftTool, craftRowboat, equipBareHands, equippedBow, equipTool, gatherNearest, isStructureDamaged, nearestFacedWall, repairStructure, nearestLiveNode, nearestUsableFacility, nearestWildCreature, repairTool, dropTool, splitResourceStack, withdrawFromFieldCache, withdrawResourceStackFromFieldCache, withdrawToolFromFieldCache, removeBuilding, rowboatActionLabel, toggleRowboat, type CommandResult } from '../simulation/gameplayCommands';
-import { craftArrows, craftClothMask, craftReinforcedSnare, craftTamingSnare, resolveEncounterAction, startNearestEncounter, throwSnareAtCreature, type EncounterAction } from '../simulation/encounters';
+import { craftArrows, craftClothMask, craftReinforcedSnare, craftTamingSnare } from '../simulation/supplyCrafting';
+import { isEating, isStaggered, tameChance } from '../simulation/tameChance';
+import { useHotbarItem } from '../simulation/hotbarItems';
 import { describeGardenBed, harvestGardenBed, nearestGardenBed } from '../simulation/gardenBeds';
 import { describeWoodlotPlanter, harvestWoodlotPlanter, nearestWoodlotPlanter } from '../simulation/woodlotPlanters';
 import type { BuildingState, GameState, GroundDropState, RaiderState, ResourceNodeState, WildCreatureState } from '../simulation/state';
@@ -46,19 +48,18 @@ import { TouchJoystick } from '../ui/touchControls';
 import { WorldNavigator } from '../ui/worldNavigator';
 import { RespawnPanel } from '../ui/respawnPanel';
 import { travelViaWaystone, type WaystoneTravelResult } from '../simulation/waystones';
-import { EncounterPanel } from '../ui/encounterPanel';
 import { OpeningPartnershipPanel } from '../ui/openingPartnershipPanel';
 import { ShelterGuide } from '../ui/shelterGuide';
 import { PaddockGuide } from '../ui/paddockGuide';
 import { SupplyRunGuide } from '../ui/supplyRunGuide';
 import { GardenGuide } from '../ui/gardenGuide';
 import { acknowledgeOpeningJourney, harvestOpeningGarden, moveOpeningGardenPlan, openingGardenAvailable, registerOpeningDiscovery } from '../simulation/openingGarden';
-import { beginOpeningGuardPractice, claimOpeningDiscovery, openOpeningSideCache, recoverOpeningSupplies } from '../simulation/openingSupplyRun';
+import { claimOpeningDiscovery, openOpeningSideCache, recoverOpeningSupplies } from '../simulation/openingSupplyRun';
 import { claimPaddockSupplies, collectOpeningOutput, followOpeningCompanion, movePaddockPlan, startOpeningWork } from '../simulation/openingPaddock';
 import { acknowledgeOpeningFog } from '../simulation/openingFog';
 import { claimShelterSupplies, moveShelterPlan } from '../simulation/openingShelter';
 import { isOpeningTuftle } from '../content/onboarding';
-import { actOpeningTrust, beginOpeningTrust, nameOpeningCompanion, nearbyOpeningTuftle } from '../simulation/onboarding';
+import { beginOpeningTrust, nameOpeningCompanion, nearbyOpeningTuftle } from '../simulation/onboarding';
 
 import { TILE_SIZE } from '../config/platform';
 
@@ -105,11 +106,6 @@ import type {
   InteractionTargetPresentation,
   ThreePresentationState,
 } from '../three/presentationState';
-import {
-  captureBattleSnapshot,
-  resolvedBattleSnapshot,
-  type BattleRoundPresentation,
-} from '../three/battleState';
 import { cameraOrientationFromTenths, screenToCameraWorldIntent } from '../three/cameraControls';
 import {
   FIRST_PERSON_VIEW_RADIUS_TILES, KEYBOARD_TURN_DEGREES_PER_SECOND, firstPersonView, groundForward,
@@ -149,7 +145,6 @@ export interface WorldSceneData {
   /** Cancel pending ordinary persistence before a transition paints. */
   onTransitionStarted?: () => void;
   globalBalance?: GlobalBalanceService;
-  onBattleRound?: (round: BattleRoundPresentation) => void;
   /** System-level controls surfaced inside the Admin menu. */
   system?: AdminSystemControls;
 }
@@ -237,7 +232,6 @@ export class WorldScene extends Phaser.Scene {
   private onTransitionStarted: () => void = () => {};
   private globalBalance = globalBalanceService;
 
-  private onBattleRound: (round: BattleRoundPresentation) => void = () => {};
   private systemControls: AdminSystemControls = {};
   private areaSplash: HTMLDivElement | null = null;
   private transitioningArea = false;
@@ -287,7 +281,7 @@ export class WorldScene extends Phaser.Scene {
   private actionKey: Phaser.Input.Keyboard.Key | null = null;
   private altActionKey: Phaser.Input.Keyboard.Key | null = null;
   private readonly onActionShortcut = (): void => {
-    if (!this.state.pendingRespawn && !this.state.activeEncounter && !this.interiorSession.ownsOverlayInput) this.performInteractAction();
+    if (!this.state.pendingRespawn && !this.interiorSession.ownsOverlayInput) this.performInteractAction();
   };
   private craftKey: Phaser.Input.Keyboard.Key | null = null;
   private buildKey: Phaser.Input.Keyboard.Key | null = null;
@@ -312,7 +306,6 @@ export class WorldScene extends Phaser.Scene {
   private blueprintsPanel!: BlueprintsPanel;
   private navigator!: WorldNavigator;
   private respawnPanel!: RespawnPanel;
-  private encounterPanel!: EncounterPanel;
   private openingPanel!: OpeningPartnershipPanel;
   private shelterGuide!: ShelterGuide;
   private paddockGuide!: PaddockGuide;
@@ -359,6 +352,10 @@ export class WorldScene extends Phaser.Scene {
   private gatheringUntil = 0;
   private gatheringKind: ResourceNodeState['kind'] | null = null;
   private playerActionVisual:{kind:StrikeStyle;startedAt:number;x:number;y:number;arrowTracked:boolean}|null=null;
+  /** The last snare throw, replayed by the renderer as an arc and a wrap or burst. */
+  private tameThrowVisual:{id:number;outcome:'tamed'|'missed';x:number;y:number}|null=null;
+  /** Last non-zero movement direction; the aim for a hotbar snare with no lock. */
+  private lastAim: { x: number; y: number } = { x: 0, y: 1 };
 
   private lastTargetKey: string | null = null;
   private presentationTarget: InteractionTargetPresentation | null = null;
@@ -390,9 +387,25 @@ export class WorldScene extends Phaser.Scene {
       gatherProgress: Math.max(0,Math.min(1,1-(this.gatheringUntil-this.time.now)/280)),
       playerAction:this.playerActionVisual&&this.time.now-this.playerActionVisual.startedAt<600
         ?{id:this.playerActionVisual.startedAt,arrowTracked:this.playerActionVisual.arrowTracked,kind:this.playerActionVisual.kind,progress:Math.max(0,(this.time.now-this.playerActionVisual.startedAt)/600),x:this.playerActionVisual.x,y:this.playerActionVisual.y}:null,
+      tameThrow: this.tameThrowVisual && this.time.now - this.tameThrowVisual.id < 1200 ? this.tameThrowVisual : null,
       gatherAssistance: this.gatherAssistance && this.time.now - this.gatherAssistance.startedAt < 900
         ? { ...this.gatherAssistance, progress: Math.max(0, (this.time.now - this.gatherAssistance.startedAt) / 900) } : null,
       prefersReducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    };
+  }
+
+  /**
+   * A wild creature's floating label: its tame chance, drawn as a bar, plus
+   * whatever state is feeding it right now. The words are the telegraph —
+   * "Staggered" is the cue to throw.
+   */
+  private creatureTargetPresentation(creature: WildCreatureState): InteractionTargetPresentation {
+    const chance = tameChance(this.state, creature).chanceBps;
+    const status = isStaggered(this.state, creature) ? ' · Staggered!' : isEating(this.state, creature) ? ' · Eating' : '';
+    return {
+      kind: 'creature', id: creature.id, x: creature.x, y: creature.y,
+      label: `Tame ${Math.floor(chance / 100)}%${status}`,
+      value: creature.hp, maxValue: creature.maxHp, tameBps: chance,
     };
   }
 
@@ -441,7 +454,6 @@ export class WorldScene extends Phaser.Scene {
       this.onCriticalChanged = () => data.onStateChanged?.('critical');
     }
     this.onTransitionStarted = data.onTransitionStarted ?? (() => {});
-    this.onBattleRound = data.onBattleRound ?? (() => {});
     this.systemControls = data.system ?? {};
   }
 
@@ -461,16 +473,6 @@ export class WorldScene extends Phaser.Scene {
     this.setupInput();
     const parent = document.getElementById('app') ?? document.body;
     this.openingPanel = new OpeningPartnershipPanel(parent, this.state, {
-      onAction: (action) => {
-        const result = actOpeningTrust(this.state, action);
-        this.onCriticalChanged();
-        if (this.state.onboarding.completedMilestoneIds.includes('befriend-tuftle')) {
-          this.stickyTarget = null;
-          this.syncWildCreatures();
-          this.openingPanel.openName();
-        } else this.openingPanel.refresh(result.message);
-        this.refreshHudNow();
-      },
       onName: (name) => {
         const result = nameOpeningCompanion(this.state, name);
         this.openingPanel.refresh(result.message);
@@ -482,7 +484,6 @@ export class WorldScene extends Phaser.Scene {
     });
     this.hud = new GameplayHud(parent, this.state, {
       onAction: () => this.performInteractAction(),
-      onThrowSnare: () => this.performSnareThrow(),
       onCraftTool: (definitionId) => this.performCraft(definitionId),
       onCraftRowboat: () => this.performToolCommand(() => craftRowboat(this.state), true),
       onDraftBlueprint: () => this.performToolCommand(
@@ -590,11 +591,14 @@ export class WorldScene extends Phaser.Scene {
     this.hotbar = new Hotbar(parent, this.state, {
       onEquipTool: (toolId) => this.performToolCommand(() => equipTool(this.state, toolId), false),
       onEquipBareHands: () => this.performToolCommand(() => equipBareHands(this.state), false),
+      onUseItem: (resource) => this.performHotbarItem(resource),
     });
     this.inventoryPanel = new InventoryPanel(parent, this.state, {
       onEquipTool: (toolId) => this.performToolCommand(() => equipTool(this.state, toolId), false),
       onAssignHotbar: (toolId) => this.hotbar.assign(toolId),
       isOnHotbar: (toolId) => this.hotbar.isAssigned(toolId),
+      onAssignHotbarItem: (resource) => this.hotbar.assignItem(resource),
+      isItemOnHotbar: (resource) => this.hotbar.isItemAssigned(resource),
       onSplitStack: (resource, stackIndex, amount) => this.performToolCommand(
         () => splitResourceStack(this.state, resource, stackIndex, amount), true,
       ),
@@ -660,11 +664,6 @@ export class WorldScene extends Phaser.Scene {
     });
     this.paddockGuide.attachToMenu(this.inventoryPanel);
     this.supplyRunGuide = new SupplyRunGuide(this.state, {
-      onPractice: () => {
-        const result = beginOpeningGuardPractice(this.state);
-        if (result.ok) { this.inventoryPanel.close(); this.syncWildCreatures(); }
-        this.applyEncounterResult(result);
-      },
       onClaim: () => this.performToolCommand(() => claimOpeningDiscovery(this.state), true),
       onRecover: () => this.performToolCommand(() => recoverOpeningSupplies(this.state), true),
       onSideCache: () => this.performToolCommand(() => openOpeningSideCache(this.state), true),
@@ -692,13 +691,6 @@ export class WorldScene extends Phaser.Scene {
       () => this.inventoryPanel.openTab('garden'),
     );
     this.respawnPanel = new RespawnPanel(parent, this.state, (destinationId) => this.performRespawn(destinationId));
-    this.encounterPanel = new EncounterPanel(
-      parent,
-      this.state,
-      (action) => this.performEncounterAction(action),
-      (abilityId) => this.performCompanionAbilitySelection(abilityId),
-    );
-    this.encounterPanel.refresh();
     this.interiorAudio = new InteriorAudioRouter();
     this.npcDialogue = new NpcDialogue(parent, {
       onChoice: (choiceId) => this.performDialogueChoice(choiceId),
@@ -759,12 +751,6 @@ export class WorldScene extends Phaser.Scene {
 
     this.updateEntityChunkActivation();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.teardown, this);
-    if (this.state.onboarding.trustSession && nearbyOpeningTuftle(this.state)) {
-      this.areaSplash?.remove();
-      this.areaSplash = null;
-      this.openingPanel.openTrust();
-      this.refreshHudNow();
-    }
   }
 
   private onExposureDefeat(result: PlayerDefeatResult): void {
@@ -786,7 +772,6 @@ export class WorldScene extends Phaser.Scene {
     const result = chooseRespawn(this.state, destinationId);
     if (!result.ok) return result;
 
-    this.encounterPanel.dismiss();
     this.respawnPanel.refresh(true);
     resetGridMovement(this.gridMovement);
     this.snapRenderPoseToState();
@@ -834,13 +819,16 @@ export class WorldScene extends Phaser.Scene {
       this.queuedStep = null;
       return;
     }
-    const inputBlocked = this.state.pendingRespawn || this.state.activeEncounter || this.openingPanel.isOpen || this.adminPanel.open || this.navigator.largeMapOpen;
+    const inputBlocked = this.state.pendingRespawn || this.openingPanel.isOpen || this.adminPanel.open || this.navigator.largeMapOpen;
     this.updateFirstPersonMode(deltaMs, Boolean(inputBlocked));
     this.intent = inputBlocked
       ? NO_MOVE
       : this.interiorSession.allowsWorldInteraction
         ? this.gatherInput()
         : NO_MOVE;
+    // The last direction the player moved is where a snare goes when nothing
+    // is locked: "in front of the character" in the free-movement sense.
+    if (this.intent.x !== 0 || this.intent.y !== 0) this.lastAim = { x: this.intent.x, y: this.intent.y };
     const areaKeyBeforeMovement = this.state.currentArea.key;
     const movingBefore = this.gridMovement.moving;
     const poseBefore = this.queuedStepPose();
@@ -893,7 +881,6 @@ export class WorldScene extends Phaser.Scene {
       && !this.transitioningArea
       && !this.buildMode.placing
       && !this.buildMode.deleteMode
-      && !this.state.activeEncounter
       && !this.state.pendingRespawn;
     if (active && !this.firstPersonLookPrimed) {
       // Look down the overhead view's "up", so the first step forward goes the
@@ -1201,8 +1188,7 @@ export class WorldScene extends Phaser.Scene {
   private raiderAtWorld(x: number, y: number): RaiderState | null { return entityAtWorld(this.state.raiders,x,y); }
 
   /**
-   * Shoot a raider. Deliberately separate from performEncounterStartOn: a raid
-   * is real-time, and clicking a raider must never open the turn-based panel.
+   * Shoot a raider. A raid is real-time; clicking a raider always shoots.
    */
   private performPlayerShot(raiderId?: string): void {
     const swingStyle = this.heldStrikeVisualStyle();
@@ -1261,7 +1247,7 @@ export class WorldScene extends Phaser.Scene {
    */
   private updateSustainedFire(): void {
     if (!this.actionInputHeld()) return;
-    if (this.state.activeEncounter || !this.interiorSession.allowsWorldInteraction) return;
+    if (!this.interiorSession.allowsWorldInteraction) return;
     if (this.buildMode.placing || this.buildMode.deleteMode || this.interiorSession.ownsOverlayInput) return;
     // Repeating before the cooldown clears would replace the hit message with
     // "Not ready yet" on every frame and nothing else.
@@ -1529,9 +1515,9 @@ export class WorldScene extends Phaser.Scene {
    */
   private performWorldAction(worldX: number, worldY: number, client?: { x: number; y: number }): void {
     if (this.openingPanel.isOpen) return;
-    if (this.state.activeEncounter || !this.interiorSession.allowsWorldInteraction) return;
+    if (!this.interiorSession.allowsWorldInteraction) return;
     // Raiders are checked before wild creatures: during a raid they are drawn
-    // on top, and a click on one must shoot rather than start an encounter.
+    // on top, and a click on one must shoot rather than strike the creature.
     const raider = this.raiderAtWorld(worldX, worldY);
     if (raider) {
       // Tapping a raider both locks it and fires: the first tap should never
@@ -1633,7 +1619,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.openingPanel.isOpen) return;
     const resourceId = targetResourceId ?? (this.stickyTarget?.kind === 'resource' ? this.stickyTarget.id : undefined);
     if (!resourceId && nearbyOpeningTuftle(this.state)) { this.performOpeningTrust(); return; }
-    if (this.state.activeEncounter || !this.interiorSession.allowsWorldInteraction) return;
+    if (!this.interiorSession.allowsWorldInteraction) return;
     const inventoryBefore = { ...this.state.inventory };
     // A raider in range outranks every peacetime action: during the danger
     // minute the action button is the player's weapon, not their sickle.
@@ -1914,22 +1900,20 @@ export class WorldScene extends Phaser.Scene {
     if (bark) this.npcBark.show(bark);
   }
 
-  /** Nearest-creature encounter kept for the 3D presentation harness. */
-  performEncounterStart(): void {
-    this.applyEncounterResult(startNearestEncounter(this.state));
-  }
-
   /**
    * Throw a snare at the locked creature, which is the way into taming now that
    * a tap on a creature is a swing. Deliberately an explicit, separate press:
    * the whole point of the split is that wanting something dead and wanting it
    * alive can never be the same gesture.
    */
-  private performSnareThrow(): void {
-    // The lock wins when it is close enough to snare; otherwise the creature
-    // the player is standing next to does. A swing scatters skittish species,
-    // so requiring a lock here would mean the only creatures that could be
-    // tamed are the ones that never ran.
+  /**
+   * The creature both taming buttons act on: the lock while it is within
+   * throwing range, otherwise the nearest one that is. It does not insist on a
+   * lock, because a tap is a swing — and a swing sends a skittish creature
+   * running, so "select it first" would be the one way to lose a stag.
+   */
+  private tameCandidate(): WildCreatureState | null {
+    if (this.openingPanel?.isOpen || this.state.pendingRespawn) return null;
     const crosshairCreatureId = firstPersonView.active && this.crosshairTarget?.kind === 'creature'
       ? this.crosshairTarget.id
       : null;
@@ -1937,14 +1921,44 @@ export class WorldScene extends Phaser.Scene {
     const locked = lockedId
       ? this.state.wildCreatures.find((creature) => creature.id === lockedId) ?? null
       : null;
-    const inSnareRange = locked
-      && Math.hypot(locked.x - this.state.player.x, locked.y - this.state.player.y) <= TAMING_RANGE_PX;
-    const target = inSnareRange ? locked : nearestWildCreature(this.state, TAMING_RANGE_PX);
-    if (!target) {
-      this.hud.showFeedback('Move closer to a wild creature', false);
-      return;
+    if (locked && locked.hp > 0
+      && Math.hypot(locked.x - this.state.player.x, locked.y - this.state.player.y) <= SNARE_THROW_RANGE_PX) return locked;
+    const nearest = nearestWildCreature(this.state, SNARE_THROW_RANGE_PX);
+    return nearest && !isOpeningTuftle(this.state, nearest.id) ? nearest : null;
+  }
+
+  /**
+   * Use a food or snare slot from the hotbar. Food goes to the creature close
+   * enough to feed; a snare is thrown in front of the character — at the lock
+   * when there is one in range, otherwise along the first-person look or the
+   * last direction moved — and resolves on whatever it hits.
+   */
+  private performHotbarItem(resource: ResourceId): void {
+    if (this.openingPanel.isOpen || this.state.pendingRespawn || !this.interiorSession.allowsWorldInteraction) return;
+    const crosshairCreatureId = firstPersonView.active && this.crosshairTarget?.kind === 'creature' ? this.crosshairTarget.id : null;
+    const lockedCreatureId = crosshairCreatureId ?? (this.stickyTarget?.kind === 'creature' ? this.stickyTarget.id : null);
+    const forward = firstPersonView.active ? groundForward(firstPersonView.look.yawDegrees) : this.lastAim;
+    const inventoryBefore = { ...this.state.inventory };
+    const wasBefriended = this.state.onboarding.completedMilestoneIds.includes('befriend-tuftle');
+    const result = useHotbarItem(this.state, resource, {
+      dirX: Math.round(forward.x * 1_000), dirY: Math.round(forward.y * 1_000), lockedCreatureId,
+    });
+    this.hud.showFeedback(result.message, result.ok && !result.missed && !result.landed);
+    if (!result.ok) { this.refreshHudNow(); return; }
+    if (result.thrownTo) {
+      this.tameThrowVisual = { id: this.time.now, outcome: result.tamed ? 'tamed' : 'missed', ...result.thrownTo };
+      if (!result.landed) this.spawnFloatingText(result.thrownTo.x, result.thrownTo.y, result.tamed ? 'Tamed!' : 'Broke free!');
     }
-    this.applyEncounterResult(throwSnareAtCreature(this.state, target.id));
+    if (result.fed && result.creatureId) {
+      const fed = this.state.wildCreatures.find((wild) => wild.id === result.creatureId);
+      if (fed) this.spawnFloatingText(fed.x, fed.y, 'Eating…');
+    }
+    if (result.tamed) { this.stickyTarget = null; this.syncWildCreatures(); }
+    if (result.landed) this.syncGroundDrops();
+    this.reportResourceCollection(inventoryBefore);
+    this.onCriticalChanged();
+    if (!wasBefriended && this.state.onboarding.completedMilestoneIds.includes('befriend-tuftle')) this.openingPanel.openName();
+    this.refreshHudNow();
   }
 
   /**
@@ -1956,18 +1970,11 @@ export class WorldScene extends Phaser.Scene {
   private performOpeningTrust(): void {
     if (this.openingPanel.isOpen || !this.interiorSession.allowsWorldInteraction) return;
     const result = beginOpeningTrust(this.state);
-    if (!result.ok) { this.hud.showFeedback(result.message, false); return; }
-    this.buildMode.cancel();
-    this.buildMenu.close();
-    this.inventoryPanel.close();
-    this.hud.closeCraft();
-    this.hud.closeFacility();
-    this.intent = NO_MOVE;
-    this.queuedStep = null;
-    resetGridMovement(this.gridMovement);
+    this.hud.showFeedback(result.message, result.ok);
+    if (!result.ok) return;
     this.areaSplash?.remove();
     this.areaSplash = null;
-    this.openingPanel.openTrust();
+    this.syncGroundDrops();
     this.onCriticalChanged();
     this.refreshHudNow();
   }
@@ -2029,44 +2036,10 @@ export class WorldScene extends Phaser.Scene {
     this.refreshHudNow();
   }
 
-  private applyEncounterResult(result: CommandResult): void {
-    this.hud.showFeedback(result.message, result.ok);
-    if (result.ok) {
-      this.onCriticalChanged();
-      this.encounterPanel.refresh();
-    }
-    this.refreshHudNow();
-  }
-
-  private performEncounterAction(action: EncounterAction): void {
-    const inventoryBefore = { ...this.state.inventory };
-    const before = captureBattleSnapshot(this.state);
-    const result = resolveEncounterAction(this.state, action);
-    if (before && result.ok) {
-      this.onBattleRound({
-        action,
-        result,
-        before,
-        resolved: resolvedBattleSnapshot(before, this.state, result),
-      });
-    }
-    if (!result.ok) this.hud.showFeedback(result.message, false);
-    this.syncWildCreatures();
-    if (result.tamed) this.spawnFloatingText(this.state.player.x, this.state.player.y, 'New creature joined you!');
-    if (result.ok) this.reportResourceCollection(inventoryBefore);
-    if (result.ok) this.onCriticalChanged();
-    // The battle screen animates the structured result itself and owns its
-    // own end-of-battle outro, so success feedback stays inside the arena.
-    this.encounterPanel.playResult(action, result);
-    if (result.playerDefeated) this.respawnPanel.refresh(true);
-    this.refreshHudNow();
-  }
-
   private performCompanionAbilitySelection(abilityId: import('../simulation/state').CompanionAbilityId, creatureId?: string): void {
     const result = selectCompanionAbility(this.state, abilityId, creatureId);
     this.hud.showFeedback(result.message, result.ok);
     if (result.ok) this.onCriticalChanged();
-    this.encounterPanel?.refresh();
     this.refreshHudNow();
   }
 
@@ -2288,9 +2261,8 @@ export class WorldScene extends Phaser.Scene {
     if (this.state.onboarding.status === 'active' || this.inventoryPanel.open) this.paddockGuide?.refresh();
     if (this.state.onboarding.supplyRun?.site || this.inventoryPanel.open) this.supplyRunGuide?.refresh();
     if (openingGardenAvailable(this.state) || this.inventoryPanel.open) this.gardenGuide?.refresh();
-    this.encounterPanel.refresh();
     this.respawnPanel.refresh();
-    const battling = this.encounterPanel.isOpen || this.openingPanel.isOpen;
+    const battling = this.openingPanel.isOpen;
     this.hud.setBattleMode(battling);
     this.navigator.setBattleMode(battling);
     this.hudDirty = false;
@@ -2386,7 +2358,9 @@ export class WorldScene extends Phaser.Scene {
     }
     const opening = nearbyOpeningTuftle(this.state);
     if (opening && !this.buildMode.placing && !this.buildMode.deleteMode) {
-      this.hud.setContextActionOverride('Help Tuftle', 'A nervous Tuftle waits by the road · E / Space');
+      this.hud.setContextActionOverride('Help Tuftle', this.state.onboarding.completedMilestoneIds.includes('meet-tuftle')
+        ? 'Hotbar: Berry first, then Snare'
+        : 'A nervous Tuftle waits by the road · E / Space');
       this.presentationTarget = { kind: 'creature', id: opening.id, x: opening.x, y: opening.y, label: 'Help Tuftle' };
       return;
     }
@@ -2418,7 +2392,7 @@ export class WorldScene extends Phaser.Scene {
       : drop
         ? { kind: 'drop', id: drop.id, x: drop.x, y: drop.y, label: `Pick up ${drop.amount} ${drop.resource}` }
         : creature
-          ? { kind: 'creature', id: creature.id, x: creature.x, y: creature.y, label: 'Attack or snare' }
+          ? this.creatureTargetPresentation(creature)
           : facility
             ? {
                 kind: 'facility', id: facility.id,
@@ -2443,13 +2417,18 @@ export class WorldScene extends Phaser.Scene {
     const locked = this.resolveStickyTarget();
     // The snare button appears at taming range, which is shorter than any
     // attack reach, so the lock's own in-range flag cannot stand in for it.
-    const snarable = locked?.kind === 'creature' && locked.distancePx <= TAMING_RANGE_PX;
+    // The tame candidate's whole chance joins the key: hp, food, stagger and
+    // noticing all move it, and the Snare button has to show the live number.
+    const tame = this.tameCandidate();
+    const tameKey = tame
+      ? `${tame.id}:${tameChance(this.state, tame).chanceBps}:${isEating(this.state, tame)}:${Math.round(tame.x / 8)}:${Math.round(tame.y / 8)}`
+      : '';
     const key = `${townHotspot?.hotspot.id ?? ''}|${target?.id ?? ''}|${target?.hp ?? ''}|${drop?.id ?? ''}|${creature?.id ?? ''}|${facility?.id ?? ''}`
-      + `|${locked?.id ?? ''}|${locked?.inRange ?? ''}|${snarable}`;
+      + `|${locked?.id ?? ''}|${locked?.inRange ?? ''}|${tameKey}|${this.state.inventory['taming-snare']}|${this.state.inventory['reinforced-snare']}|${this.state.inventory.berry}`;
     if (key === this.lastTargetKey) return;
     this.lastTargetKey = key;
 
-    this.hud.refreshTargets(target, drop, creature, locked);
+    this.hud.refreshTargets(target, drop, creature, locked, tame);
   }
 
   /**
@@ -2617,7 +2596,7 @@ export class WorldScene extends Phaser.Scene {
     this.entityActivationDirty=true; this.hudDirty=true;
     this.buildResourceNodes(); this.syncWildCreatures(); this.syncGroundDrops(); this.syncBuildingQueryIndex();
     this.previousPlayerX=this.state.player.x; this.previousPlayerY=this.state.player.y; this.renderPlayerPose(1);
-    this.navigator.refresh(true); this.encounterPanel.refresh(); this.hotbar.setSuppressed(false); this.refreshHudNow();
+    this.navigator.refresh(true); this.hotbar.setSuppressed(false); this.refreshHudNow();
   }
 
   private showTravelOverlay(parent: HTMLElement): void {
@@ -2760,7 +2739,6 @@ export class WorldScene extends Phaser.Scene {
     this.blueprintsPanel.destroy();
     this.navigator.destroy();
     this.respawnPanel.destroy();
-    this.encounterPanel.destroy();
     this.npcServiceOverlay.destroy();
     this.npcDialogue.destroy();
     this.npcBark.destroy();

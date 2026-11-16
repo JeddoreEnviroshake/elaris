@@ -23,7 +23,6 @@ import { townBuildingsInArea } from '../content/townBuildings';
 import { isWithinTownSafeZoneWorldPosition } from '../content/townDefences';
 import { isExpeditionRouteId } from '../content/expeditions';
 import { createOpeningChapter, createOpeningThreat, createOpeningProduction, createOpeningSupplyRun, createOpeningGarden, OPENING_NEXT_GOALS, OPENING_CHAPTER_VERSION, OPENING_MILESTONES, starterTuftleId } from '../content/onboarding';
-import { TAMING_MOODS } from '../simulation/taming';
 import { ATTRIBUTE_GAIN_FIELDS, ATTRIBUTE_IDS } from '../simulation/characterProgression';
 import { CONSUMABLE_BLUEPRINT_IDS, isBlueprintItemId } from '../simulation/blueprintKnowledge';
 import { blueprintsGrantedUpToLevel } from '../content/blueprintGates';
@@ -2226,6 +2225,45 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // here on may carry levelled facilities, and so the validator below (which
   // sizes storage by level) only ever sees saves that know about levels.
   90: (raw) => ({ ...raw, meta: { ...asRecord(raw['meta']), saveVersion: 91, contentVersion: 69 } }),
+  // v91 -> v92: taming moves into the world (taming-chance-plan.md). The battle
+  // arena, the tutorial's Calm/Fear session and the Shell Guard practice are
+  // gone. An arena that was open at save time hands its creature's health back
+  // to the world creature and closes; the practice Craghopper is removed.
+  // The new per-creature tame fields are optional and start absent.
+  91: (raw) => {
+    const meta = asRecord(raw['meta']); const state = asRecord(raw['state']);
+    const guardianId = `opening-guardian-${state['seed'] as number}`;
+    const encounter = isRecord(state['activeEncounter']) ? state['activeEncounter'] : null;
+    const withoutGuardian = (list: unknown): unknown => Array.isArray(list)
+      ? list.filter((wild) => !(isRecord(wild) && wild['id'] === guardianId))
+      : list;
+    let wildCreatures = withoutGuardian(state['wildCreatures']);
+    if (encounter && Array.isArray(wildCreatures)) {
+      wildCreatures = wildCreatures.map((wild) => isRecord(wild) && wild['id'] === encounter['wildCreatureId']
+        && typeof encounter['creatureHp'] === 'number' && encounter['creatureHp'] > 0
+        ? { ...wild, hp: Math.min(wild['maxHp'] as number, encounter['creatureHp']) }
+        : wild);
+    }
+    const { activeEncounter: _encounter, ...rest } = state;
+    const onboarding = asRecord(state['onboarding']);
+    const { trustSession: _trust, ...chapter } = onboarding;
+    const run = isRecord(chapter['supplyRun']) ? chapter['supplyRun'] : null;
+    let supplyRun: unknown = chapter['supplyRun'];
+    if (run) {
+      const { guardianStarted: _started, guardianDefeated: _defeated, guardedDamage: _damage, ...kept } = run;
+      supplyRun = kept;
+    }
+    return {
+      ...raw,
+      meta: { ...meta, saveVersion: 92, contentVersion: 70 },
+      state: {
+        ...rest,
+        wildCreatures,
+        visitedAreas: mapAreaSnapshots(state['visitedAreas'], (area) => ({ ...area, wildCreatures: withoutGuardian(area['wildCreatures']) })),
+        onboarding: { ...chapter, supplyRun },
+      },
+    };
+  },
 };
 
 /**
@@ -2782,6 +2820,9 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
       'hp', 'maxHp', 'homeX', 'homeY',
       'aggroUntilTick', 'nextAttackTick', 'fleeUntilTick', 'captureBonusBps',
     ]) requireNonNegativeInteger(creature, field);
+    for (const field of ['staggerUntilTick', 'staggerSpent', 'eatingUntilTick', 'snareMisses']) {
+      if (creature[field] !== undefined) requireNonNegativeInteger(creature, field);
+    }
     if ((creature['hp'] as number) > (creature['maxHp'] as number)) {
       throw new SaveValidationError('creature hp exceeds maxHp');
     }
@@ -2812,26 +2853,6 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
     throw new SaveValidationError('invalid raidSettledAreaKeys');
   }
 
-  const encounter = state['activeEncounter'];
-  if (encounter !== null) {
-    if (!isRecord(encounter) || typeof encounter['wildCreatureId'] !== 'string' || typeof encounter['message'] !== 'string') throw new SaveValidationError('invalid active encounter');
-    requireNonNegativeInteger(encounter, 'creatureHp'); requirePositiveInteger(encounter, 'creatureMaxHp'); requirePositiveInteger(encounter, 'round');
-    requireNonNegativeInteger(encounter, 'playerPos'); requireNonNegativeInteger(encounter, 'creaturePos');
-    if ((encounter['playerPos'] as number) > 100 || (encounter['creaturePos'] as number) > 100 || (encounter['playerPos'] as number) > (encounter['creaturePos'] as number)) {
-      throw new SaveValidationError('invalid encounter positions');
-    }
-    if ((encounter['creatureHp'] as number) > (encounter['creatureMaxHp'] as number)) throw new SaveValidationError('encounter hp exceeds maxHp');
-    if (!wildCreatures.some((item) => isRecord(item) && item['id'] === encounter['wildCreatureId'])) throw new SaveValidationError('encounter creature does not exist');
-    if (encounter['companionCreatureId'] !== null && typeof encounter['companionCreatureId'] !== 'string') throw new SaveValidationError('invalid encounter companion');
-    if (encounter['selectedCompanionAbilityId'] !== null && !isCompanionAbilityId(encounter['selectedCompanionAbilityId'])) throw new SaveValidationError('invalid selected encounter ability');
-    if (encounter['enemyIntent'] !== 'advance' && encounter['enemyIntent'] !== 'strike' && encounter['enemyIntent'] !== 'advance-strike'
-      && encounter['enemyIntent'] !== 'retreat-strike' && encounter['enemyIntent'] !== 'watch') throw new SaveValidationError('invalid enemy intent');
-    const cooldowns = encounter['companionAbilityReadyRounds'];
-    if (!isRecord(cooldowns)) throw new SaveValidationError('invalid companion cooldowns');
-    for (const [abilityId, readyRound] of Object.entries(cooldowns)) {
-      if (!isCompanionAbilityId(abilityId) || !Number.isSafeInteger(readyRound) || (readyRound as number) < 0) throw new SaveValidationError('invalid companion cooldown');
-    }
-  }
   const ownedCreatures = state['ownedCreatures'];
   if (!Array.isArray(ownedCreatures)) throw new SaveValidationError('missing ownedCreatures');
   if (ownedCreatures.length > MAX_CREATURE_ROSTER) throw new SaveValidationError('creature roster exceeds capacity');
@@ -2873,19 +2894,6 @@ export function assertValidPortableSave(raw: unknown): PortableSave {
   if (state['battleCompanionId'] !== null && typeof state['battleCompanionId'] !== 'string') throw new SaveValidationError('invalid battle companion');
   if (typeof state['battleCompanionId'] === 'string' && !ownedCreatures.some((item) => isRecord(item)
     && item['id'] === state['battleCompanionId'] && item['role'] === 'follow')) throw new SaveValidationError('battle companion must be a follower');
-  if (encounter !== null) {
-    const current = asRecord(encounter);
-    const companionId = current['companionCreatureId'];
-    const selectedAbilityId = current['selectedCompanionAbilityId'];
-    const companion = typeof companionId === 'string'
-      ? ownedCreatures.find((item) => isRecord(item) && item['id'] === companionId)
-      : undefined;
-    if (typeof companionId === 'string' && !companion) throw new SaveValidationError('encounter companion does not exist');
-    if (selectedAbilityId !== null) {
-      if (!companion || !isRecord(companion) || !isSpeciesId(companion['speciesId']) || !isCompanionAbilityId(selectedAbilityId)
-        || !companionAbility(companion['speciesId'], selectedAbilityId)) throw new SaveValidationError('encounter ability does not belong to companion');
-    }
-  }
 
   const tools = state['tools'];
   if (!Array.isArray(tools)) throw new SaveValidationError('missing tools');
@@ -3332,19 +3340,15 @@ function validateOpeningChapter(state: Record<string, unknown>): void {
     if (run !== null) throw new SaveValidationError('legacy supply run must be inactive');
   } else {
     if (!isRecord(run)) throw new SaveValidationError('invalid opening supply run');
-    for (const key of ['discovered', 'suppliesRecovered', 'sideCacheOpened', 'guardianStarted', 'guardianDefeated', 'blueprintClaimed']) if (typeof run[key] !== 'boolean') throw new SaveValidationError('invalid supply run flag');
-    requireNonNegativeInteger(run, 'guardedDamage');
-    if ((run['guardedDamage'] as number) > 9999) throw new SaveValidationError('invalid guard lesson damage');
+    for (const key of ['discovered', 'suppliesRecovered', 'sideCacheOpened', 'blueprintClaimed']) if (typeof run[key] !== 'boolean') throw new SaveValidationError('invalid supply run flag');
     for (const key of ['blueprintInstanceId', 'blueprintDropId']) if (run[key] !== null && (typeof run[key] !== 'string' || !run[key])) throw new SaveValidationError('invalid discovery identity');
     const site = run['site'];
     if (site !== null && (!isRecord(site) || site['areaKey'] !== '0,0' || !Number.isSafeInteger(site['tileX']) || !Number.isSafeInteger(site['tileY'])
       || (site['tileX'] as number) < 5 || (site['tileX'] as number) >= WORLD_TILES || (site['tileY'] as number) < 0 || (site['tileY'] as number) >= WORLD_TILES)) throw new SaveValidationError('invalid supply cart site');
-    if ((site !== null || run['discovered'] || run['suppliesRecovered'] || run['sideCacheOpened'] || run['guardianStarted']) && !milestones.includes('return-to-follow')
-      || (run['suppliesRecovered'] || run['guardianStarted'] || run['sideCacheOpened']) && site === null
+    if ((site !== null || run['discovered'] || run['suppliesRecovered'] || run['sideCacheOpened']) && !milestones.includes('return-to-follow')
+      || (run['suppliesRecovered'] || run['sideCacheOpened']) && site === null
       || run['blueprintClaimed'] && !run['suppliesRecovered']
       || (run['blueprintInstanceId'] !== null || run['blueprintDropId'] !== null) && !run['blueprintClaimed']
-      || run['guardianDefeated'] && !run['guardianStarted']
-      || (run['guardedDamage'] as number) > 0 && !run['guardianStarted']
       || milestones.includes('recover-supplies') && !run['suppliesRecovered']
       || milestones.includes('collect-discovery') && (!run['blueprintClaimed'] || !milestones.includes('recover-supplies'))) throw new SaveValidationError('inconsistent supply run progress');
   }
@@ -3399,36 +3403,24 @@ function validateOpeningChapter(state: Record<string, unknown>): void {
   }
   if (chapter['companionId'] !== null && (typeof chapter['companionId'] !== 'string' || !chapter['companionId'])) throw new SaveValidationError('invalid opening companion');
   if (chapter['status'] === 'legacy') {
-    if (chapter['starterWildCreatureId'] !== null || chapter['companionId'] !== null || chapter['trustSession'] !== null
+    if (chapter['starterWildCreatureId'] !== null || chapter['companionId'] !== null
       || chapter['shelterPlan'] !== null || chapter['shelterHome'] !== null || milestones.length || rewards.length) throw new SaveValidationError('legacy opening must be inactive');
     return;
   }
   if (chapter['starterWildCreatureId'] !== starterTuftleId(state['seed'] as number)) throw new SaveValidationError('invalid opening creature identity');
   if (chapter['status'] === 'complete') {
     if (!OPENING_MILESTONES.every((milestone) => milestones.includes(milestone.id)) || !rewards.includes('starter-partner') || !rewards.includes('shelter-recipes')
-      || chapter['companionId'] === null || chapter['trustSession'] !== null || chapter['shelterHome'] === null) throw new SaveValidationError('incomplete opening partnership');
+      || chapter['companionId'] === null || chapter['shelterHome'] === null) throw new SaveValidationError('incomplete opening partnership');
     return;
   }
   if (milestones.includes('befriend-tuftle')) {
     if (!milestones.includes('meet-tuftle') || chapter['companionId'] === null || !rewards.includes('starter-partner')
       || rewards.includes('shelter-recipes') !== milestones.includes('gather-together')
-      || milestones.includes('build-shelter') !== (chapter['shelterHome'] !== null) || chapter['trustSession'] !== null
+      || milestones.includes('build-shelter') !== (chapter['shelterHome'] !== null)
       || (!milestones.includes('gather-together') && (chapter['shelterPlan'] !== null || rewards.includes('shelter-supplies') || rewards.includes('shelter-grove')))) throw new SaveValidationError('invalid gathering partnership');
     return;
   }
   if (chapter['companionId'] !== null || rewards.length) throw new SaveValidationError('unearned opening partnership');
-  const session = chapter['trustSession'];
-  if (session === null) return;
-  if (!isRecord(session) || !milestones.includes('meet-tuftle') || state['activeEncounter'] !== null) throw new SaveValidationError('invalid opening trust session');
-  for (const key of ['beatsRemaining', 'calmBps', 'fearBps', 'peakFearBps', 'boldBeats', 'patientBeats', 'fedBeats', 'bandLowBps', 'bandHighBps']) {
-    requireNonNegativeInteger(session, key);
-    if ((session[key] as number) > 10_000) throw new SaveValidationError('invalid opening trust meter');
-  }
-  if ((session['beatsRemaining'] as number) < 1 || (session['beatsRemaining'] as number) > 4
-    || (session['bandLowBps'] as number) >= (session['bandHighBps'] as number)
-    || (session['peakFearBps'] as number) < (session['fearBps'] as number)
-    || !TAMING_MOODS.includes(session['mood'] as typeof TAMING_MOODS[number])
-    || session['temperament'] !== 'passive' || session['settled'] !== null || session['finishedEarly'] !== false) throw new SaveValidationError('invalid opening trust state');
 }
 
 function validateQuestIds(state: Record<string, unknown>, key: string): void {

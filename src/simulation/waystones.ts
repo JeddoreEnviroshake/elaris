@@ -27,7 +27,6 @@ export interface WaystoneTravelResult {
 
 export function waystoneOriginView(state: GameState): WaystoneOriginView {
   if (state.pendingRespawn) return { active: false, name: null, reason: 'Choose where to awaken first.' };
-  if (state.activeEncounter) return { active: false, name: null, reason: 'Waystones cannot open during an encounter.' };
   if (survivalSchedule(state).phase === 'danger') {
     return { active: false, name: null, reason: 'Waystones sleep during the danger phase.' };
   }

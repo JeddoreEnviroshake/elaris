@@ -3,7 +3,7 @@ import { acquireTarget, combatActionLabel, loadoutStrikeStyle, resolveCombatTarg
 import {
   fireCreatureShot, isHuntable, nearestHuntableCreature, strikeCreatureMelee,
 } from '../../src/simulation/creatureStrike';
-import { snareThrowBlockedReason, throwSnareAtCreature } from '../../src/simulation/encounters';
+import { snareThrowBlockedReason, throwSnareAtCreature } from '../../src/simulation/tameChance';
 import { createInitialState, type GameState, type RaiderState, type WildCreatureState } from '../../src/simulation/state';
 import { toolDefinition } from '../../src/config/balance';
 
@@ -328,7 +328,7 @@ describe('fireCreatureShot', () => {
 });
 
 describe('throwSnareAtCreature', () => {
-  it('opens a taming session on the selected creature', () => {
+  it('resolves in place on the selected creature and spends the snare', () => {
     const state = bareState();
     state.inventory['taming-snare'] = 1;
     const tuftle = addCreature(state, 'tuftle', 1_010, 1_000);
@@ -336,7 +336,8 @@ describe('throwSnareAtCreature', () => {
     const result = throwSnareAtCreature(state, tuftle.id);
 
     expect(result.ok).toBe(true);
-    expect(state.activeEncounter?.wildCreatureId).toBe(tuftle.id);
+    expect(result.tamed || result.missed).toBe(true);
+    expect(state.inventory['taming-snare']).toBe(0);
   });
 
   it('refuses with an empty bag — the snare is the whole gate', () => {
@@ -346,7 +347,7 @@ describe('throwSnareAtCreature', () => {
     const tuftle = addCreature(state, 'tuftle', 1_010, 1_000);
 
     expect(throwSnareAtCreature(state, tuftle.id).message).toBe('Craft a Taming Snare first');
-    expect(state.activeEncounter).toBeNull();
+    expect(state.wildCreatures).toContain(tuftle);
   });
 
   it('refuses out of snaring range, and says the same thing the button does', () => {

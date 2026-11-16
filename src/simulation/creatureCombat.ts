@@ -1,5 +1,5 @@
 import { leveledCreatureDefinition } from '../config/balance';
-import { isOpeningTuftle, isOpeningGuardian } from '../content/onboarding';
+import { isOpeningTuftle } from '../content/onboarding';
 import { TILE_SIZE, WORLD_PX } from '../config/platform';
 import { isWithinTownSafeZoneWorldPosition } from '../content/townDefences';
 import type { CreatureDefinition } from '../content/creatures';
@@ -9,6 +9,7 @@ import { blockingBoundary, playerIsHuntable } from './raids';
 import { solidBoundaryBetween } from './buildingCollision';
 import { beginPlayerDefeat, type PlayerDefeatResult } from './survivalCycle';
 import type { GameState, WildCreatureState } from './state';
+import { isHeldInPlace } from './tameChance';
 
 /**
  * Wild creatures as real-time inhabitants of the overworld.
@@ -107,7 +108,10 @@ export function advanceWildCreatures(state: GameState): CreatureAdvanceResult {
   // Copied so a defeat stops the loop immediately rather than carrying on
   // through stale decisions made against a dead player.
   for (const creature of [...state.wildCreatures]) {
-    if (isOpeningTuftle(state, creature.id) || isOpeningGuardian(state, creature.id)) continue;
+    if (isOpeningTuftle(state, creature.id)) continue;
+    // Staggered or eating: it neither moves nor bites. That stillness is what
+    // the tame bonus for both is paying for.
+    if (isHeldInPlace(state, creature)) continue;
     const definition = leveledCreatureDefinition(state, creature);
     const step = advanceCreature(state, creature, definition, huntable);
     if (step.changed) changed = true;

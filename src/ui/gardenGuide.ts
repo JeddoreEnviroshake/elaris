@@ -31,7 +31,7 @@ export class GardenGuide {
     const tileX = Math.floor(state.player.x / 16); const tileY = Math.floor(state.player.y / 16);
     const key = JSON.stringify([active, garden, chapter.status, chapter.completedMilestoneIds, chapter.supplyRun?.blueprintDropId, state.currentArea.key,
       tileX, tileY, view.bed?.id, view.paper?.instanceId, view.stored?.id, view.known, view.canRegister, view.inReach,
-      state.inventory, state.activeEncounter?.wildCreatureId, !!state.pendingRespawn, geometry, state.ownedCreatures.map((creature) => [creature.id, creature.name, creature.role]), Object.keys(state.visitedAreas), this.showFootprint]);
+      state.inventory, !!state.pendingRespawn, geometry, state.ownedCreatures.map((creature) => [creature.id, creature.name, creature.role]), Object.keys(state.visitedAreas), this.showFootprint]);
     if (key === this.signature) return;
     const scrollTop = this.panel.scrollTop;
     const section = `${active}|${view.known}|${view.bed?.id ?? ''}|${chapter.status}`;
@@ -72,7 +72,7 @@ export class GardenGuide {
     this.panel.append(routeCard);
     if (!view.known) {
       const register = uiButton('Register Garden Bed discovery', this.actions.onRegister);
-      register.disabled = !view.paper || !view.canRegister || !!state.activeEncounter || !!state.pendingRespawn; this.panel.append(register);
+      register.disabled = !view.paper || !view.canRegister || !!state.pendingRespawn; this.panel.append(register);
       return;
     }
     if (!view.bed) {
@@ -81,7 +81,7 @@ export class GardenGuide {
       if (garden.bedId) this.paragraph('Your previous Garden Bed is gone. Rebuild anywhere clear in Elaris; the registered recipe and earned progress remain yours.');
       if (!garden.plan || garden.plan.areaKey !== state.currentArea.key) return;
       this.paragraph(`Suggested bed: X ${garden.plan.tileX}, Y ${garden.plan.tileY} · two tiles wide, one tile deep. Preview first, then confirm Build 1.`);
-      const preview = uiButton('Preview Garden Bed', () => this.actions.onPreview(requests)); preview.disabled = !requests.length || !!state.activeEncounter || !!state.pendingRespawn; this.panel.append(preview);
+      const preview = uiButton('Preview Garden Bed', () => this.actions.onPreview(requests)); preview.disabled = !requests.length || !!state.pendingRespawn; this.panel.append(preview);
       const check = requests.length ? checkBuildBatch(state, requests) : null;
       if (check && !check.ok) this.paragraph(check.message);
       const moves = div({ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' });
@@ -107,7 +107,7 @@ export class GardenGuide {
   private refreshGrowth(view: ReturnType<typeof openingGardenView>): void {
     if (this.growthStatus) this.growthStatus.textContent = view.status;
     if (this.growthRules) this.growthRules.textContent = `${GARDEN_BED_YIELD_FIBER} fiber every ${GARDEN_BED_GROW_TICKS / 60} seconds · Stored ${view.readyFiber}/${GARDEN_BED_READY_CAP}. No creature assignment is needed. Full output pauses growth; collecting makes room without losing partial progress.`;
-    if (this.harvestButton) this.harvestButton.disabled = view.readyFiber === 0 || !view.inReach || !!this.state.activeEncounter || !!this.state.pendingRespawn;
+    if (this.harvestButton) this.harvestButton.disabled = view.readyFiber === 0 || !view.inReach || !!this.state.pendingRespawn;
   }
   private paragraph(text: string): void { const p = document.createElement('p'); p.textContent = text; this.panel.append(p); }
   private renderRecap(): void {
@@ -118,7 +118,6 @@ export class GardenGuide {
     const list = document.createElement('ul');
     const achievements = [`Befriended ${companion?.name ?? 'your Tuftle'} and gathered together.`, 'Built a shelter and weathered the first fog.',
       'Housed your Tuftle, collected its first delivery, and travelled together again.', 'Recovered the lost supplies and made the Garden Bed recipe permanent.', 'Built a garden and collected its first fiber harvest.'];
-    if ((state.onboarding.supplyRun?.guardedDamage ?? 0) > 0) achievements.push(`Shell Guard prevented ${state.onboarding.supplyRun!.guardedDamage} damage during optional practice.`);
     for (const achievement of achievements) { const row = document.createElement('li'); row.textContent = achievement; list.append(row); }
     recap.append(intro, list); this.panel.append(recap);
     this.paragraph('Follow helps you gather on the road. Work supplies the Pen at home. The garden renews fiber independently. Your recipes and completed lessons stay saved.');

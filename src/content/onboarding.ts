@@ -1,5 +1,4 @@
 import type { GameState } from '../simulation/state';
-import type { TamingSession } from '../simulation/taming';
 import type { ShelterSite } from '../simulation/openingShelter';
 
 export const OPENING_CHAPTER_VERSION = 7;
@@ -20,23 +19,16 @@ export interface OpeningSupplyRunState {
   discovered: boolean;
   suppliesRecovered: boolean;
   sideCacheOpened: boolean;
-  guardianStarted: boolean;
-  guardianDefeated: boolean;
-  guardedDamage: number;
   blueprintClaimed: boolean;
   blueprintInstanceId: string | null;
   blueprintDropId: string | null;
 }
 export function createOpeningSupplyRun(): OpeningSupplyRunState {
-  return { site: null, discovered: false, suppliesRecovered: false, sideCacheOpened: false, guardianStarted: false,
-    guardianDefeated: false, guardedDamage: 0, blueprintClaimed: false, blueprintInstanceId: null, blueprintDropId: null };
+  return { site: null, discovered: false, suppliesRecovered: false, sideCacheOpened: false,
+    blueprintClaimed: false, blueprintInstanceId: null, blueprintDropId: null };
 }
 export const openingSupplyCacheId = (seed: number) => `opening-supplies-${seed}`;
 export const openingSideCacheId = (seed: number) => `opening-side-cache-${seed}`;
-export const openingGuardianId = (seed: number) => `opening-guardian-${seed}`;
-export function isOpeningGuardian(state: Pick<GameState, 'seed' | 'onboarding'>, id: string): boolean {
-  return !!state.onboarding.supplyRun && id === openingGuardianId(state.seed);
-}
 export function isOpeningDiscoveryPaper(state: Pick<GameState, 'onboarding' | 'unlockedItemIds'>, id: string): boolean {
   return state.onboarding.supplyRun?.blueprintInstanceId === id && !state.unlockedItemIds.includes('garden-bed');
 }
@@ -73,7 +65,7 @@ export function createOpeningThreat(mode: OpeningThreatState['mode'] = 'guided')
 export const STARTER_TUFTLE_POSITION = { x: 82 * 16, y: 82 * 16 } as const;
 export const OPENING_MILESTONES = [
   { id: 'meet-tuftle', requires: [], title: 'A nervous little neighbour', objective: 'Approach the Tuftle southeast of you and choose Help Tuftle.' },
-  { id: 'befriend-tuftle', requires: ['meet-tuftle'], title: 'Earn its trust', objective: 'Read the Tuftle’s mood. Stay steady, offer a berry, or approach gently.' },
+  { id: 'befriend-tuftle', requires: ['meet-tuftle'], title: 'Tame the Tuftle', objective: 'Add the Berry and the Taming Snare to your hotbar (Bag → tap the item → Add to Hotbar). Use the Berry beside the Tuftle, then throw the Snare at it.' },
   { id: 'gather-together', requires: ['befriend-tuftle'], title: 'Better together', objective: 'Take your following Tuftle through the west gate to the resource grove. Harvest fiber plants together to earn shelter recipes.' },
   { id: 'build-shelter', requires: ['gather-together'], title: 'A home together', objective: 'Build an enclosed eight-tile room with a usable door, Air Purifier, and Storage Box. Open the Shelter guide for a suggested layout.' },
   { id: 'weather-fog', requires: ['build-shelter'], title: 'Weather the first fog', objective: 'Stay in purified air during the fog. Organize storage or build safely, then watch the air clear. Elaris sanctuary is always a fallback.' },
@@ -98,7 +90,6 @@ export interface OpeningChapterState {
   issuedRewardIds: string[];
   starterWildCreatureId: string | null;
   companionId: string | null;
-  trustSession: TamingSession | null;
   shelterPlan: ShelterSite | null;
   shelterHome: ShelterSite | null;
   firstThreat: OpeningThreatState | null;
@@ -113,7 +104,7 @@ export function createOpeningChapter(seed: number, legacy = false): OpeningChapt
   return {
     version: OPENING_CHAPTER_VERSION, status: legacy ? 'legacy' : 'active',
     completedMilestoneIds: [], issuedRewardIds: [],
-    starterWildCreatureId: legacy ? null : starterTuftleId(seed), companionId: null, trustSession: null,
+    starterWildCreatureId: legacy ? null : starterTuftleId(seed), companionId: null,
     shelterPlan: null, shelterHome: null, firstThreat: legacy ? null : createOpeningThreat(), production: legacy ? null : createOpeningProduction(), supplyRun: legacy ? null : createOpeningSupplyRun(), garden: legacy ? null : createOpeningGarden(),
   };
 }

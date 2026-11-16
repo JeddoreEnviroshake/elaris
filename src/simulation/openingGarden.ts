@@ -71,7 +71,7 @@ export function reconcileOpeningGarden(state: GameState): boolean {
 }
 
 export function registerOpeningDiscovery(state: GameState): CommandResult {
-  if (!openingGardenAvailable(state) || state.pendingRespawn || state.activeEncounter) return { ok: false, message: 'Finish the supply run and leave the encounter before registering.' };
+  if (!openingGardenAvailable(state) || state.pendingRespawn) return { ok: false, message: 'Finish the supply run before registering.' };
   const view = openingGardenView(state);
   if (view.known) return { ok: false, message: 'The Garden Bed recipe is already yours.' };
   if (!view.paper) return { ok: false, message: 'Recover the Garden Bed paper or take it from storage first.' };
@@ -97,7 +97,7 @@ export function moveOpeningGardenPlan(state: GameState, dx: number, dy: number):
 
 export function harvestOpeningGarden(state: GameState): CommandResult {
   const view = openingGardenView(state);
-  if (!openingGardenAvailable(state) || !view.bed || state.activeEncounter || state.pendingRespawn) return { ok: false, message: 'Walk near your Garden Bed outside an encounter.' };
+  if (!openingGardenAvailable(state) || !view.bed || state.pendingRespawn) return { ok: false, message: 'Walk near your Garden Bed.' };
   return harvestGardenBed(state, view.bed.id);
 }
 

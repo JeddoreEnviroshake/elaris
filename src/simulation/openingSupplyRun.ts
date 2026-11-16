@@ -1,19 +1,18 @@
-import { isOpeningGuardian, openingGuardianId, openingSideCacheId, openingSupplyCacheId } from '../content/onboarding';
+import { openingSideCacheId, openingSupplyCacheId } from '../content/onboarding';
 import { buildableById } from '../content/buildingParts';
-import { INTERACTION_RANGE_PX, gameCreatureDefinition } from '../config/balance';
+import { INTERACTION_RANGE_PX } from '../config/balance';
 import { TILE_SIZE, WORLD_TILES } from '../config/platform';
 import { effectiveBuildingDimensions } from './buildingGeometry';
 import { terrainAtWithBuildings, terrainCapabilities } from './landscape';
 import { isTownFootprintTile } from '../content/townBuildings';
-import { addGroundDrop, FACILITY_INTERACTION_RANGE_PX, selectCompanionAbility, setBattleCompanion, tryAddResource, type CommandResult } from './gameplayCommands';
-import { startEncounterWithCreature } from './encounters';
+import { addGroundDrop, FACILITY_INTERACTION_RANGE_PX, tryAddResource, type CommandResult } from './gameplayCommands';
 import { tryCarryBlueprint } from './carriedBlueprints';
 import { knowsBlueprint } from './blueprintKnowledge';
 import { completeOpeningMilestone } from './onboardingProgress';
 import { ELARIS_PUBLIC_WORKBENCH_TILE, withinElarisPublicWorkbench } from './elarisWorkbench';
 import { resolveTownMovement } from './town';
 import { isBuildingBoundaryCrossingBlocked } from './buildingCollision';
-import type { GameState, ResourceId, WildCreatureState } from './state';
+import type { GameState, ResourceId } from './state';
 import type { ShelterSite } from './openingShelter';
 
 export const SUPPLY_RUN_MATERIALS = { wood: 4, fiber: 2 } as const;
@@ -63,7 +62,7 @@ export function reconcileOpeningSupplyRun(state: GameState): boolean {
 export function claimOpeningDiscovery(state: GameState): CommandResult {
   const run = state.onboarding.supplyRun;
   if (!run?.suppliesRecovered || run.blueprintClaimed) return { ok: false, message: 'The discovery is not ready or was already collected' };
-  if (state.pendingRespawn || state.activeEncounter || !supplyRunInReach(state) && !withinElarisPublicWorkbench(state, FACILITY_INTERACTION_RANGE_PX)) return { ok: false, message: 'Collect the paper at the supply cart or Elaris public workbench' };
+  if (state.pendingRespawn || !supplyRunInReach(state) && !withinElarisPublicWorkbench(state, FACILITY_INTERACTION_RANGE_PX)) return { ok: false, message: 'Collect the paper at the supply cart or Elaris public workbench' };
   if (knowsBlueprint(state, 'garden-bed')) { run.blueprintClaimed = true; return { ok: true, message: 'You already know the Garden Bed recipe. The recovered building materials are yours.' }; }
   const paper = tryCarryBlueprint(state, 'garden-bed');
   if (!paper) return { ok: false, message: 'Bag full. The Garden Bed blueprint waits safely at the cart or Elaris public workbench; make one free space.' };
@@ -73,7 +72,7 @@ export function claimOpeningDiscovery(state: GameState): CommandResult {
 
 export function recoverOpeningSupplies(state: GameState): CommandResult {
   const run = state.onboarding.supplyRun;
-  if (!supplyRunAvailable(state) || !run || !supplyRunInReach(state) || state.activeEncounter || state.pendingRespawn) return { ok: false, message: 'Move near the supply cart outside an encounter' };
+  if (!supplyRunAvailable(state) || !run || !supplyRunInReach(state) || state.pendingRespawn) return { ok: false, message: 'Move near the supply cart' };
   if (run.suppliesRecovered) return claimOpeningDiscovery(state);
   run.discovered = true; run.suppliesRecovered = true;
   const container = state.containers.find((candidate) => candidate.id === openingSupplyCacheId(state.seed)); if (container) container.opened = true;
@@ -84,35 +83,11 @@ export function recoverOpeningSupplies(state: GameState): CommandResult {
 
 export function openOpeningSideCache(state: GameState): CommandResult {
   const run = state.onboarding.supplyRun;
-  if (!supplyRunAvailable(state) || !run || run.sideCacheOpened || !supplyRunInReach(state, true) || state.activeEncounter || state.pendingRespawn) return { ok: false, message: 'Move closer to the unopened roadside log' };
+  if (!supplyRunAvailable(state) || !run || run.sideCacheOpened || !supplyRunInReach(state, true) || state.pendingRespawn) return { ok: false, message: 'Move closer to the unopened roadside log' };
   run.sideCacheOpened = true;
   const container = state.containers.find((candidate) => candidate.id === openingSideCacheId(state.seed)); if (container) container.opened = true;
   for (const [id, amount] of [['berry', 3], ['cloth-mask', 1]] as const) if (!tryAddResource(state, id, amount)) addGroundDrop(state, id, amount, state.player.x, state.player.y);
   return { ok: true, message: 'Roadside log: 3 berries and 1 Cloth Mask. The supply cart is four tiles east.', targetId: openingSideCacheId(state.seed) };
-}
-
-export function beginOpeningGuardPractice(state: GameState): CommandResult {
-  const run = state.onboarding.supplyRun;
-  if (!supplyRunAvailable(state) || !run?.site || !supplyRunInReach(state) || state.pendingRespawn || state.activeEncounter) return { ok: false, message: 'Walk near the supply cart to practise Shell Guard' };
-  if (run.guardianDefeated) return { ok: false, message: 'You have already defeated this Craghopper. Recover the supplies or head home.' };
-  const companion = state.ownedCreatures.find((creature) => creature.id === state.onboarding.companionId);
-  if (!companion || companion.role !== 'follow' || state.expeditions.some((expedition) => expedition.creatureId === companion.id)) return { ok: false, message: 'Bring your following Tuftle to practise Shell Guard together' };
-  let guardian = state.wildCreatures.find((creature) => isOpeningGuardian(state, creature.id));
-  const created = !guardian;
-  if (!guardian) {
-    const maxHp = gameCreatureDefinition(state, 'craghopper').encounter.maxHp;
-    const x = (run.site.tileX - .5) * TILE_SIZE; const y = (run.site.tileY + .5) * TILE_SIZE;
-    guardian = { id: openingGuardianId(state.seed), speciesId: 'craghopper', x, y, homeX: x, homeY: y, level: 1, hp: Math.min(maxHp, 18), maxHp, aggroUntilTick: 0,
-      nextAttackTick: 0, fleeUntilTick: 0, captureBonusBps: 0, encounterCooldownUntilTick: 0 } satisfies WildCreatureState;
-    state.wildCreatures.push(guardian);
-  }
-  const previous = { id: state.battleCompanionId, ability: companion.selectedBattleAbilityId };
-  setBattleCompanion(state, companion.id); selectCompanionAbility(state, 'tuftle-guard', companion.id);
-  const result = startEncounterWithCreature(state, guardian.id, INTERACTION_RANGE_PX + TILE_SIZE);
-  if (!result.ok) { state.battleCompanionId = previous.id; companion.selectedBattleAbilityId = previous.ability; if (created) state.wildCreatures = state.wildCreatures.filter((wild) => wild.id !== guardian!.id); return result; }
-  run.guardianStarted = true;
-  state.activeEncounter!.message = 'Optional guard practice. Read Intent before acting. Shell Guard blocks an incoming hit when ready; Rest lets the Craghopper approach. Retreat is guaranteed here. Supplies do not require a win.';
-  return { ok: true, message: state.activeEncounter!.message };
 }
 
 /** Match actual walking rules; a saved player-built obstruction gets an honest no-route answer. */

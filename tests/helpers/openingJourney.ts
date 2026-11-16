@@ -1,5 +1,5 @@
 import { createInitialState } from '../../src/simulation/state';
-import { actOpeningTrust, beginOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, shelterLayout } from '../../src/simulation/openingShelter';
 import { advanceOpeningFog } from '../../src/simulation/openingFog';
@@ -15,7 +15,7 @@ import { elarisPublicWorkbenchCenterPx } from '../../src/simulation/elarisWorkbe
 export function readySupplyRun(seed = 42) {
   const state = createInitialState(seed);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
-  beginOpeningTrust(state); for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  beginOpeningTrust(state); offerOpeningTuftle(state); throwOpeningSnare(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1); reconcileOpeningShelter(state);
   const home = state.onboarding.shelterPlan!;
   state.player.x = (home.tileX + 1.5) * 16; state.player.y = (home.tileY + 3) * 16;

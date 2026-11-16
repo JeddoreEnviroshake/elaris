@@ -169,7 +169,6 @@ function reorderedCopy(state: GameState): GameState {
     })),
     groundDrops: state.groundDrops,
     equippedToolId: state.equippedToolId,
-    activeEncounter: state.activeEncounter,
     battleCompanionId: state.battleCompanionId,
     actionCooldownUntilTick: state.actionCooldownUntilTick,
     gameBalance: structuredClone(state.gameBalance),

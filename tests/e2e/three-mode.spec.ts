@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { openApp, waitForDebugHandles, reloadApp } from './app';
 import { openAdmin, openBuildPalette, grantBlueprints } from './menu';
 import { createInitialState } from '../../src/simulation/state';
-import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { findShelterSite } from '../../src/simulation/openingShelter';
 import { createOpeningChapter } from '../../src/content/onboarding';
 import { isResourceClearOfRoad } from '../../src/content/roads';
@@ -79,7 +79,7 @@ test('3D world draws an owned Tuftle follower and removes it when resting', asyn
   const fixture = createInitialState(42);
   fixture.player.x = 82 * 16; fixture.player.y = 82 * 16;
   beginOpeningTrust(fixture);
-  for (let index = 0; index < 4; index++) actOpeningTrust(fixture, 'steady');
+  offerOpeningTuftle(fixture); throwOpeningSnare(fixture);
   await page.evaluate((creature) => {
     const game = (globalThis as unknown as { __game: { scene: { getScene: (key: string) => { state: { ownedCreatures: unknown[] } } } } }).__game;
     game.scene.getScene('world').state.ownedCreatures.push(creature);
@@ -220,37 +220,6 @@ test('3D presentation mirrors the authoritative build-placement ghost', async ({
   await expect.poll(() => page.evaluate(() => (
     globalThis as unknown as { __renderer3d: { getSnapshot: () => { placementActive: boolean } } }
   ).__renderer3d.getSnapshot().placementActive)).toBe(false);
-});
-
-test('3D presentation opens and animates the deterministic battle arena', async ({ page }) => {
-  await openApp(page, 'render=3d');
-  await waitForDebugHandles(page);
-  await page.evaluate(() => {
-    const game = (globalThis as unknown as {
-      __game: { scene: { getScene: (key: string) => {
-        state: { player: { x: number; y: number }; wildCreatures: Array<{ x: number; y: number }> };
-        performEncounterStart: () => void;
-      } } };
-    }).__game;
-    const scene = game.scene.getScene('world');
-    const wild = scene.state.wildCreatures[0]!;
-    scene.state.player.x = wild.x;
-    scene.state.player.y = wild.y;
-    scene.performEncounterStart();
-  });
-
-  const encounter = page.getByRole('dialog', { name: 'Wild creature encounter' });
-  await expect(encounter).toBeVisible();
-  await expect(encounter).toHaveCSS('background-image', 'none');
-  await expect.poll(() => page.evaluate(() => (
-    globalThis as unknown as { __renderer3d: { getSnapshot: () => { battleActive: boolean } } }
-  ).__renderer3d.getSnapshot().battleActive)).toBe(true);
-
-  // The button's accessible name is its aria-label, not its "Forward · N SP" text.
-  await encounter.getByRole('button', { name: 'Move forward' }).click();
-  await expect.poll(() => page.evaluate(() => (
-    globalThis as unknown as { __renderer3d: { getSnapshot: () => { battleRoundAnimating: boolean } } }
-  ).__renderer3d.getSnapshot().battleRoundAnimating)).toBe(true);
 });
 
 type WalkInDebug = {

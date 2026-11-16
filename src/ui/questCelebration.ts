@@ -109,7 +109,7 @@ export class QuestCelebration {
     return this.card.getBoundingClientRect().bottom;
   }
 
-  /** The battle screen owns the display, so the banner waits its turn. */
+  /** A modal dialog owns the display, so the banner waits its turn. */
   setHidden(hidden: boolean): void {
     this.hidden = hidden;
     if (hidden) this.strip.style.display = 'none';

@@ -1,10 +1,10 @@
 import { MAX_ACTIVE_FOLLOWERS } from '../content/creatures';
 import { isOpeningTuftle } from '../content/onboarding';
-import { TAMING_RANGE_PX } from '../config/balance';
+import { OFFER_RANGE_PX, SNARE_THROW_RANGE_PX, TAMING_RANGE_PX, TAME_EATING_TICKS, TAME_FAVOURITE_OFFER_BPS } from '../config/balance';
 import { acquireWildCreature } from './creatureAcquisition';
-import { setCreatureRole, type CommandResult } from './gameplayCommands';
+import { addGroundDrop, setCreatureRole, tryAddResource, type CommandResult } from './gameplayCommands';
+import { reconcileResourceStacks } from './inventoryStacks';
 import type { GameState } from './state';
-import { beginTamingSession, resolveTamingBeat, TAMING_ACTIONS, type TamingAction } from './taming';
 import { generateOpeningTuftle } from './worldGeneration';
 import { completeOpeningMilestone } from './onboardingProgress';
 export { completeOpeningMilestone } from './onboardingProgress';
@@ -23,7 +23,6 @@ export function reconcileOpeningChapter(state: GameState): boolean {
   const existing = state.ownedCreatures.find((creature) => creature.speciesId === 'tuftle');
   if (existing) {
     chapter.companionId = existing.id;
-    chapter.trustSession = null;
     completeOpeningMilestone(state, 'meet-tuftle');
     completeOpeningMilestone(state, 'befriend-tuftle');
     if (!chapter.issuedRewardIds.includes('starter-partner')) chapter.issuedRewardIds.push('starter-partner');
@@ -51,10 +50,21 @@ function removeOpeningFixture(state: GameState): void {
   }
 }
 
-export function nearbyOpeningTuftle(state: GameState) {
-  if (state.currentArea.key !== '0,0' || state.pendingRespawn || state.activeEncounter) return null;
+export function nearbyOpeningTuftle(state: GameState, range = TAMING_RANGE_PX) {
+  if (state.currentArea.key !== '0,0' || state.pendingRespawn) return null;
   return state.wildCreatures.find((wild) => isOpeningTuftle(state, wild.id)
-    && Math.hypot(wild.x - state.player.x, wild.y - state.player.y) <= TAMING_RANGE_PX) ?? null;
+    && Math.hypot(wild.x - state.player.x, wild.y - state.player.y) <= range) ?? null;
+}
+
+/**
+ * Hand the player one of `item` from the roadside basket: always on the first
+ * meeting, so the lesson never spends the player's own supplies, and again
+ * later only when they have run out.
+ */
+function topUpFromBasket(state: GameState, item: 'berry' | 'taming-snare', firstMeeting: boolean): boolean {
+  if (!firstMeeting && state.inventory[item] > 0) return false;
+  if (!tryAddResource(state, item, 1)) addGroundDrop(state, item, 1, state.player.x, state.player.y);
+  return true;
 }
 
 export function beginOpeningTrust(state: GameState): CommandResult {
@@ -63,54 +73,70 @@ export function beginOpeningTrust(state: GameState): CommandResult {
   if (state.ownedCreatures.some((creature) => creature.speciesId === 'tuftle')) {
     return { ok: false, message: 'Your Tuftle is already in the roster.' };
   }
-  completeOpeningMilestone(state, 'meet-tuftle');
-  if (!state.onboarding.trustSession) resetTrust(state);
-  return { ok: true, message: 'The Tuftle watches you. Give it time to feel safe.' };
+  const firstMeeting = completeOpeningMilestone(state, 'meet-tuftle');
+  // The roadside basket keeps the lesson free: a berry and a snare on the
+  // first meeting, and again whenever the player has run out of either.
+  const berry = topUpFromBasket(state, 'berry', firstMeeting);
+  const snare = topUpFromBasket(state, 'taming-snare', firstMeeting);
+  const gift = berry || snare ? 'The roadside basket had a berry and a snare. ' : '';
+  return {
+    ok: true,
+    message: `${gift}Put the Berry and the Taming Snare on your hotbar (Bag → tap the item → Add to Hotbar). Use the Berry beside the Tuftle, then the Snare.`,
+  };
 }
 
-function resetTrust(state: GameState): void {
-  const begun = beginTamingSession('passive', 'taming-snare', state.rngState);
-  state.rngState = begun.rngState;
-  state.onboarding.trustSession = { ...begun.session, mood: 'watching' };
+/** True once the roadside Tuftle has eaten the tutorial berry. */
+export function openingTuftleFed(state: GameState): boolean {
+  return (nearbyOpeningTuftle(state, SNARE_THROW_RANGE_PX)?.captureBonusBps ?? 0) > 0;
 }
 
-export function actOpeningTrust(state: GameState, action: TamingAction): CommandResult {
-  if (!TAMING_ACTIONS.includes(action) || !nearbyOpeningTuftle(state) || !state.onboarding.trustSession) {
-    return { ok: false, message: 'Approach the Tuftle to continue earning its trust.' };
+/**
+ * Step one of the tutorial: a berry from the hotbar, the same Offer the world
+ * uses. The Tuftle settles to eat and its Tame % jumps, which is the lesson.
+ */
+export function offerOpeningTuftle(state: GameState): CommandResult {
+  const wild = nearbyOpeningTuftle(state, OFFER_RANGE_PX);
+  if (!wild) return { ok: false, message: 'Move closer to the roadside Tuftle.' };
+  if (wild.captureBonusBps > 0) return { ok: false, message: 'It is already eating. Now throw the snare.' };
+  if (state.inventory.berry <= 0) return { ok: false, message: 'You have no berries. Press Help Tuftle for one from the basket.' };
+  state.inventory.berry -= 1;
+  reconcileResourceStacks(state, 'berry');
+  wild.captureBonusBps = TAME_FAVOURITE_OFFER_BPS;
+  wild.eatingUntilTick = state.tick + TAME_EATING_TICKS;
+  return { ok: true, message: 'The Tuftle loves berries — it settles in to eat. Its tame chance jumped. Now use the Snare.' };
+}
+
+/**
+ * Step two: the throw. The first one always holds — out in the world the
+ * percentage is a real roll. The snare is spent only once the throw lands.
+ */
+export function throwOpeningSnare(state: GameState, snareItemId: 'taming-snare' | 'reinforced-snare' = 'taming-snare'): CommandResult {
+  const wild = nearbyOpeningTuftle(state, SNARE_THROW_RANGE_PX);
+  if (!wild) return { ok: false, message: 'Move closer to the roadside Tuftle.' };
+  if (wild.captureBonusBps <= 0) return { ok: false, message: 'It is too wary. Offer it a berry first.' };
+  if (state.inventory[snareItemId] <= 0) return { ok: false, message: 'You have no snare. Press Help Tuftle for one from the basket.' };
+  const result = finishOpeningPartnership(state, SNARE_THROW_RANGE_PX);
+  if (result.ok) {
+    state.inventory[snareItemId] -= 1;
+    reconcileResourceStacks(state, snareItemId);
   }
-  // The roadside basket supplies tutorial berries. The player's bag is never charged.
-  const result = resolveTamingBeat(state.onboarding.trustSession, action, state.rngState, { berriesAvailable: 1 });
-  if (result.blocked) return { ok: false, message: result.blocked };
-  state.rngState = result.rngState;
-  state.onboarding.trustSession = result.session;
-  if (result.session.settled === 'broken') {
-    resetTrust(state);
-    return { ok: true, message: 'The Tuftle needs a little more time. Take a breath and try again; the basket still has berries.' };
-  }
-  if (result.session.settled) return finishOpeningPartnership(state);
-  // A predictable, readable teaching profile; the normal taming resolver still prices each action.
-  result.session.mood = result.session.beatsRemaining % 2 === 1 ? 'settling' : 'watching';
-  return { ok: true, message: action === 'back-off' ? 'You give the Tuftle room to breathe.' : 'The Tuftle responds to your patience.' };
+  return result;
 }
 
-function finishOpeningPartnership(state: GameState): CommandResult {
+function finishOpeningPartnership(state: GameState, range = TAMING_RANGE_PX): CommandResult {
   const chapter = state.onboarding;
   if (chapter.issuedRewardIds.includes('starter-partner')) return { ok: false, message: 'Your partner has already joined.' };
   if (state.ownedCreatures.filter((creature) => creature.role === 'follow').length >= MAX_ACTIVE_FOLLOWERS) {
-    // Retrying must remain possible after making a follower slot available.
-    chapter.trustSession = null;
     return { ok: false, message: 'Rest a follower, then return to the Tuftle.' };
   }
-  const wild = nearbyOpeningTuftle(state);
+  const wild = nearbyOpeningTuftle(state, range);
   const creature = wild ? acquireWildCreature(state, wild) : null;
   if (!creature) {
-    chapter.trustSession = null;
     return { ok: false, message: 'Make room in your creature roster, then return.' };
   }
   setCreatureRole(state, creature.id, 'follow');
   removeOpeningFixture(state);
   chapter.companionId = creature.id;
-  chapter.trustSession = null;
   chapter.issuedRewardIds.push('starter-partner');
   completeOpeningMilestone(state, 'befriend-tuftle');
   return { ok: true, message: 'The Tuftle trusts you and is now following. Give your new friend a name!' };

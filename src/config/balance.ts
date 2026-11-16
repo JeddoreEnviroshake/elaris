@@ -702,107 +702,40 @@ export const IRON_SMELT_WORK_MS = 5_000;
 export const IRON_SMELT_INPUTS = { 'iron-ore': 2, wood: 1 } as const;
 
 /**
- * Snare taming (spec formula, fixed-point basis points):
- *   chance = clamp(speciesEase × snareTier × (1.5 − hpPercent), 0.05, 0.90)
+ * Tame chance (taming-chance-plan.md). Every wild creature carries a visible
+ * chance the player builds up in the world, then cashes in with a thrown snare:
+ *
+ *   sum    = base + hp + stagger + fed + unnoticed + pity + luck
+ *   chance = clamp(sum × snareTier, TAME_CHANCE_MIN_BPS, TAME_CHANCE_MAX_BPS)
+ *
+ * Every value is basis points or whole ticks — `canonicalizeGameState` throws
+ * on fractions, and these numbers feed state.
  */
 export const TAMING_SNARE_TIER_BPS = 10_000; // basic snare = 1.0×
 export const REINFORCED_SNARE_TIER_BPS = 16_000; // trophy snare = 1.6×
-export const SNARE_CHANCE_MIN_BPS = 500;
-export const SNARE_CHANCE_MAX_BPS = 9_000;
-
-/**
- * Taming session. A landed snare captures but does not tame: it opens a short
- * session of `beats`, during which the player nudges the creature's Calm up and
- * its Fear down. Every session yields the creature — what the player is playing
- * for is its disposition, not its capture.
- *
- * All values are basis points or whole beats. `canonicalizeGameState` throws on
- * non-integer numbers, so nothing here may ever become fractional.
- */
-export const TAMING_BEATS_BASIC = 4;
-export const TAMING_BEATS_REINFORCED = 6;
-
-/** Calm/Fear the session opens on, before the first mood drift. */
-export const TAMING_START_CALM_BPS = 2_000;
-export const TAMING_START_FEAR_BPS = 3_000;
-
-/**
- * The success band drawn on the meter. Landing inside it at beat exhaustion
- * tames properly; reaching the top edge early ends the session with beats to
- * spare, which is the only route to `eager`.
- */
-export const TAMING_BAND_LOW_BPS = 5_000;
-export const TAMING_BAND_HIGH_BPS = 8_500;
-/** The Reinforced Snare lowers the band's floor as well as buying beats. */
-export const TAMING_BAND_WIDEN_BPS = 1_000;
-
-/**
- * Peak Fear at or above this grades the tame `wary` no matter how it finished.
- * This is the whole tension of the mechanic: Approach is the fastest way to the
- * band and the fastest way past this line.
- */
-export const TAMING_WARY_FEAR_BPS = 7_000;
-
-/**
- * Fear at or above this ends the session immediately as `broken` � the creature
- * is past calming. This is what stops Approach-spam from being a free dominant
- * line: without it, mashing the biggest Calm gain never actually fails, and
- * Back off has no reason to exist.
- */
-export const TAMING_FEAR_BREAK_BPS = 9_500;
-
-/** Per-action effect on the two meters. Positive fear is worse for the player. */
-export const TAMING_ACTION_EFFECTS = {
-  steady: { calmBps: 900, fearBps: -200 },
-  /** Both figures are the tense-mood case; a calm creature uses the constants below. */
-  approach: { calmBps: 1_000, fearBps: 1_400 },
-  offer: { calmBps: 1_400, fearBps: -1_600 },
-  'back-off': { calmBps: -400, fearBps: -2_400 },
-} as const;
-
-/**
- * Approach against a creature that is *not* tense. This is the whole reward for
- * reading the telegraph: closing on a settled animal is the single strongest
- * move in the session, and closing on a straining one is among the worst. The
- * tell has to change both axes or the read is not worth making.
- */
-export const TAMING_APPROACH_CALM_CALM_BPS = 2_600;
-export const TAMING_APPROACH_CALM_FEAR_BPS = 200;
-
-/** Berries spent per Offer. */
-export const TAMING_OFFER_BERRY_COST = 1;
-
-/**
- * Drift applied at the top of each beat by the telegraphed mood. `tense` moods
- * are the ones that make Approach expensive, and the label is the player's only
- * warning — see `tamingMoodLabel`.
- */
-export const TAMING_MOOD_DRIFT = {
-  settling: { calmBps: 400, fearBps: -300, tense: false },
-  watching: { calmBps: -200, fearBps: 100, tense: false },
-  straining: { calmBps: -600, fearBps: 500, tense: true },
-  panicking: { calmBps: -1_200, fearBps: 1_000, tense: true },
-} as const;
-
-/**
- * Mood weights per species temperament, before the Fear skew. A skittish
- * creature spends most of the session tense; a passive one hands the player
- * openings. Weights are relative and need not sum to anything.
- */
-export const TAMING_MOOD_WEIGHTS = {
-  passive: { settling: 40, watching: 35, straining: 20, panicking: 5 },
-  neutral: { settling: 25, watching: 35, straining: 30, panicking: 10 },
-  skittish: { settling: 15, watching: 25, straining: 40, panicking: 20 },
-  aggressive: { settling: 15, watching: 30, straining: 35, panicking: 20 },
-} as const;
-
-/**
- * How hard current Fear skews the mood roll toward the tense moods, in bps of
- * the fear meter. Fear is not just a lose condition — it feeds back into how
- * hard the creature is to read, which is what makes a fear spiral recoverable
- * only by spending beats on Back off.
- */
-export const TAMING_FEAR_SKEW_BPS = 6_000;
+export const TAME_CHANCE_MIN_BPS = 500;
+export const TAME_CHANCE_MAX_BPS = 9_500;
+/** Share of a species' `tameEaseBps` that counts before the player does anything. */
+export const TAME_BASE_SHARE_BPS = 2_500;
+/** Default weight of missing health, at 0 HP, when a species does not set its own. */
+export const TAME_HP_WEIGHT_BPS = 3_500;
+/** Health share at or below which a creature staggers, once per life. */
+export const TAME_STAGGER_HP_BPS = 2_500;
+export const TAME_STAGGER_TICKS = 240;
+export const TAME_STAGGER_BONUS_BPS = 1_500;
+/** Progress one offer adds: the species' favourite, or a berry as a generic edible. */
+export const TAME_FAVOURITE_OFFER_BPS = 2_000;
+export const TAME_BERRY_OFFER_BPS = 500;
+/** Default cap on what offering alone can contribute. */
+export const TAME_FOOD_CAP_BPS = 4_000;
+export const TAME_EATING_TICKS = 300;
+/** Bonus for a throw the creature never saw coming; doubled while it eats. */
+export const TAME_UNNOTICED_BPS = 1_000;
+/** Each failed throw makes the next one this much likelier. */
+export const TAME_PITY_PER_MISS_BPS = 750;
+/** How far a snare can be thrown, and an offer tossed. */
+export const SNARE_THROW_RANGE_PX = 96;
+export const OFFER_RANGE_PX = 72;
 
 /** Eat Berry restores this share of max HP (capped at full health). */
 export const BERRY_HEAL_BPS = 3_000;

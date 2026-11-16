@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { createOpeningChapter, STARTER_TUFTLE_POSITION, starterTuftleId, activeOpeningMilestone } from '../../src/content/onboarding';
 import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { actOpeningTrust, beginOpeningTrust, completeOpeningMilestone, nameOpeningCompanion, reconcileOpeningChapter } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, completeOpeningMilestone, nameOpeningCompanion, offerOpeningTuftle, openingTuftleFed, reconcileOpeningChapter, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { activeQuest, reconcileQuestProgress, openingQuestViews } from '../../src/simulation/progression';
 import { canonicalizeGameState } from '../../src/simulation/determinism';
 import { migrateToCurrent, SaveValidationError } from '../../src/persistence/migrations';
 import { acquireWildCreature } from '../../src/simulation/creatureAcquisition';
 import { strikeCreatureMelee } from '../../src/simulation/creatureStrike';
-import { throwSnareAtCreature } from '../../src/simulation/encounters';
+import { throwSnareAtCreature } from '../../src/simulation/tameChance';
 import { advanceWildCreatures } from '../../src/simulation/creatureCombat';
 import { terrainAt } from '../../src/simulation/landscape';
 import { isTownFootprintWorldPosition } from '../../src/content/townBuildings';
@@ -26,7 +26,8 @@ function approach(seed = 42) {
 }
 function befriend(state: GameState) {
   expect(beginOpeningTrust(state).ok).toBe(true);
-  for (let action = 0; action < 4; action++) expect(actOpeningTrust(state, 'steady').ok).toBe(true);
+  offerOpeningTuftle(state);
+  expect(throwOpeningSnare(state).ok).toBe(true);
   expect(state.onboarding.status).toBe('active');
 }
 
@@ -62,21 +63,22 @@ describe('opening chapter and early Tuftle partnership', () => {
     state.inventory.berry = 0;
     expect(state.unlockedItemIds).not.toContain('taming-snare');
     expect(beginOpeningTrust(state).ok).toBe(true);
-    expect(actOpeningTrust(state, 'offer').ok).toBe(true);
+    expect(offerOpeningTuftle(state).ok).toBe(true);
     expect(state.inventory.berry).toBe(0);
+    expect(throwOpeningSnare(state).ok).toBe(true);
+    expect(state.inventory['taming-snare']).toBe(0);
   });
 
-  it('resumes the exact saved trust state and uses the same deterministic outcome', () => {
+  it('resumes a fed Tuftle from a save and reaches the same deterministic outcome', () => {
     const state = approach();
     beginOpeningTrust(state);
-    actOpeningTrust(state, 'steady');
+    offerOpeningTuftle(state);
     const saved = migrateToCurrent(JSON.parse(JSON.stringify(envelope(state)))).save.state;
     expect(saved.onboarding).toEqual(state.onboarding);
+    expect(openingTuftleFed(saved)).toBe(true);
     expect(beginOpeningTrust(saved).ok).toBe(true);
-    for (const action of ['offer', 'approach', 'steady'] as const) {
-      actOpeningTrust(state, action);
-      actOpeningTrust(saved, action);
-    }
+    throwOpeningSnare(state);
+    throwOpeningSnare(saved);
     expect(canonicalizeGameState(saved)).toBe(canonicalizeGameState(state));
     expect(saved.onboarding.status).toBe('active');
   });
@@ -85,9 +87,11 @@ describe('opening chapter and early Tuftle partnership', () => {
     const state = approach();
     const inventoryBefore = structuredClone(state.inventory);
     beginOpeningTrust(state);
-    for (let index = 0; index < 12; index++) actOpeningTrust(state, 'back-off');
+    expect(throwOpeningSnare(state).ok).toBe(false);
+    expect(offerOpeningTuftle(state).ok).toBe(true);
+    expect(offerOpeningTuftle(state).ok).toBe(false);
     expect(state.onboarding.status).toBe('active');
-    expect(state.onboarding.trustSession?.settled).toBeNull();
+    expect(state.ownedCreatures).toHaveLength(0);
     befriend(state);
     expect(state.inventory).toEqual(inventoryBefore);
   });
@@ -100,7 +104,7 @@ describe('opening chapter and early Tuftle partnership', () => {
     expect(creature).toMatchObject({ id: `creature-${nextId}`, speciesId: 'tuftle', role: 'follow', level: 1 });
     expect(state.wildCreatures.some((wild) => wild.id === starterTuftleId(state.seed))).toBe(false);
     expect(state.firstTamedSpeciesIds).toEqual(['tuftle']);
-    expect(actOpeningTrust(state, 'steady').ok).toBe(false);
+    expect(throwOpeningSnare(state).ok).toBe(false);
     expect(beginOpeningTrust(state).ok).toBe(false);
     expect(reconcileOpeningChapter(state)).toBe(false);
     expect(state.ownedCreatures).toHaveLength(1);
@@ -157,17 +161,15 @@ describe('opening chapter and early Tuftle partnership', () => {
   it('can leave, reload, and return to the same paused introduction', () => {
     const state = approach();
     beginOpeningTrust(state);
-    actOpeningTrust(state, 'steady');
-    const trust = structuredClone(state.onboarding.trustSession);
+    offerOpeningTuftle(state);
     enterWorldArea(state, 1, 0);
     expect(beginOpeningTrust(state).ok).toBe(false);
     const reloaded = migrateToCurrent(envelope(state)).save.state;
-    expect(reloaded.onboarding.trustSession).toEqual(trust);
     enterWorldArea(reloaded, 0, 0);
     Object.assign(reloaded.player, STARTER_TUFTLE_POSITION);
     expect(beginOpeningTrust(reloaded).ok).toBe(true);
-    expect(reloaded.onboarding.trustSession).toEqual(trust);
-    for (let action = 0; action < 3; action++) actOpeningTrust(reloaded, 'steady');
+    expect(openingTuftleFed(reloaded)).toBe(true);
+    expect(throwOpeningSnare(reloaded).ok).toBe(true);
     expect(reloaded.onboarding.status).toBe('active');
     expect(reloaded.visitedAreas['0,0']?.wildCreatures.some((wild) => wild.id === starterTuftleId(state.seed))).toBe(false);
     enterWorldArea(reloaded, 1, 0);
@@ -211,13 +213,11 @@ describe('opening chapter and early Tuftle partnership', () => {
     expect(save.state.wildCreatures.some((wild) => wild.id === starterTuftleId(7))).toBe(false);
   });
 
-  it('rejects corrupt opening versions, rewards, and trust data before loading', () => {
+  it('rejects corrupt opening versions and rewards before loading', () => {
     const state = approach();
     beginOpeningTrust(state);
     for (const corrupt of [
       { version: 99 }, { issuedRewardIds: ['starter-partner'] },
-      { trustSession: { ...state.onboarding.trustSession, calmBps: 1.5 } },
-      { trustSession: { ...state.onboarding.trustSession, mood: 'unknown' } },
       { status: 'complete' }, { starterWildCreatureId: 'another-creature' },
     ]) {
       const broken = structuredClone(state);

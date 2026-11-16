@@ -57,13 +57,7 @@ describe('IndexedDbSaveRepository', () => {
     await a.open();
     await a.acquireWriter();
     const save = makeSave(7, 123);
-    save.state.activeEncounter = {
-      wildCreatureId: save.state.wildCreatures[0]!.id,
-      creatureHp: 12, creatureMaxHp: 36, round: 4, message: 'Your turn.',
-      playerPos: 50, creaturePos: 63,
-      companionCreatureId: null, selectedCompanionAbilityId: null,
-      companionAbilityReadyRounds: {}, enemyIntent: 'strike',
-    };
+    save.state.wildCreatures[0]!.captureBonusBps = 2_000;
     await a.save(save, 'critical');
     a.close();
 
@@ -72,7 +66,7 @@ describe('IndexedDbSaveRepository', () => {
     const loaded = await b.load();
     expect(loaded?.source).toBe('current');
     expect(loaded?.save.state.player.x).toBe(123);
-    expect(loaded?.save.state.activeEncounter).toMatchObject({ playerPos: 50, creaturePos: 63, round: 4 });
+    expect(loaded?.save.state.wildCreatures[0]!.captureBonusBps).toBe(2_000);
     b.close();
   });
 

@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { readySupplyRun } from '../helpers/openingJourney';
 import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
-import { createOpeningChapter, OPENING_CHAPTER_VERSION, openingGuardianId, openingSupplyCacheId } from '../../src/content/onboarding';
+import { createOpeningChapter, OPENING_CHAPTER_VERSION, openingSupplyCacheId } from '../../src/content/onboarding';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { beginOpeningGuardPractice, claimOpeningDiscovery, openOpeningSideCache, recoverOpeningSupplies, reconcileOpeningSupplyRun, supplyRunRoute, supplyRunTarget } from '../../src/simulation/openingSupplyRun';
-import { encounterDistance, resolveEncounterAction } from '../../src/simulation/encounters';
+import { claimOpeningDiscovery, openOpeningSideCache, recoverOpeningSupplies, reconcileOpeningSupplyRun, supplyRunRoute, supplyRunTarget } from '../../src/simulation/openingSupplyRun';
 import { openNearestContainer } from '../../src/simulation/worldContainers';
 import { activeQuest, reconcileQuestProgress } from '../../src/simulation/progression';
 import { migrateToCurrent, SaveValidationError } from '../../src/persistence/migrations';
 import { canonicalizeGameState } from '../../src/simulation/determinism';
-import { advanceWildCreatures } from '../../src/simulation/creatureCombat';
 import { dropCarriedBlueprint, recoverBlueprintDrop, expireBlueprintDrops, registerCarriedBlueprint, scrapCarriedBlueprint } from '../../src/simulation/carriedBlueprints';
 import { sellCarriedBlueprint } from '../../src/simulation/npcStock';
 import { elarisPublicWorkbenchCenterPx } from '../../src/simulation/elarisWorkbench';
@@ -52,7 +50,7 @@ describe('nearby supply run', () => {
     expect(state.inventory.wood).toBe(before.wood + 4); expect(state.inventory.fiber).toBe(before.fiber + 2);
     expect(state.carriedBlueprints.filter((paper) => paper.blueprintId === 'garden-bed')).toHaveLength(1);
     expect(state.unlockedItemIds).not.toContain('garden-bed');
-    expect(state.onboarding.supplyRun).toMatchObject({ guardianDefeated: false, guardianStarted: false, suppliesRecovered: true, blueprintClaimed: true });
+    expect(state.onboarding.supplyRun).toMatchObject({ suppliesRecovered: true, blueprintClaimed: true });
     expect(state.onboarding.status).toBe('active');
     expect(recoverOpeningSupplies(state).ok).toBe(false);
     expect(claimOpeningDiscovery(state).ok).toBe(false);
@@ -78,44 +76,7 @@ describe('nearby supply run', () => {
     expect(state.carriedBlueprints).toHaveLength(1);
   });
 
-  it('shows enemy intent before actions, selects the original Tuftle, and records actual prevented damage', () => {
-    const state = atCart();
-    expect(beginOpeningGuardPractice(state).ok).toBe(true);
-    expect(state.activeEncounter).toMatchObject({ wildCreatureId: openingGuardianId(state.seed), companionCreatureId: state.onboarding.companionId, selectedCompanionAbilityId: 'tuftle-guard', enemyIntent: 'advance' });
-    let prevented = 0;
-    for (let i = 0; i < 12; i++) {
-      const control = structuredClone(state); control.activeEncounter!.selectedCompanionAbilityId = null;
-      const original = resolveEncounterAction(control, 'rest');
-      const result = resolveEncounterAction(state, 'rest');
-      const guarded = result.companionAbility?.guardedDamage ?? 0;
-      if (guarded > 0) {
-        expect(result.creatureStrike!.damage + guarded).toBe(original.creatureStrike!.damage);
-        prevented += guarded; break;
-      }
-    }
-    expect(prevented).toBeGreaterThan(0);
-    expect(state.onboarding.supplyRun!.guardedDamage).toBe(prevented);
-    expect(migrateToCurrent(envelope(state)).save.state.activeEncounter).toEqual(state.activeEncounter);
-  });
-
-  it('retreats safely, preserves health/progress for retry, and never duplicates the guardian', () => {
-    let state = atCart(); beginOpeningGuardPractice(state);
-    resolveEncounterAction(state, 'rest');
-    const hp = state.player.hp; const wildHp = state.activeEncounter!.creatureHp;
-    expect(resolveEncounterAction(state, 'flee')).toMatchObject({ ok: true, ended: true, fled: true });
-    expect(state.player.hp).toBe(hp);
-    const x = state.wildCreatures.find((wild) => wild.id === openingGuardianId(state.seed))!.x;
-    for (let i = 0; i < 200; i++) { state.tick++; advanceWildCreatures(state); }
-    expect(state.wildCreatures.find((wild) => wild.id === openingGuardianId(state.seed))!.x).toBe(x);
-    state = migrateToCurrent(envelope(state)).save.state;
-    expect(beginOpeningGuardPractice(state).ok).toBe(true);
-    expect(state.activeEncounter!.creatureHp).toBe(wildHp);
-    expect(state.wildCreatures.filter((wild) => wild.id === openingGuardianId(state.seed))).toHaveLength(1);
-    resolveEncounterAction(state, 'flee');
-    expect(recoverOpeningSupplies(state).ok).toBe(true);
-  });
-
-  it('gives one optional cache reward and refuses remote or in-battle recovery', () => {
+  it('gives one optional cache reward and refuses remote recovery', () => {
     const state = atCart(); const site = state.onboarding.supplyRun!.site!;
     expect(openOpeningSideCache(state).ok).toBe(false);
     state.player.x -= 4 * 16;
@@ -125,22 +86,6 @@ describe('nearby supply run', () => {
     expect(openOpeningSideCache(state).ok).toBe(false);
     expect(recoverOpeningSupplies(state).ok).toBe(false);
     state.player.x = (site.tileX + .5) * 16;
-    beginOpeningGuardPractice(state);
-    expect(recoverOpeningSupplies(state).ok).toBe(false);
-  });
-
-  it('allows a short normal arena win without farming or respawning the guardian', () => {
-    const state = atCart(); beginOpeningGuardPractice(state);
-    for (let round = 0; round < 30 && state.activeEncounter; round++) {
-      const action = encounterDistance(state.activeEncounter) > 10 ? 'forward' : state.player.stamina >= 10 ? 'melee' : 'rest';
-      const result = resolveEncounterAction(state, action);
-      expect(result.playerDefeated).not.toBe(true);
-    }
-    expect(state.onboarding.supplyRun!.guardianDefeated).toBe(true);
-    expect(state.activeEncounter).toBeNull();
-    expect(beginOpeningGuardPractice(state).ok).toBe(false);
-    reconcileQuestProgress(state);
-    expect(state.wildCreatures.some((wild) => wild.id === openingGuardianId(state.seed))).toBe(false);
     expect(recoverOpeningSupplies(state).ok).toBe(true);
   });
 

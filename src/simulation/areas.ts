@@ -183,7 +183,6 @@ function activateArea(state: GameState, area: AreaSnapshot): void {
   state.containers = area.containers;
   state.buildings = area.buildings;
   state.raiders = [];
-  state.activeEncounter = null;
   reconcileRoadResources(state);
   recordAreaVisit(state);
 }

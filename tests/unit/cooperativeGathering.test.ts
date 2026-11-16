@@ -4,7 +4,7 @@ import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../s
 import { RESOURCE_STACK_SIZE } from '../../src/config/balance';
 import { OPENING_SHELTER_BLUEPRINTS, createOpeningChapter } from '../../src/content/onboarding';
 import { createInitialState, type GameState, type ResourceNodeState } from '../../src/simulation/state';
-import { beginOpeningTrust, actOpeningTrust, reconcileOpeningChapter } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare, reconcileOpeningChapter } from '../../src/simulation/onboarding';
 import { activeQuest } from '../../src/simulation/progression';
 import { gatherNearest } from '../../src/simulation/gameplayCommands';
 import { inventoryCapacity } from '../../src/simulation/characterProgression';
@@ -22,7 +22,7 @@ function partnered() {
   state.player.x = 82 * 16;
   state.player.y = 82 * 16;
   beginOpeningTrust(state);
-  for (let index = 0; index < 4; index++) actOpeningTrust(state, 'steady');
+  offerOpeningTuftle(state); throwOpeningSnare(state);
   Object.assign(state.player, starterGroveAnchor(state.seed));
   state.gameBalance.objects.plant.yieldMin = 1;
   state.gameBalance.objects.plant.yieldMax = 1;
@@ -145,13 +145,14 @@ describe('cooperative fiber gathering', () => {
     expect(loaded.state.ownedCreatures).toHaveLength(1);
   });
 
-  it('preserves an in-progress trust session and keeps legacy worlds opted out', () => {
+  it('preserves a fed opening Tuftle and keeps legacy worlds opted out', () => {
     const state = createInitialState(7);
     state.player.x = 82 * 16; state.player.y = 82 * 16;
-    beginOpeningTrust(state); actOpeningTrust(state, 'steady');
+    beginOpeningTrust(state); offerOpeningTuftle(state);
     state.onboarding.version = 1;
     const loaded = migrateToCurrent(save(state, 82)).save.state;
-    expect(loaded.onboarding.trustSession).toEqual(state.onboarding.trustSession);
+    const fixture = (wild: { id: string }) => wild.id === state.onboarding.starterWildCreatureId;
+    expect(loaded.wildCreatures.find(fixture)?.captureBonusBps).toBeGreaterThan(0);
     const legacy = migrateToCurrent(save(createInitialState(7), 81)).save.state;
     expect(legacy.onboarding.status).toBe('legacy');
     expect(legacy.unlockedItemIds).not.toContain('field-cache');

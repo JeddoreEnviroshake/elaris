@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState } from '../../src/simulation/state';
-import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { starterGroveAnchor } from '../../src/simulation/worldGeneration';
 import { easeFollowerToward, followerCreaturePlacements, FOLLOWER_SNAP_DISTANCE } from '../../src/presentation/followerCreatures';
 
@@ -8,7 +8,7 @@ function companion() {
   const state = createInitialState(42);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
   beginOpeningTrust(state);
-  for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  offerOpeningTuftle(state); throwOpeningSnare(state);
   Object.assign(state.player, starterGroveAnchor(state.seed));
   return state;
 }

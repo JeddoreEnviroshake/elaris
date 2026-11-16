@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createOpeningChapter } from '../../src/content/onboarding';
 import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { completeOpeningMilestone, recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, shelterLayout } from '../../src/simulation/openingShelter';
 import { advanceOpeningFog } from '../../src/simulation/openingFog';
@@ -27,7 +27,7 @@ function envelope(state: GameState, version = SAVE_SCHEMA_VERSION) {
 function afterFog(seed = 42) {
   const state = createInitialState(seed);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
-  beginOpeningTrust(state); for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  beginOpeningTrust(state); offerOpeningTuftle(state); throwOpeningSnare(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1); reconcileOpeningShelter(state);
   const site = state.onboarding.shelterPlan!;
   state.player.x = (site.tileX + 1.5) * 16; state.player.y = (site.tileY + 3) * 16;

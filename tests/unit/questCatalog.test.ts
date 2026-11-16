@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { QUEST_DEFINITIONS } from '../../src/content/quests';
-import { craftArrows, craftTamingSnare } from '../../src/simulation/encounters';
+import { craftArrows, craftTamingSnare } from '../../src/simulation/supplyCrafting';
 import { sellResource } from '../../src/simulation/economy';
 import { questViews } from '../../src/simulation/progression';
 import { learnBlueprint } from '../../src/simulation/blueprintKnowledge';

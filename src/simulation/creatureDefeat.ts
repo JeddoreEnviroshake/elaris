@@ -21,7 +21,6 @@ import { describeFind, rollCreatureBlueprint, type BlueprintFind } from './bluep
 import { tryAddResource } from './gameplayCommands';
 import { grantXp } from './characterProgression';
 import { recordCreatureDefeat } from './questTracking';
-import { isOpeningGuardian } from '../content/onboarding';
 import type { GameState, ResourceId, WildCreatureState } from './state';
 
 export interface CreatureDefeatPayout {
@@ -42,7 +41,6 @@ export interface CreatureDefeatPayout {
  * the message it wants to show — because those differ between the two paths.
  */
 export function awardCreatureDefeat(state: GameState, wild: WildCreatureState): CreatureDefeatPayout {
-  if (isOpeningGuardian(state, wild.id)) state.onboarding.supplyRun!.guardianDefeated = true;
   const definition = leveledCreatureDefinition(state, wild);
   // Counted before the payout so the third, sixth, ninth defeat of a species
   // each yield its trophy. A counter, not a roll: the same defeat sequence
@@ -67,7 +65,7 @@ export function awardCreatureDefeat(state: GameState, wild: WildCreatureState): 
   }
   // Rolled here rather than in either caller for the same reason the trophy
   // counter is: a species owes its blueprint on the same defeat whether it died
-  // in a field or in a taming session, and two implementations would drift.
+  // in a field or anywhere else, and two implementations would drift.
   // After the loot is banked, so a blueprint never costs the player the hide.
   const blueprintFind = rollCreatureBlueprint(state, wild.speciesId);
   if (blueprintFind) granted.push(describeFind(blueprintFind));

@@ -1,4 +1,3 @@
-import { isOpeningGuardian } from '../content/onboarding';
 import { supplyRunAvailable, supplyRunInReach, supplyRunRoute, supplyRunTarget, SUPPLY_RUN_ROAD } from '../simulation/openingSupplyRun';
 import { knowsBlueprint } from '../simulation/blueprintKnowledge';
 import { isElarisPublicWorkbenchServing, withinElarisPublicWorkbench } from '../simulation/elarisWorkbench';
@@ -13,7 +12,7 @@ export class SupplyRunGuide {
   private routeCache: { key: string; path: Array<{ tileX: number; tileY: number }> } | null = null;
   private waypoint: { tileX: number; tileY: number; label: string } | null = null;
   constructor(private readonly state: GameState, private readonly actions: {
-    onPractice: () => void; onRecover: () => void; onClaim: () => void; onSideCache: () => void;
+    onRecover: () => void; onClaim: () => void; onSideCache: () => void;
   }) { this.panel.setAttribute('aria-label', 'Supply run directions and discovery'); }
   attachToMenu(menu: InventoryPanel): void { menu.registerTab('supply-run', 'Supply Run', this.panel, () => { this.refresh(); this.panel.scrollTop = 0; }); }
   refresh(): void {
@@ -22,7 +21,7 @@ export class SupplyRunGuide {
     const tileX = Math.floor(state.player.x / 16); const tileY = Math.floor(state.player.y / 16);
     const known = knowsBlueprint(state, 'garden-bed');
     const atCart = supplyRunInReach(state); const atSide = supplyRunInReach(state, true); const atBench = withinElarisPublicWorkbench(state, FACILITY_INTERACTION_RANGE_PX);
-    const key = JSON.stringify([active, run, tileX, tileY, state.currentArea.key, state.buildings.length, state.inventory, state.carriedBlueprints, state.activeEncounter?.wildCreatureId,
+    const key = JSON.stringify([active, run, tileX, tileY, state.currentArea.key, state.buildings.length, state.inventory, state.carriedBlueprints,
       companion?.role, companion?.name, state.expeditions.length, known, atCart, atSide, atBench]);
     if (key === this.signature) return;
     this.signature = key; this.panel.replaceChildren(); this.waypoint = null;
@@ -63,19 +62,11 @@ export class SupplyRunGuide {
     if (run.site) { const optional = document.createElement('p'); optional.style.margin = '6px 0 0'; optional.textContent = `Optional roadside log: X ${run.site.tileX - 4}, Y ${run.site.tileY} · three berries and a Cloth Mask.`; directions.append(optional); }
     this.panel.append(directions);
     const actions = div({ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' });
-    const recover = uiButton('Recover lost supplies', this.actions.onRecover); recover.disabled = run.suppliesRecovered || !supplyRunInReach(state) || !!state.activeEncounter || !!state.pendingRespawn;
+    const recover = uiButton('Recover lost supplies', this.actions.onRecover); recover.disabled = run.suppliesRecovered || !supplyRunInReach(state) || !!state.pendingRespawn;
     const claim = uiButton(run.blueprintClaimed ? 'Discovery collected' : 'Collect Garden Bed blueprint', this.actions.onClaim);
-    claim.disabled = !run.suppliesRecovered || run.blueprintClaimed || !atCart && !atBench || !!state.activeEncounter || !!state.pendingRespawn;
-    const cache = uiButton(run.sideCacheOpened ? 'Roadside log opened' : 'Open roadside log', this.actions.onSideCache); cache.disabled = run.sideCacheOpened || !supplyRunInReach(state, true) || !!state.activeEncounter;
+    claim.disabled = !run.suppliesRecovered || run.blueprintClaimed || !atCart && !atBench || !!state.pendingRespawn;
+    const cache = uiButton(run.sideCacheOpened ? 'Roadside log opened' : 'Open roadside log', this.actions.onSideCache); cache.disabled = run.sideCacheOpened || !supplyRunInReach(state, true);
     actions.append(run.suppliesRecovered ? claim : recover, cache); this.panel.append(actions);
-    const battle = div({ marginTop: '12px', padding: '10px', border: '1px solid #8ca776', borderRadius: '6px' }); battle.setAttribute('aria-label', 'Optional guard practice');
-    const lesson = document.createElement('p'); lesson.style.margin = '0 0 8px'; lesson.textContent = run.guardedDamage > 0
-      ? `Shell Guard prevented ${run.guardedDamage} damage in practice. ${run.guardianDefeated ? 'Craghopper defeated.' : 'You can retry or leave the encounter alone.'}`
-      : 'Optional arena lesson: read the enemy Intent, then act. Your following Tuftle will be selected with Shell Guard. Its guard works when ready; Rest lets the wounded Craghopper approach. Retreat is guaranteed and preserves progress.';
-    const practice = uiButton('Practice Shell Guard', this.actions.onPractice);
-    practice.disabled = !supplyRunInReach(state) || run.guardianDefeated || !!state.activeEncounter || !companion || companion.role !== 'follow';
-    battle.append(lesson, practice); this.panel.append(battle);
-    if (state.activeEncounter && isOpeningGuardian(state, state.activeEncounter.wildCreatureId)) practice.disabled = true;
     if (run.blueprintDropId) { const note = document.createElement('p'); note.textContent = 'Your discovery paper is on the ground where you dropped it or were defeated. It will remain there for recovery.'; this.panel.append(note); }
   }
   get visibleWaypoint() { return this.waypoint; }

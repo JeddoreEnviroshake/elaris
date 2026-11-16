@@ -174,10 +174,10 @@ test('first-person polish opens gates ahead and gives companions space behind th
   await page.evaluate(async () => {
     const scene = (globalThis as unknown as Debug).__game.scene.getScene('world');
     const path = '/src/simulation/onboarding.ts';
-    const { beginOpeningTrust, actOpeningTrust } = await import(path);
+    const { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } = await import(path);
     scene.state.player.x = 82 * 16; scene.state.player.y = 82 * 16;
     beginOpeningTrust(scene.state);
-    for (let i = 0; i < 4; i++) actOpeningTrust(scene.state, 'steady');
+    offerOpeningTuftle(scene.state); throwOpeningSnare(scene.state);
     scene.state.player.x = 104.5 * 16; scene.state.player.y = 73.5 * 16;
     scene.state.player.facing = 'up'; scene.state.wildCreatures = [];
     scene.snapRenderPoseToState();

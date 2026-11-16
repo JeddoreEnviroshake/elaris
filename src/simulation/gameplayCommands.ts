@@ -875,7 +875,6 @@ export function setCreatureRole(state: GameState, creatureId: string, role: Crea
 
 /** Select one eligible follower to support future encounters, or clear it. */
 export function setBattleCompanion(state: GameState, creatureId: string | null): CommandResult {
-  if (state.activeEncounter) return { ok: false, message: 'Choose a battle companion outside an encounter' };
   if (creatureId === null) {
     state.battleCompanionId = null;
     return { ok: true, message: 'Battle companion cleared' };
@@ -890,14 +889,13 @@ export function setBattleCompanion(state: GameState, creatureId: string | null):
 
 /** Free deterministic tactic selection. It never advances a turn or consumes RNG. */
 export function selectCompanionAbility(state: GameState, abilityId: import('./state').CompanionAbilityId, creatureId?: string): CommandResult {
-  const companionId = state.activeEncounter?.companionCreatureId ?? creatureId ?? state.battleCompanionId;
+  const companionId = creatureId ?? state.battleCompanionId;
   const creature = state.ownedCreatures.find((candidate) => candidate.id === companionId);
   if (!creature) return { ok: false, message: 'No Battle Companion is available' };
   const ability = companionAbility(creature.speciesId, abilityId);
   if (!ability) return { ok: false, message: 'This creature cannot use that ability' };
   if (creatureBondLevel(creature) < ability.unlockBondLevel) return { ok: false, message: `Requires Bond ${ability.unlockBondLevel}` };
   creature.selectedBattleAbilityId = ability.id;
-  if (state.activeEncounter) state.activeEncounter.selectedCompanionAbilityId = ability.id;
   return { ok: true, message: `${ability.displayName} selected` };
 }
 

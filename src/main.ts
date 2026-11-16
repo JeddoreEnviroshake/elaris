@@ -14,7 +14,6 @@ import { installArtTheme } from './ui/artTheme';
 import { installTypingGuard } from './ui/typingGuard';
 import { Elaris3DRenderer } from './three/Elaris3DRenderer';
 import { cameraOrientationFromTenths, type ElarisCameraOrientation } from './three/cameraControls';
-import type { BattleRoundPresentation } from './three/battleState';
 import { LocalWorlds, type LocalWorld } from './persistence/localWorlds';
 import { worldDatabaseName } from './persistence/IndexedDbSaveRepository';
 import { SessionMenu } from './ui/sessionMenu';
@@ -158,7 +157,6 @@ async function startWorld(world: LocalWorld, fresh = false): Promise<void> {
       onStateChanged,
       onTransitionStarted: () => controller.prepareCriticalSave(),
       globalBalance: globalBalanceService,
-      onBattleRound: (round: BattleRoundPresentation) => renderer3d.playBattleRound(round),
       system: systemControls,
     });
     renderer3d.setPresentationProvider(() => {
@@ -278,8 +276,7 @@ async function startWorld(world: LocalWorld, fresh = false): Promise<void> {
         onStateChanged,
         onTransitionStarted: () => controller.prepareCriticalSave(),
         globalBalance: globalBalanceService,
-        onBattleRound: (round: BattleRoundPresentation) => renderer3d.playBattleRound(round),
-        system: systemControls,
+          system: systemControls,
       });
     }
 

@@ -1,9 +1,4 @@
 import * as THREE from 'three';
-import {companionAbility} from '../content/companionAbilities';
-import type {SpeciesId} from '../simulation/state';
-import {battleActorPositions,creatureAttackStyle,type BattleRoundPresentation} from './battleState';
-import {BATTLE_TIMING} from '../presentation/combatTiming';
-export {BATTLE_TIMING} from '../presentation/combatTiming';
 
 export type CombatEffectKind = 'charge'|'bolt'|'arrow'|'slash'|'impact'|'fizzle'|'snare'|'capture'|'guard'|'heal'|'wind'|'stone'|'dodge';
 export interface EffectPoint {readonly x:number;readonly y:number;readonly z:number}
@@ -20,63 +15,6 @@ export interface CombatEffectCue {
 export const COMBAT_PALETTE={arcane:0x6ff3dc,ivory:0xffefd0,gold:0xffcb70,leaf:0xa5df85,stone:0xd7ad81,enemy:0xf18f70,mist:0xb9b3f2};
 const clamp=(x:number):number=>Math.max(0,Math.min(1,x));
 const ease=(x:number):number=>{const t=clamp(x);return t*t*(3-2*t);};
-const point=(x:number,y:number,z:number):EffectPoint=>({x,y,z});
-export function companionEffectKind(species:SpeciesId,event:BattleRoundPresentation):CombatEffectKind {
-  const ability=event.result.companionAbility;
-  const kind=ability?companionAbility(species,ability.abilityId)?.effect.kind:null;
-  if(kind==='heal')return 'heal';
-  if(kind==='recover-stamina')return 'wind';
-  if(kind==='guard'||kind==='reduce-enemy-power'||kind==='prevent-retreat')return 'guard';
-  if(kind==='player-dodge-bonus'||kind==='move-player'||kind==='player-hit-bonus')return 'wind';
-  return ['craghopper','masonmole','bulwark-boar','slingtail'].includes(species)?'stone':'wind';
-}
-export function companionEffectBeat(event:BattleRoundPresentation):number {
-  const species=event.before.companionSpeciesId,id=event.result.companionAbility?.abilityId;
-  const ability=species&&id?companionAbility(species,id):null;
-  return ability?.timing==='beforePlayerAction'?.03:ability?.timing==='beforeEnemyAction'?.58:.39;
-}
-
-/** Only resolved outcomes create hit effects. Presentation never rolls damage or RNG. */
-export function battleEffectCues(event:BattleRoundPresentation):CombatEffectCue[] {
-  const release=battleActorPositions(event,BATTLE_TIMING.release),impact=battleActorPositions(event,BATTLE_TIMING.impact);
-  const settled=battleActorPositions(event,1,true);
-  const p=point(release.playerX,1.05,.35),c=point(impact.creatureX,1,-.2),cues:CombatEffectCue[]=[];
-  const add=(kind:CombatEffectKind,at:number,duration:number,from:EffectPoint,to:EffectPoint,color:number,critical=false,anchor:'player'|'creature'='creature'):void=>{
-    cues.push({kind,at:at*BATTLE_TIMING.duration,duration,from,to,color,critical,reducedTo:point(anchor==='player'?settled.playerX:settled.creatureX,to.y,to.z)});
-  };
-  const strike=event.result.playerStrike,hit=!!strike&&!['miss','dodge'].includes(strike.outcome);
-  const target=hit?c:point(c.x+.6,c.y,c.z-.7);
-  if(event.action==='magic'){
-    add('charge',0,250,p,p,COMBAT_PALETTE.arcane,false,'player');
-    add('bolt',BATTLE_TIMING.release,184,p,target,COMBAT_PALETTE.arcane);
-  }else if(event.action==='ranged')add('arrow',BATTLE_TIMING.release,184,p,target,COMBAT_PALETTE.gold);
-  else if(event.action==='melee')add('slash',.20,235,p,target,COMBAT_PALETTE.ivory);
-  if(strike)add(hit?'impact':strike.outcome==='dodge'?'dodge':'fizzle',BATTLE_TIMING.impact,hit?420:320,c,strike.outcome==='miss'?target:c,
-    strike.outcome==='crit'?COMBAT_PALETTE.gold:event.action==='magic'?COMBAT_PALETTE.arcane:COMBAT_PALETTE.ivory,strike.outcome==='crit');
-  if(event.action==='snare'){
-    add('snare',BATTLE_TIMING.release,220,p,c,COMBAT_PALETTE.gold);
-    add(event.result.tamed?'capture':'fizzle',.37,event.result.tamed?1450:400,c,c,event.result.tamed?COMBAT_PALETTE.leaf:COMBAT_PALETTE.gold);
-  }
-  if(event.action==='berry'||event.action==='rest')add(event.action==='berry'?'heal':'wind',.18,650,p,p,event.action==='berry'?COMBAT_PALETTE.leaf:COMBAT_PALETTE.gold,false,'player');
-  const assist=event.result.companionAbility,species=event.before.companionSpeciesId;
-  if(assist&&species){
-    const kind=companionEffectKind(species,event),at=companionEffectBeat(event),pose=battleActorPositions(event,at);
-    const enemy=kind==='stone'||(assist.damage??0)>0,dest=enemy?point(pose.creatureX,1,-.2):point(pose.playerX,1.05,.35);
-    add(kind,at,620,point(pose.playerX-1.05,.65,1.15),dest,kind==='stone'?COMBAT_PALETTE.stone:(assist.recoveredStamina??0)>0?COMBAT_PALETTE.gold:species==='mistmoth'?COMBAT_PALETTE.mist:COMBAT_PALETTE.leaf,false,enemy?'creature':'player');
-  }
-  const counter=event.result.creatureStrike;
-  if(counter){
-    const style=counter.style??creatureAttackStyle(event.before.speciesId),launch=battleActorPositions(event,.63),reply=battleActorPositions(event,BATTLE_TIMING.reply);
-    const from=point(launch.creatureX,1,-.2),to=point(reply.playerX,1.05,.35);
-    const target=counter.outcome==='dodge'?point(to.x-.6,to.y,to.z+.7):to;
-    if(style!=='melee')add(style==='magic'?'bolt':'arrow',.63,195,from,target,style==='magic'?event.before.speciesId==='snarlfox'?0xffb36e:COMBAT_PALETTE.mist:COMBAT_PALETTE.enemy,false,'player');
-    else add('slash',.67,220,from,to,COMBAT_PALETTE.enemy,false,'player');
-    const blocked=counter.outcome!=='dodge'&&counter.damage===0;
-    add(counter.outcome==='dodge'?'dodge':blocked?'guard':'impact',BATTLE_TIMING.reply,350,to,to,blocked?COMBAT_PALETTE.leaf:COMBAT_PALETTE.enemy,counter.outcome==='crit','player');
-  }
-  return cues;
-}
-
 const MAX_CUES=24,MAX_GLYPHS=192,MAX_SHARDS=512;
 const GROUND=-Math.PI/2;
 const X_AXIS=new THREE.Vector3(1,0,0);
@@ -159,10 +97,6 @@ export class CombatEffects {
     if(this.disposed||cue.duration<=0)return;
     if(this.cues.length===MAX_CUES)this.cues.shift();
     this.cues.push({...cue,from:{...cue.from},to:{...cue.to}});
-  }
-  playBattle(event:BattleRoundPresentation,at:number):void {
-    this.clear();
-    for(const cue of battleEffectCues(event))this.emit({...cue,at:at+cue.at});
   }
   clear():void {this.cues.length=0;this.glyphCount=this.shardCount=0;this.glyphs.count=this.shards.count=0;}
   update(timeMs:number,reducedMotion:boolean):void {

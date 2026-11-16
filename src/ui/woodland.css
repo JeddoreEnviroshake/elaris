@@ -171,8 +171,6 @@
 [data-world-map-overlay] {background:radial-gradient(ellipse,#071d13aa,#05160fd9)!important}
 [data-world-map-overlay]>.elaris-panel {padding:23px!important;border-radius:16px!important;border-color:#c1a56e99!important}
 [aria-label="Close large map"] {min-height:44px!important}
-.elaris-battle>div:first-child {padding-top:18px!important;font-family:var(--elaris-font-display)!important}
-[data-presentation="3d"] .elaris-battle {background-color:transparent!important;background-image:none!important}
 .eb-bottom {background:linear-gradient(0deg,#112c23fc,#1c3529f2)!important;border-top:1px solid #cdb77b88!important;gap:12px!important;padding:12px 16px 16px!important;box-shadow:0 -10px 40px #10221d33}
 .eb-plate {border-radius:11px!important;background:#223d2de8!important;border-color:#c7ac704d!important}
 .eb-plate>div:first-child {background:transparent!important;color:#ead5a6!important;font-family:var(--elaris-font-display)!important;font-weight:400!important;font-size:17px!important}

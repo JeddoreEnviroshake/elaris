@@ -1,7 +1,7 @@
 import { OPENING_CHAPTER_VERSION } from '../../src/content/onboarding';
 import { describe, expect, it } from 'vitest';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { shelterLayout, shelterChecklist, shelterMaterialBudget, reconcileOpeningShelter, claimShelterSupplies, moveShelterPlan, findShelterSite } from '../../src/simulation/openingShelter';
 import { batchCost, checkBuildBatch, placeBuildBatch, shapedBuildRequests, undoBuildGroup } from '../../src/simulation/batchBuilding';
@@ -16,7 +16,7 @@ function readyToBuild(seed = 42) {
   const state = createInitialState(seed);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
   beginOpeningTrust(state);
-  for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  offerOpeningTuftle(state); throwOpeningSnare(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1);
   reconcileOpeningShelter(state);
   return state;

@@ -660,7 +660,6 @@ describe('the player’s shot', () => {
     expect(result).toMatchObject({ killed: true, bounty: Math.floor(target.maxHp / 2) });
     expect(state.raiders).not.toContain(target);
     expect(state.coins).toBe(coinsBefore + Math.floor(target.maxHp / 2));
-    expect(state.activeEncounter).toBeNull();
   });
 
   it('pays nothing for a hit that leaves the raider standing', () => {

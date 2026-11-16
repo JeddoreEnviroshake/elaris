@@ -275,7 +275,6 @@ function clearStormCaches(state: GameState): boolean {
 function strikesSuppressed(state: GameState): boolean {
   return state.pendingRespawn !== null
     || state.player.hp === 0
-    || state.activeEncounter !== null
     || isPlayerEnclosed(state);
 }
 

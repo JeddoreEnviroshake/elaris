@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { GameState } from '../../src/simulation/state';
 import { openApp, reloadApp } from './app';
 import { releaseSaveWriter, readSavedState } from './save';
+import { openMenuTab } from './menu';
 
 test.setTimeout(60_000);
 
@@ -9,38 +10,58 @@ async function saved(page: Page) { return await readSavedState(page) as unknown 
 
 async function approachTuftle(page: Page) {
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
+  const help = page.getByRole('button', { name: 'Help Tuftle', exact: true });
   await page.keyboard.down('d');
-  try { await expect(page.getByRole('button', { name: 'Help Tuftle', exact: true })).toBeVisible(); }
+  try { await expect(help).toBeVisible(); }
   finally { await page.keyboard.up('d'); }
+  // Releasing the key can coast the player past the Tuftle's reach on a slow
+  // frame; step back until the prompt is up again.
+  await page.waitForTimeout(400);
+  if (!(await help.isVisible())) {
+    await page.keyboard.down('a');
+    try { await expect(help).toBeVisible(); }
+    finally { await page.keyboard.up('a'); }
+  }
 }
 
-test('3D opening resumes trust, creates one named follower, and persists the partnership', async ({ page, isMobile }, testInfo) => {
+const fedTuftle = (state: GameState | null) => state?.wildCreatures
+  .find((creature) => creature.id === state.onboarding.starterWildCreatureId)?.captureBonusBps ?? 0;
+
+/** Bag → tap the stack → Add to Hotbar, the route the tutorial tells the player to take. */
+async function addToHotbar(page: Page, label: string) {
+  await openMenuTab(page, 'Bag');
+  await page.getByRole('button', { name: new RegExp(`^${label} stack`) }).first().click();
+  await page.getByRole('dialog', { name: `${label} stack actions` }).getByRole('button', { name: 'Add to Hotbar', exact: true }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+}
+
+test('3D opening teaches berry-then-snare from the hotbar and persists the partnership', async ({ page, isMobile }, testInfo) => {
   await openApp(page, 'render=3d');
   await expect(page.locator('#elaris-three-canvas')).toBeVisible();
   await approachTuftle(page);
   if (isMobile) await page.getByRole('button', { name: 'Help Tuftle', exact: true }).tap();
   else await page.keyboard.press('e');
-  const dialog = page.getByRole('dialog', { name: 'Earn the Tuftle’s trust' });
-  await expect(dialog).toBeVisible();
-  await page.screenshot({ path: `tmp/opening-trust-${testInfo.project.name}.png` });
-  await expect(dialog.getByRole('button', { name: 'Offer a berry', exact: true })).toContainText('Calm +12%');
-  await dialog.getByRole('button', { name: 'Stay steady', exact: true }).click();
-  await expect.poll(async () => (await saved(page))?.onboarding.trustSession?.beatsRemaining).toBe(3);
-  const beforeReload = (await saved(page))!;
-  await reloadApp(page);
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('status').first()).toContainText('3 actions left');
-  await expect.poll(async () => (await saved(page))?.onboarding.trustSession).toEqual(beforeReload.onboarding.trustSession);
+  // No dialog: the basket hands over a berry and a snare, and the hint says what to do with them.
+  await expect(page.getByTestId('opening-partnership')).toBeHidden();
+  await expect.poll(async () => (await saved(page))?.onboarding.completedMilestoneIds.includes('meet-tuftle')).toBe(true);
+  const before = (await saved(page))!;
+  expect(before.inventory['taming-snare']).toBeGreaterThan(0);
 
-  // Esc dismisses the view, without losing the saved interaction or granting a creature.
-  await page.keyboard.press('Escape');
-  await expect(dialog).toBeHidden();
-  await page.getByRole('button', { name: 'Help Tuftle', exact: true }).click();
-  await expect(dialog).toBeVisible();
-  for (let index = 0; index < 3; index++) {
-    if (isMobile) await dialog.getByRole('button', { name: 'Stay steady', exact: true }).tap();
-    else await dialog.getByRole('button', { name: 'Stay steady', exact: true }).click();
-  }
+  await addToHotbar(page, 'Berry');
+  await addToHotbar(page, 'Taming Snare');
+  const toolbar = page.getByRole('toolbar', { name: 'Hotbar' });
+  const berrySlot = toolbar.getByRole('button', { name: /Berry ×/ });
+  const snareSlot = toolbar.getByRole('button', { name: /Taming Snare ×/ });
+  await expect(berrySlot).toBeVisible();
+  await expect(snareSlot).toBeVisible();
+  await page.screenshot({ path: `tmp/opening-hotbar-${testInfo.project.name}.png` });
+
+  // Snaring before feeding is refused and costs nothing.
+  await snareSlot.click();
+  await berrySlot.click();
+  await expect.poll(async () => fedTuftle(await saved(page))).toBeGreaterThan(0);
+  await snareSlot.click();
+
   const naming = page.getByRole('dialog', { name: 'A new friend' });
   await expect(naming).toBeVisible();
   await naming.getByLabel('Your companion’s name').fill('Moss');
@@ -52,39 +73,14 @@ test('3D opening resumes trust, creates one named follower, and persists the par
   await expect(page.getByTestId('opening-partnership')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Help Tuftle', exact: true })).toBeHidden();
   const state = (await saved(page))!;
-  expect(state.onboarding.status).toBe('active');
   expect(state.onboarding.completedMilestoneIds).toContain('befriend-tuftle');
   expect(state.onboarding.issuedRewardIds).toEqual(['starter-partner']);
   expect(state.ownedCreatures.filter((creature) => creature.speciesId === 'tuftle')).toHaveLength(1);
   expect(state.ownedCreatures.find((creature) => creature.id === state.onboarding.companionId)).toMatchObject({ name: 'Moss', role: 'follow' });
   expect(state.wildCreatures.some((creature) => creature.id === state.onboarding.starterWildCreatureId)).toBe(false);
-});
-
-test('trust dialog traps focus, blocks game actions, and permits a recoverable retry', async ({ page }) => {
-  await openApp(page, 'render=3d');
-  await approachTuftle(page);
-  await page.getByRole('button', { name: 'Help Tuftle', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Earn the Tuftle’s trust' });
-  await expect(dialog).toBeVisible();
-  const first = dialog.getByRole('button', { name: 'Stay steady', exact: true });
-  await expect(first).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(dialog.getByRole('button', { name: 'Continue later', exact: true })).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(first).toBeFocused();
-  await expect.poll(async () => Boolean((await saved(page))?.onboarding.trustSession)).toBe(true);
-  const before = (await saved(page))!;
-  await page.keyboard.press('e');
-  await page.keyboard.press('b');
-  await page.keyboard.press('Space');
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: 'Give it space', exact: true }).click();
-  for (let index = 0; index < 3; index++) await dialog.getByRole('button', { name: 'Give it space', exact: true }).click();
-  await expect(page.getByTestId('opening-response')).toContainText('try again');
-  await expect.poll(async () => (await saved(page))?.onboarding.trustSession?.beatsRemaining).toBe(4);
-  expect((await saved(page))?.ownedCreatures).toHaveLength(0);
-  expect((await saved(page))?.player).toEqual(before.player);
-  expect((await saved(page))?.inventory).toEqual(before.inventory);
+  // The basket paid for the lesson: one berry and one snare in, one of each spent.
+  expect(state.inventory.berry).toBe(before.inventory.berry - 1);
+  expect(state.inventory['taming-snare']).toBe(before.inventory['taming-snare'] - 1);
 });
 
 test('an existing v81 save keeps its progress and does not receive the new introduction', async ({ page }) => {

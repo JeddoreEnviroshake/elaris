@@ -18,6 +18,7 @@ import {
 } from './strike';
 import { awardCreatureDefeat } from './creatureDefeat';
 import { provokeCreature } from './creatureCombat';
+import { damageWildCreature } from './tameChance';
 import { equippedBow } from './gameplayCommands';
 import { gameToolDefinition, leveledCreatureDefinition } from '../config/balance';
 import { creatureDefinition } from '../content/creatures';
@@ -62,7 +63,7 @@ export function strikeCreatureMelee(state: GameState, creatureId?: string): Crea
 
   const definition = leveledCreatureDefinition(state, target);
   const name = `Level ${target.level} ${definition.displayName}`;
-  target.hp = Math.max(0, target.hp - profile.damage);
+  const { staggered } = damageWildCreature(state, target, profile.damage);
   // Hitting something makes it fight back. This finally wires up the aggro
   // machinery creatureCombat already had but nothing ever called.
   provokeCreature(state, target);
@@ -74,7 +75,7 @@ export function strikeCreatureMelee(state: GameState, creatureId?: string): Crea
     ok: true,
     message: payout
       ? `${name} down · ${payout.granted.join(', ')}${toolBroke ? ' · Tool broke' : ''}`
-      : `Hit ${name} (${target.hp}/${target.maxHp})${toolBroke ? ' · Tool broke' : ''}`,
+      : `Hit ${name} (${target.hp}/${target.maxHp})${staggered ? ' · Staggered!' : ''}${toolBroke ? ' · Tool broke' : ''}`,
     creatureId: target.id,
     killed,
     toolBroke,
@@ -124,7 +125,7 @@ export function fireCreatureShot(state: GameState, creatureId?: string): Creatur
 
   const definition = leveledCreatureDefinition(state, target);
   const name = `Level ${target.level} ${definition.displayName}`;
-  target.hp = Math.max(0, target.hp - playerShotDamage(state));
+  const { staggered } = damageWildCreature(state, target, playerShotDamage(state));
   // An arrow is a provocation like any other. Shooting something from six tiles
   // away and having it keep grazing would read as the shot having missed.
   provokeCreature(state, target);
@@ -135,7 +136,7 @@ export function fireCreatureShot(state: GameState, creatureId?: string): Creatur
     ok: true,
     message: (payout
       ? `${name} down · ${payout.granted.join(', ')}`
-      : `Hit ${name} (${target.hp}/${target.maxHp})`) + (bowBroke ? ' · Bow broke' : ''),
+      : `Hit ${name} (${target.hp}/${target.maxHp})${staggered ? ' · Staggered!' : ''}`) + (bowBroke ? ' · Bow broke' : ''),
     creatureId: target.id,
     killed,
     toolBroke: bowBroke,

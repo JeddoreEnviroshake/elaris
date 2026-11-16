@@ -3,7 +3,7 @@ import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { beginOpeningTrust, actOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, SHELTER_STAGE_LABELS } from '../../src/simulation/openingShelter';
 
@@ -17,7 +17,7 @@ async function loadBuilder(page: Page) {
   const state = createInitialState(42);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
   beginOpeningTrust(state);
-  for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  offerOpeningTuftle(state); throwOpeningSnare(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1);
   reconcileOpeningShelter(state);
   const site = state.onboarding.shelterPlan!;

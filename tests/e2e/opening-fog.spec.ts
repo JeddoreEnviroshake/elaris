@@ -3,7 +3,7 @@ import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { actOpeningTrust, beginOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, shelterLayout } from '../../src/simulation/openingShelter';
 import { placeBuildBatch } from '../../src/simulation/batchBuilding';
@@ -17,7 +17,7 @@ function fogFixture() {
   const state = createInitialState(42);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
   beginOpeningTrust(state);
-  for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  offerOpeningTuftle(state); throwOpeningSnare(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1);
   reconcileOpeningShelter(state);
   const site = state.onboarding.shelterPlan!;

@@ -3,7 +3,7 @@ import { OPENING_CHAPTER_VERSION, createOpeningChapter, createOpeningThreat, OPE
 import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
 import { TILE_SIZE, WORLD_PX } from '../../src/config/platform';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { actOpeningTrust, beginOpeningTrust } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, shelterChecklist, shelterLayout } from '../../src/simulation/openingShelter';
 import { placeBuildBatch } from '../../src/simulation/batchBuilding';
@@ -27,7 +27,7 @@ function readyShelter() {
   const state = createInitialState(42);
   state.player.x = 82 * TILE_SIZE; state.player.y = 82 * TILE_SIZE;
   beginOpeningTrust(state);
-  for (let i = 0; i < 4; i++) actOpeningTrust(state, 'steady');
+  offerOpeningTuftle(state); throwOpeningSnare(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1);
   reconcileOpeningShelter(state);
   const site = state.onboarding.shelterPlan!;

@@ -1,3 +1,4 @@
+import { isHotbarItem } from '../simulation/hotbarItems';
 import { BAG_ITEM_LABELS, INVENTORY_SLOTS, toolDefinition } from '../config/balance';
 import { nextRepairCost, usedInventorySlots } from '../simulation/gameplayCommands';
 import { bagItemWeightHundredths, bagWeightHundredths, effectiveBagCapacityHundredths, formatWeight, isBagOverweight } from '../simulation/bagWeight';
@@ -18,6 +19,10 @@ export interface InventoryPanelActions {
   onAssignHotbar?: (toolId: string) => void;
   /** Whether a tool already occupies a hotbar slot, so the card can say so. */
   isOnHotbar?: (toolId: string) => boolean;
+  /** Put a usable item (food, a snare) on the hotbar. */
+  onAssignHotbarItem?: (resource: ResourceId) => void;
+  /** Whether that item already has a hotbar slot. */
+  isItemOnHotbar?: (resource: ResourceId) => boolean;
   /** Split one resource stack at a selected slot boundary. */
   onSplitStack: (resource: ResourceId, stackIndex: number, amount: number) => void;
   /** Drop the whole selected resource stack into the world. */
@@ -458,6 +463,17 @@ export class InventoryPanel {
     drop.dataset.tone='danger';
     drop.style.background = '#71392f';
     const cancel = uiButton('Cancel', () => this.closeItemActions());
+    // Food and snares are used straight from the hotbar, mid-fight, so the
+    // card offers to put them there.
+    if (isHotbarItem(resource) && this.actions.onAssignHotbarItem) {
+      const onBar = this.actions.isItemOnHotbar?.(resource) ?? false;
+      const assign = uiButton(onBar ? 'On Hotbar' : 'Add to Hotbar', () => {
+        this.closeItemActions();
+        this.actions.onAssignHotbarItem?.(resource);
+      });
+      assign.disabled = onBar;
+      actions.append(assign);
+    }
     actions.append(split, drop, cancel);
     card.append(title, actions);
     overlay.appendChild(card);

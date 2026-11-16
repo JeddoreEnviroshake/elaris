@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { learnBlueprint } from '../../src/simulation/blueprintKnowledge';
 import { newWildCreature } from '../../src/simulation/worldGeneration';
-import {
-  activeSnare,
-  craftReinforcedSnare,
-  resolveEncounterAction,
-  snareChanceBps,
-  startNearestEncounter,
-} from '../../src/simulation/encounters';
+import { activeSnare, craftReinforcedSnare } from '../../src/simulation/supplyCrafting';
+import { tameChance, throwSnareAtCreature } from '../../src/simulation/tameChance';
+import { strikeCreatureMelee } from '../../src/simulation/creatureStrike';
 import {
   REINFORCED_SNARE_CRAFT_COST,
   REINFORCED_SNARES_PER_CRAFT,
@@ -30,14 +26,13 @@ function defeatOne(state: GameState, speciesId: SpeciesId): void {
   if (!wild) throw new Error(`no wild ${speciesId} remaining`);
   state.player.x = wild.x;
   state.player.y = wild.y;
-  startNearestEncounter(state);
-  for (let attempt = 0; attempt < 500 && state.activeEncounter; attempt += 1) {
-    state.activeEncounter.creatureHp = 1;
-    state.activeEncounter.playerPos = 60;
-    state.activeEncounter.creaturePos = 70;
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    wild.hp = 1;
+    state.actionCooldownUntilTick = 0;
     state.player.stamina = state.player.maxStamina;
     state.player.hp = state.player.maxHp;
-    if (resolveEncounterAction(state, 'melee').defeated) return;
+    if (strikeCreatureMelee(state, wild.id).killed) return;
+    state.tick += 60;
   }
   throw new Error(`could not defeat ${speciesId}`);
 }
@@ -167,15 +162,15 @@ describe('reinforced snare', () => {
       const wild = state.wildCreatures.find((creature) => creature.speciesId === speciesId)!;
       state.player.x = wild.x;
       state.player.y = wild.y;
-      startNearestEncounter(state);
-      state.activeEncounter!.creatureHp = Math.floor(state.activeEncounter!.creatureMaxHp / 2);
-      return state;
+      wild.hp = Math.floor(wild.maxHp / 2);
+      return { state, wild };
     };
     const basic = beside('tuftle');
-    basic.inventory['taming-snare'] = 1;
+    basic.state.inventory['taming-snare'] = 1;
     const reinforced = beside('tuftle');
-    reinforced.inventory['reinforced-snare'] = 1;
-    expect(snareChanceBps(reinforced)).toBeGreaterThan(snareChanceBps(basic));
+    reinforced.state.inventory['reinforced-snare'] = 1;
+    expect(tameChance(reinforced.state, reinforced.wild).chanceBps)
+      .toBeGreaterThan(tameChance(basic.state, basic.wild).chanceBps);
   });
 
   it('spends the reinforced snare on a throw', () => {
@@ -183,11 +178,10 @@ describe('reinforced snare', () => {
     const wild = state.wildCreatures.find((creature) => creature.speciesId === 'tuftle')!;
     state.player.x = wild.x;
     state.player.y = wild.y;
-    startNearestEncounter(state);
-    state.activeEncounter!.creatureHp = 1;
+    wild.hp = 1;
     state.inventory['reinforced-snare'] = 2;
     state.inventory['taming-snare'] = 2;
-    resolveEncounterAction(state, 'snare');
+    throwSnareAtCreature(state, wild.id);
     expect(state.inventory['reinforced-snare']).toBe(1);
     expect(state.inventory['taming-snare']).toBe(2);
   });

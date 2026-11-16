@@ -1,7 +1,9 @@
 import { toolDefinition } from '../config/balance';
-import type { GameState } from '../simulation/state';
+import type { GameState, ResourceId } from '../simulation/state';
+import { isHotbarItem } from '../simulation/hotbarItems';
 import { durabilityColor, inventorySlotEntries, type SlotEntry } from './inventorySlots';
-import { createUiIcon, setUiIcon } from './icons';
+import { createUiIcon, setUiIcon, type UiIconName } from './icons';
+import { BAG_ITEM_LABELS } from '../config/balance';
 
 export const HOTBAR_SLOTS = 5;
 
@@ -10,9 +12,21 @@ const REMOVE_HOLD_MS = 550;
 /** Preference-sized, so localStorage rather than the save repository. */
 const LAYOUT_STORAGE_KEY = 'elaris.hotbar-layout';
 
+/** Layout entries for items are prefixed so they can share the list with tool instance ids. */
+const ITEM_PREFIX = 'item:';
+const ITEM_ICONS: Partial<Record<ResourceId, UiIconName>> = {
+  berry: 'berry', fiber: 'fiber', stone: 'stone', wood: 'wood', 'iron-ore': 'ore',
+  'taming-snare': 'snare', 'reinforced-snare': 'snare',
+};
+
+type ToolSlot = Extract<SlotEntry, { kind: 'tool' }>;
+type HotbarEntry = { kind: 'tool'; entry: ToolSlot } | { kind: 'item'; resource: ResourceId; count: number };
+
 export interface HotbarActions {
   /** A slot holding a tool was selected (tap/click or 1–5 key). */
   onEquipTool: (toolId: string) => void;
+  /** A slot holding a usable item (food, snare) was selected: use it now. */
+  onUseItem?: (resource: ResourceId) => void;
   /** An empty slot or the dedicated 0 shortcut was selected. */
   onEquipBareHands: () => void;
 }
@@ -175,10 +189,11 @@ export class Hotbar {
     this.refresh();
   }
 
-  /** Equip the tool in the given 0-based slot, or bare hands when it is empty. */
+  /** Equip the tool in the given 0-based slot, use its item, or go bare-handed when it is empty. */
   select(index: number): void {
-    const entry = this.toolEntries()[index];
-    if (entry) this.actions.onEquipTool(entry.tool.instanceId);
+    const entry = this.entries()[index];
+    if (entry?.kind === 'item') this.actions.onUseItem?.(entry.resource);
+    else if (entry) this.actions.onEquipTool(entry.entry.tool.instanceId);
     else this.selectBareHands();
   }
 
@@ -192,13 +207,35 @@ export class Hotbar {
    * untouched; the Bag's "Assign to Hotbar" action puts it back.
    */
   removeSlot(index: number): void {
-    const entry = this.toolEntries()[index];
-    if (!entry) return;
-    if (entry.equipped) this.actions.onEquipBareHands();
-    this.assigned = this.assigned.filter((id) => id !== entry.tool.instanceId);
-    this.hidden.add(entry.tool.instanceId);
+    const slot = this.entries()[index];
+    if (!slot) return;
+    if (slot.kind === 'item') {
+      this.assigned = this.assigned.filter((id) => id !== ITEM_PREFIX + slot.resource);
+    } else {
+      const entry = slot.entry;
+      if (entry.equipped) this.actions.onEquipBareHands();
+      this.assigned = this.assigned.filter((id) => id !== entry.tool.instanceId);
+      this.hidden.add(entry.tool.instanceId);
+    }
     this.persist();
     this.refresh();
+  }
+
+  /**
+   * Put a usable item (food, a snare) on the bar from the Bag. It takes the
+   * first slot, like an assigned tool, and stays there when the stack runs
+   * out so restocking puts it straight back into reach.
+   */
+  assignItem(resource: ResourceId): void {
+    if (!isHotbarItem(resource)) return;
+    const id = ITEM_PREFIX + resource;
+    this.assigned = [id, ...this.assigned.filter((entry) => entry !== id)].slice(0, HOTBAR_SLOTS);
+    this.persist();
+    this.refresh();
+  }
+
+  isItemAssigned(resource: ResourceId): boolean {
+    return this.entries().some((entry) => entry.kind === 'item' && entry.resource === resource);
   }
 
   /**
@@ -215,13 +252,13 @@ export class Hotbar {
 
   /** Whether the tool currently occupies one of the visible slots. */
   isAssigned(instanceId: string): boolean {
-    return this.toolEntries().some((entry) => entry.tool.instanceId === instanceId);
+    return this.entries().some((entry) => entry.kind === 'tool' && entry.entry.tool.instanceId === instanceId);
   }
 
   private beginHold(index: number): void {
     this.cancelHold();
     this.removedByHold = false;
-    if (!this.toolEntries()[index]) return;
+    if (!this.entries()[index]) return;
     this.holdSlot = this.slots[index]!.slot;
     // Shrinks over the hold so the wait reads as a deliberate gesture.
     this.holdSlot.style.transition = `transform ${REMOVE_HOLD_MS}ms linear`;
@@ -246,11 +283,36 @@ export class Hotbar {
   }
 
   refresh(): void {
-    const tools = this.toolEntries();
+    const entries = this.entries();
     this.refreshQuiver();
     for (let index = 0; index < HOTBAR_SLOTS; index += 1) {
       const { slot, icon, bar, fill } = this.slots[index]!;
-      const entry = tools[index];
+      const current = entries[index];
+      delete slot.dataset.hotbarItem;
+      if (current?.kind === 'item') {
+        const label = BAG_ITEM_LABELS[current.resource];
+        slot.disabled = false;
+        slot.dataset.hotbarItem = current.resource;
+        slot.style.opacity = current.count > 0 ? '1' : '0.45';
+        slot.style.borderColor = 'rgba(255,224,138,0.45)';
+        slot.setAttribute('aria-pressed', 'false');
+        slot.setAttribute('aria-label', `Hotbar slot ${index + 1}: ${label} ×${current.count}. Tap to use. Hold to remove from the bar.`);
+        setUiIcon(icon, ITEM_ICONS[current.resource] ?? 'bag', 19);
+        bar.style.display = 'none';
+        let count = slot.querySelector<HTMLSpanElement>('[data-item-count]');
+        if (!count) {
+          count = document.createElement('span');
+          count.dataset.itemCount = '';
+          Object.assign(count.style, {
+            position: 'absolute', right: '3px', bottom: '1px', fontSize: '10px', fontWeight: '700',
+          } satisfies Partial<CSSStyleDeclaration>);
+          slot.appendChild(count);
+        }
+        count.textContent = String(current.count);
+        continue;
+      }
+      slot.querySelector('[data-item-count]')?.remove();
+      const entry = current?.entry;
       if (!entry) {
         slot.disabled = false;
         slot.style.opacity = '0.5';
@@ -309,22 +371,33 @@ export class Hotbar {
    * they never touched, so a fresh save still auto-fills the bar and a removed
    * tool stays off it until it is assigned again.
    */
-  private toolEntries(): Array<Extract<SlotEntry, { kind: 'tool' }>> {
+  private entries(): HotbarEntry[] {
     const tools = inventorySlotEntries(this.state)
-      .filter((entry): entry is Extract<SlotEntry, { kind: 'tool' }> => entry.kind === 'tool');
+      .filter((entry): entry is ToolSlot => entry.kind === 'tool');
     this.forgetUnownedTools(tools);
     const byId = new Map(tools.map((entry) => [entry.tool.instanceId, entry]));
-    const assigned = this.assigned.map((id) => byId.get(id)!).filter(Boolean);
+    const assigned: HotbarEntry[] = [];
+    for (const id of this.assigned) {
+      if (id.startsWith(ITEM_PREFIX)) {
+        const resource = id.slice(ITEM_PREFIX.length) as ResourceId;
+        if (isHotbarItem(resource)) assigned.push({ kind: 'item', resource, count: this.state.inventory[resource] ?? 0 });
+        continue;
+      }
+      const tool = byId.get(id);
+      if (tool) assigned.push({ kind: 'tool', entry: tool });
+    }
     const rest = tools.filter((entry) => !this.assigned.includes(entry.tool.instanceId)
-      && !this.hidden.has(entry.tool.instanceId));
+      && !this.hidden.has(entry.tool.instanceId))
+      .map((entry): HotbarEntry => ({ kind: 'tool', entry }));
     return [...assigned, ...rest].slice(0, HOTBAR_SLOTS);
   }
 
   /** Ids for tools the player no longer owns, so neither list grows unbounded. */
-  private forgetUnownedTools(tools: Array<Extract<SlotEntry, { kind: 'tool' }>>): void {
+  private forgetUnownedTools(tools: ToolSlot[]): void {
     if (!this.hidden.size && !this.assigned.length) return;
     const owned = new Set(tools.map((entry) => entry.tool.instanceId));
-    const kept = this.assigned.filter((id) => owned.has(id));
+    // Item slots survive an empty stack on purpose; only tools can be lost.
+    const kept = this.assigned.filter((id) => id.startsWith(ITEM_PREFIX) || owned.has(id));
     let changed = kept.length !== this.assigned.length;
     this.assigned = kept;
     for (const id of [...this.hidden]) {

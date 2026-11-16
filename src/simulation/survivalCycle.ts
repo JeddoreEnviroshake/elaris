@@ -604,7 +604,6 @@ export function beginPlayerDefeat(
   // than an obituary.
   const lostItemCount = applySafeguardCharms(state);
   state.clothMaskActiveUntilTick = null;
-  state.activeEncounter = null;
   state.player.hp = 0;
   state.pendingRespawn = {
     cause,
@@ -795,7 +794,6 @@ export function chooseRespawn(state: GameState, destinationId: string): RespawnC
   state.player.hp = state.player.maxHp;
   state.dangerExposureStartedAtTick = null;
   state.clothMaskActiveUntilTick = null;
-  state.activeEncounter = null;
   state.pendingRespawn = null;
   state.respawnProtectionUntilTick = state.tick + RESPAWN_PROTECTION_SECONDS * TICKS_PER_SECOND;
   return {

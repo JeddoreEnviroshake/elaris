@@ -251,15 +251,6 @@ describe('what does and does not protect', () => {
     expect(state.player.hp).toBe(hp - state.gameBalance.storm.playerDamage);
   });
 
-  it('spends slots without marking a player locked in an encounter', () => {
-    const state = stormingState();
-    state.activeEncounter = { wildCreatureId: 'creature-1' } as never;
-    runTo(state, tickAt(9));
-
-    expect(state.arcaneStorm.strikes).toEqual([]);
-    expect(state.arcaneStorm.nextStrikeIndex).toBe(1);
-    expect(state.player.hp).toBe(state.player.maxHp);
-  });
 
   it('spends slots without marking a player choosing a respawn', () => {
     const state = stormingState();

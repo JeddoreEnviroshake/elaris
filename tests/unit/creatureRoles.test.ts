@@ -103,7 +103,5 @@ describe('species-specific overworld roles', () => {
     expect(setCreatureRole(state, 'snarlfox', 'work')).toMatchObject({ ok: true });
     expect(snarlfoxDetectionMultiplierBps(state, 11 * 16, 11 * 16)).toBe(7_500);
     expect(snarlfoxDetectionMultiplierBps(state, 11 * 16, 30 * 16)).toBe(10_000);
-    state.activeEncounter = {} as GameState['activeEncounter'];
-    expect(snarlfoxDetectionMultiplierBps(state, 11 * 16, 11 * 16)).toBe(10_000);
   });
 });

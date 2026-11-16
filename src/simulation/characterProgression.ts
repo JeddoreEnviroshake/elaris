@@ -381,7 +381,7 @@ function increaseAttributeBy(state: GameState, attribute: AttributeId, amount: n
  * usual, which is what makes sprinting a choice rather than a default.
  */
 export function recoverPlayer(state: GameState, sprinting = false): boolean {
-  if (state.tick % TICKS_PER_SECOND !== 0 || state.activeEncounter) return false;
+  if (state.tick % TICKS_PER_SECOND !== 0) return false;
   return applyPlayerRegen(state, sprinting);
 }
 

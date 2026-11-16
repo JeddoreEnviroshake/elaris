@@ -1,14 +1,12 @@
 import { ARROWS_CRAFT_COST, ARROWS_PER_CRAFT, CRAFTABLE_TOOL_DEFINITIONS, IRON_SMELT_INPUTS, CLOTH_MASK_CRAFT_COST, CLOTH_MASK_PROTECTION_SECONDS, REINFORCED_SNARE_CRAFT_COST, REINFORCED_SNARES_PER_CRAFT, TAMING_SNARE_CRAFT_COST, gameToolDefinition, isHandcraftTool, leveledRaiderDefinition, INVENTORY_SLOTS, toolDefinition } from '../config/balance';
 import { CREATURE_DEFINITIONS, MAX_ACTIVE_FOLLOWERS, creatureDefinition } from '../content/creatures';
-import { isOpeningTuftle } from '../content/onboarding';
 import { creatureWorkPassive, type CreatureWorkPassiveDefinition } from '../content/creatureWorkPassives';
 import { producerForSpecies } from '../content/producers';
 import { FOLLOWER_ACTION_SPEED_CAP_BPS } from '../simulation/creatureRoles';
 import { creatureBondLevel } from '../content/companionAbilities';
 import { eligibleCreatureWorksites, fieldCache, ROWBOAT_CRAFT_COST, rowboatActionLabel, toolUnlockReason, usedInventorySlots } from '../simulation/gameplayCommands';
 import { homesteadRating } from '../simulation/scoring';
-import { snareThrowBlockedReason } from '../simulation/encounters';
-import { TAMING_RANGE_PX } from '../config/balance';
+import { tameChance, TAME_PART_LABELS, type TameChancePartId } from '../simulation/tameChance';
 import {
   ATTRIBUTE_DESCRIPTIONS,
   ATTRIBUTE_IDS,
@@ -211,8 +209,6 @@ function assignmentDescriptionLines(
 
 export interface GameplayHudActions {
   onAction: () => void;
-  /** Throw a snare at the locked creature — the way into a taming session. */
-  onThrowSnare?: () => void;
   onCraftTool: (definitionId: ToolDefinitionId) => void;
   onCraftRowboat?: () => void;
   /** Spend Draft Parchment at a workbench for a random unowned blueprint. */
@@ -283,7 +279,6 @@ export class GameplayHud {
   private readonly target: HTMLDivElement;
   private readonly craftPanel: HTMLDivElement;
   private readonly craftButton: HTMLButtonElement;
-  private readonly throwSnareButton: HTMLButtonElement;
   private readonly reinforcedSnareButton: HTMLButtonElement;
   private readonly arrowsButton: HTMLButtonElement;
   private readonly clothMaskButton: HTMLButtonElement;
@@ -291,6 +286,7 @@ export class GameplayHud {
   private readonly snareButton: HTMLButtonElement;
   private readonly sprintButton: HTMLButtonElement;
   private battleMode = false;
+  private tameTarget: WildCreatureState | null = null;
   private buildMode = false;
   /** Presentation-only: the scene reads it each frame to build the move intent. */
   private sprintEnabled = false;
@@ -662,31 +658,6 @@ export class GameplayHud {
       fontSize: '12px',
       fontWeight: '700',
       lineHeight: '1.2',
-    });
-
-    // Throw Snare sits to the left of the thumb action, and only while a
-    // creature is locked and close enough to snare. A tap on a creature is an
-    // attack now, so this button is the entire taming path — it has to be
-    // impossible to miss when it is available, and absent when it is not.
-    this.throwSnareButton = uiButton('Snare', () => this.actions.onThrowSnare?.());
-    this.throwSnareButton.dataset.snareButton = '';
-    // Deliberately not "Throw Snare": that name belongs to the button inside a
-    // taming session, and two controls sharing an accessible name is a trap for
-    // both screen readers and tests.
-    this.throwSnareButton.setAttribute('aria-label', 'Throw snare at creature');
-    Object.assign(this.throwSnareButton.style, {
-      position: 'absolute',
-      right: 'calc(env(safe-area-inset-right) + 100px)',
-      bottom: 'calc(env(safe-area-inset-bottom) + 46px)',
-      width: '84px',
-      minHeight: '48px',
-      borderRadius: '24px',
-      padding: '4px 8px',
-      fontSize: '12px',
-      fontWeight: '700',
-      lineHeight: '1.2',
-      background: 'rgba(122,89,44,0.94)',
-      display: 'none',
     });
 
     this.craftButton = railButton('craft', 'Craft', () => this.toggleCraft());
@@ -1079,7 +1050,7 @@ export class GameplayHud {
       this.survivalTimer, this.xpBar, this.blueprintClaim,
       this.healthBar, this.staminaBar, this.manaBar,
     );
-    this.root.append(this.statusStack, this.resourceFlash, this.dangerGraceTimer, this.target, this.actionButton, this.throwSnareButton, this.sprintButton, this.facilityPanel, this.craftButton, this.creatureButton, this.statsButton, this.craftPanel, this.creaturePanel, this.statsPanel, this.feedback);
+    this.root.append(this.statusStack, this.resourceFlash, this.dangerGraceTimer, this.target, this.actionButton, this.sprintButton, this.facilityPanel, this.craftButton, this.creatureButton, this.statsButton, this.craftPanel, this.creaturePanel, this.statsPanel, this.feedback);
     this.root.append(this.gatherFeedback);
     parent.appendChild(this.root);
     this.progressionGuide = new ProgressionGuide(this.root, this.state, (questId) => this.claimQuestReward(questId));
@@ -1107,7 +1078,7 @@ export class GameplayHud {
   }
 
   /**
-   * The battle screen owns the display while it is up, so the overworld status
+   * A modal dialog (the taming tutorial) owns the display while it is up, so the overworld status
    * readouts (survival timer, HP, XP) step aside instead of overlapping it.
    */
   setBattleMode(active: boolean): void {
@@ -1136,40 +1107,16 @@ export class GameplayHud {
     const hidden = this.battleMode || this.buildMode;
     this.sprintButton.style.display = hidden ? 'none' : 'block';
     this.actionButton.style.display = this.buildMode ? 'none' : 'block';
-    if (hidden) this.throwSnareButton.style.display = 'none';
   }
 
-  /**
-   * Offer the snare throw for a creature within snaring distance: the locked
-   * one when it is that close, and otherwise simply the nearest.
-   *
-   * It does not insist on a lock, because a tap is a swing — and a swing sends
-   * a skittish creature running, which would make "select it first" the one
-   * thing guaranteed to put a stag out of snaring reach. Walking up to
-   * something is selection enough for the snare.
-   *
-   * Disabled rather than hidden when the throw would be refused: an empty bag
-   * or a full roster is something the player needs told, and a button that
-   * simply vanishes teaches them nothing.
-   */
-  private refreshSnareButton(
-    lockedTarget: ResolvedCombatTarget | null,
-    nearestCreature: WildCreatureState | null,
-  ): void {
-    const locked = lockedTarget?.kind === 'creature' && lockedTarget.distancePx <= TAMING_RANGE_PX
-      ? lockedTarget
-      : null;
-    const targetId = locked?.id ?? nearestCreature?.id ?? null;
-    const eligible = targetId !== null && !isOpeningTuftle(this.state, targetId) && !this.battleMode && !this.buildMode && !this.state.activeEncounter;
-    this.throwSnareButton.style.display = eligible ? 'block' : 'none';
-    this.throwSnareButton.dataset.snareTarget = eligible ? targetId : '';
-    if (!eligible) return;
-    const blocked = snareThrowBlockedReason(this.state, targetId);
-    const label = locked?.label
-      ?? (nearestCreature ? creatureDefinition(nearestCreature.speciesId).displayName : 'creature');
-    this.throwSnareButton.disabled = blocked !== null;
-    this.throwSnareButton.style.opacity = blocked ? '0.55' : '1';
-    this.throwSnareButton.title = blocked ?? `Open a taming session with the ${label}`;
+  /** "Tame 47% · Fed +20 · Unnoticed +10", the breakdown the target card shows. */
+  private tameSummary(wild: WildCreatureState): string {
+    const chance = tameChance(this.state, wild);
+    const parts = (Object.entries(chance.parts) as [TameChancePartId, number][])
+      .filter(([id, value]) => value > 0 && id !== 'base' && id !== 'luck')
+      .map(([id, value]) => `${TAME_PART_LABELS[id]} +${Math.floor(value / 100)}`);
+    const favourite = chance.parts.fed === 0 ? [`loves ${creatureDefinition(wild.speciesId).tame.favourite}`] : [];
+    return [`Tame ${Math.floor(chance.chanceBps / 100)}%`, ...parts, ...favourite].join(' · ');
   }
 
   /**
@@ -1514,9 +1461,10 @@ export class GameplayHud {
     targetDrop: GroundDropState | null = null,
     targetCreature: WildCreatureState | null = null,
     lockedTarget: ResolvedCombatTarget | null = null,
+    tameTarget: WildCreatureState | null = null,
   ): void {
+    this.tameTarget = tameTarget;
     this.refreshAction(targetNode, targetDrop, targetCreature, lockedTarget);
-    this.refreshSnareButton(lockedTarget, targetCreature);
     this.refreshOpenFacility();
   }
 
@@ -1778,7 +1726,7 @@ export class GameplayHud {
     this.snareButton.disabled = !snareKnown || !this.canAfford(TAMING_SNARE_CRAFT_COST);
     this.snareButton.replaceChildren(
       this.cardTitle('Taming Snare', this.costLabel(TAMING_SNARE_CRAFT_COST)),
-      this.cardDetail(`Tame weakened creatures during encounters. ${this.state.inventory['taming-snare']} in bag.`),
+      this.cardDetail(`Throw at a wild creature to tame it. ${this.state.inventory['taming-snare']} in bag.`),
     );
     const reinforcedSnareKnown = knowsBlueprint(this.state, 'reinforced-snare');
     this.reinforcedSnareButton.style.display = reinforcedSnareKnown ? 'block' : 'none';
@@ -2046,11 +1994,12 @@ export class GameplayHud {
       this.clearResourceTargetData();
       this.target.textContent = `${targetDrop.resource} ×${targetDrop.amount} on the ground · E / Space`;
       this.target.style.display = 'block';
-    } else if (targetCreature) {
+    } else if (this.tameTarget ?? targetCreature) {
       this.clearResourceTargetData();
-      // A tap attacks now, so the prompt names both halves of the choice: the
-      // snare is the only thing that takes a creature alive.
-      this.target.textContent = `Wild ${creatureDefinition(targetCreature.speciesId).displayName} · tap to attack · snare to tame`;
+      // The tame chance and what is feeding it, so the player always knows
+      // which lever they just pulled.
+      const wild = (this.tameTarget ?? targetCreature)!;
+      this.target.textContent = `${creatureDefinition(wild.speciesId).displayName} · ${this.tameSummary(wild)}`;
       this.target.style.display = 'block';
     } else if (rowboatActionLabel(this.state)) {
       this.clearResourceTargetData();

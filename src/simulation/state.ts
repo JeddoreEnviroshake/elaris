@@ -446,7 +446,6 @@ export type CompanionAbilityId =
   | 'quillfinch-volley' | 'quillfinch-pin' | 'quillfinch-dart' | 'quillfinch-barb'
   | 'mistmoth-veil' | 'mistmoth-filter' | 'mistmoth-dust' | 'mistmoth-lull'
   | 'slingtail-lob' | 'slingtail-sling' | 'slingtail-stagger' | 'slingtail-barrage';
-export type EnemyIntent = 'advance' | 'strike' | 'advance-strike' | 'retreat-strike' | 'watch';
 
 /**
  * A wild creature as a live world entity. Health used to exist only inside an
@@ -477,9 +476,22 @@ export interface WildCreatureState {
   nextAttackTick: number;
   /** Skittish species only: tick until which it runs from the player. */
   fleeUntilTick: number;
-  /** Capture chance accumulated by feeding, in basis points. */
+  /** Tame chance accumulated by offering food, in basis points. Halved by a missed snare. */
   captureBonusBps: number;
   encounterCooldownUntilTick: number;
+  /**
+   * Tame-chance state (taming-chance-plan.md). Optional so a creature that has
+   * never been touched carries none of it; absent means 0. Never set to
+   * `undefined` — canonicalizeGameState rejects it.
+   */
+  /** Tick until which it is staggered: no movement, no attacks, a tame bonus. */
+  staggerUntilTick?: number;
+  /** 1 once this creature has staggered; a creature staggers once per life. */
+  staggerSpent?: number;
+  /** Tick until which it is eating an offer, back to the player. */
+  eatingUntilTick?: number;
+  /** Failed snare throws at this creature; each adds a pity bonus. */
+  snareMisses?: number;
 }
 
 /**
@@ -524,24 +536,6 @@ export interface RaiderState {
 export interface TurretState {
   ammo: number;
   nextFireTick: number;
-}
-
-export interface EncounterState {
-  wildCreatureId: string;
-  creatureHp: number;
-  creatureMaxHp: number;
-  round: number;
-  message: string;
-  /** Positions on the deterministic 0..100 battle track. */
-  playerPos: number;
-  creaturePos: number;
-  /** The eligible follower snapshotted when this encounter began. */
-  companionCreatureId: string | null;
-  selectedCompanionAbilityId: CompanionAbilityId | null;
-  /** Absolute encounter rounds on which each used ability becomes ready. */
-  companionAbilityReadyRounds: Partial<Record<CompanionAbilityId, number>>;
-  /** Persisted so reloading never changes the telegraphed enemy response. */
-  enemyIntent: EnemyIntent;
 }
 
 /** Owned creatures deliberately have allocated IDs, separate from their spawn. */
@@ -1378,7 +1372,6 @@ export interface GameState {
    * end-of-round absent-base pass can never bill the same base twice.
    */
   raidSettledAreaKeys: string[];
-  activeEncounter: EncounterState | null;
   ownedCreatures: OwnedCreatureState[];
   /** Creatures currently away on a route; they are unavailable until they return. */
   expeditions: ExpeditionState[];
@@ -1463,7 +1456,6 @@ export function createInitialState(seed: number, suppliedBalance?: GameBalanceSt
     arcaneStorm: createArcaneStormState(),
     raidCycleIndex: null,
     raidSettledAreaKeys: [],
-    activeEncounter: null,
     ownedCreatures: [],
     expeditions: [],
     expeditionsDispatched: 0,

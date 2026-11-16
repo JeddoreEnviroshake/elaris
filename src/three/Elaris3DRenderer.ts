@@ -55,7 +55,6 @@ import {
   elarisCameraOffset,
   type ElarisCameraOrientation,
 } from './cameraControls';
-import { captureBattleSnapshot, type BattleRoundPresentation } from './battleState';
 import { terrainAt, type TerrainKind } from '../simulation/landscape';
 import {
   ELARIS_SANCTUARY_TILE,
@@ -76,7 +75,6 @@ import {
   playerExposedTo,
   purifierProtectedRects,
 } from '../scenes/dangerPresentation';
-import { ThreeBattleStage } from './ThreeBattleStage';
 import {CombatEffects,COMBAT_PALETTE} from './combatEffects';
 import { TownRoom, type TownRoomSnapshot } from './townRooms';
 import { townBuildingShell } from '../content/interiors';
@@ -191,9 +189,6 @@ export interface ThreeRendererSnapshot {
   readonly stormMarkers: number;
   readonly stormImpacts: number;
   readonly arrowsInFlight: number;
-  readonly battleActive: boolean;
-  readonly battleRoundAnimating: boolean;
-  readonly battleEffectInstances:number;
   /** True while the player stands inside a walk-in town building. */
   readonly interiorActive: boolean;
   readonly interiorId: string | null;
@@ -355,9 +350,9 @@ export class Elaris3DRenderer {
   private shelterGuideSignature = '';
   /** World-space floor wash for every tile currently reached by a purifier. */
   private readonly protectionRoot = new THREE.Group();
-  private readonly battleStage = new ThreeBattleStage(this.models);
   private readonly combatEffects = new CombatEffects();
   private lastCombatActionId=Number.NEGATIVE_INFINITY;
+  private lastTameThrowId=Number.NEGATIVE_INFINITY;
   /** Walk-in rooms of this area's town buildings, rebuilt with the world. */
   private readonly townRooms: TownRoomEntry[] = [];
   /**
@@ -448,7 +443,6 @@ export class Elaris3DRenderer {
   private mountRig: CreatureRig | null = null;
   private mountSpecies: SpeciesId | null = null;
   private lastFurnaceEffectAt = Number.NEGATIVE_INFINITY;
-  private battleCameraActive = false;
   private cameraOrientation: ElarisCameraOrientation = {
     yawDegrees: ELARIS_CAMERA_YAW_DEGREES,
     pitchDegrees: ELARIS_CAMERA_PITCH_DEGREES,
@@ -463,7 +457,6 @@ export class Elaris3DRenderer {
   private travelAnchor: { x: number; z: number } | null = null;
   private travelFacing: GameState['player']['facing'] | null = null;
   private travelMovedAt = Number.NEGATIVE_INFINITY;
-  private readonly battleAnchor = new THREE.Vector3();
   private readonly hemisphere = new THREE.HemisphereLight(0xdaf2e1, 0x35422e, 2.2);
   private readonly sun = new THREE.DirectionalLight(0xfff0cf, 3.6);
   private readonly fill = new THREE.DirectionalLight(0x7aa6b6, 0.75);
@@ -514,7 +507,7 @@ export class Elaris3DRenderer {
 
     this.scene.add(
       this.worldRoot, this.entityRoot, this.raiderRoot, this.workerRoot, this.stormRoot, this.arrowRoot,
-      this.feedbackRoot, this.protectionRoot, this.playerRoot, this.battleStage.root,this.combatEffects.root,
+      this.feedbackRoot, this.protectionRoot, this.playerRoot, this.combatEffects.root,
       this.roomLight,
       this.contactShadows.mesh,
       this.resourceGrounding.root, this.woodlandSky.mesh,
@@ -576,10 +569,6 @@ export class Elaris3DRenderer {
     this.worldPointerHandler = handler;
   }
 
-  playBattleRound(round: BattleRoundPresentation): void {
-    this.battleStage.playRound(round);
-  }
-
   getSnapshot(): ThreeRendererSnapshot {
     const presentation = this.presentationProvider?.() ?? null;
     return {
@@ -600,9 +589,6 @@ export class Elaris3DRenderer {
       stormMarkers: this.stormVisuals.size,
       stormImpacts: this.stormImpactsShown,
       arrowsInFlight: this.arrows.length,
-      battleActive: this.battleCameraActive,
-      battleRoundAnimating: this.battleStage.roundAnimating,
-      battleEffectInstances:this.battleStage.effectInstances,
       interiorActive: this.townRooms.some(({ room }) => room.isPlayerInside),
       interiorId: this.townRooms.find(({ room }) => room.isPlayerInside)?.room.interior?.id ?? null,
       townRooms: this.townRooms.map(({ room }) => room.snapshot()),
@@ -631,7 +617,6 @@ export class Elaris3DRenderer {
     this.disposeObject(this.protectionRoot);
     this.disposeObject(this.playerRoot);
     this.disposeObject(this.focusRing);
-    this.battleStage.dispose();
     this.combatEffects.dispose();
     for (const { room } of this.townRooms) room.retire();
     this.townRooms.length = 0;
@@ -840,7 +825,7 @@ export class Elaris3DRenderer {
     this.clearGroup(this.workerRoot);
     this.clearGroup(this.stormRoot);
     this.clearGroup(this.arrowRoot);
-    this.combatEffects.clear();this.lastCombatActionId=Number.NEGATIVE_INFINITY;
+    this.combatEffects.clear();this.lastCombatActionId=Number.NEGATIVE_INFINITY;this.lastTameThrowId=Number.NEGATIVE_INFINITY;
     this.stormVisuals.clear();
     this.raiderVisuals.clear();
     this.workerRigs.clear();
@@ -2690,7 +2675,7 @@ export class Elaris3DRenderer {
     const height=target?.kind==='resource'?2.35:target?.kind==='creature'
       ?Math.max(CREATURE_PLATE_HEIGHT,modelHeight+.22)+.55:1.55;
     const signature = target
-      ? `${target.kind}|${target.id}|${target.label}|${target.value ?? ''}|${target.maxValue ?? ''}`
+      ? `${target.kind}|${target.id}|${target.label}|${target.value ?? ''}|${target.maxValue ?? ''}|${target.tameBps ?? ''}`
       : '';
     if (signature === this.targetSignature) {
       if(this.targetStatus&&position)this.targetStatus.position.set(position.x,height,position.z);
@@ -2708,13 +2693,14 @@ export class Elaris3DRenderer {
     const color = target.kind === 'resource' ? '#ffd66b'
       : target.kind === 'drop' ? '#7ce7d5'
         : target.kind === 'creature' ? '#e9a1ff' : '#90d7ff';
-    const sprite = this.createStatusLabel(text, color);
+    const sprite = this.createStatusLabel(text, color, target.tameBps);
     sprite.position.set(position!.x, height, position!.z);
     this.feedbackRoot.add(sprite);
     this.targetStatus = sprite;
   }
 
-  private createStatusLabel(text: string, accent: string): THREE.Sprite {
+  /** `fillBps`, when given, draws a gold progress strip along the label's base (the tame chance). */
+  private createStatusLabel(text: string, accent: string, fillBps?: number): THREE.Sprite {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 96;
@@ -2732,7 +2718,17 @@ export class Elaris3DRenderer {
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       const clipped = text.length > 34 ? `${text.slice(0, 31)}…` : text;
-      context.fillText(clipped, 256, 49);
+      context.fillText(clipped, 256, fillBps === undefined ? 49 : 43);
+      if (fillBps !== undefined) {
+        context.fillStyle = 'rgba(255, 248, 232, .18)';
+        context.beginPath();
+        context.roundRect(40, 66, 432, 10, 5);
+        context.fill();
+        context.fillStyle = '#f2c95c';
+        context.beginPath();
+        context.roundRect(40, 66, Math.max(10, 432 * Math.min(1, fillBps / 10_000)), 10, 5);
+        context.fill();
+      }
     }
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -3034,6 +3030,19 @@ export class Elaris3DRenderer {
   }
 
   private updateCombatEffects(presentation:ThreePresentationState|null,time:number,reduced:boolean):void {
+    // A snare throw: the snare lobs over in a high arc, then either wraps the
+    // creature in rising gold rings or bursts into grey shards.
+    const tameThrow=presentation?.tameThrow;
+    if(tameThrow&&tameThrow.id!==this.lastTameThrowId){
+      this.lastTameThrowId=tameThrow.id;
+      const from={x:this.playerRoot.position.x,y:1.05+this.actorRoot.position.y,z:this.playerRoot.position.z};
+      const to={x:tameThrow.x/TILE_SIZE,y:.7,z:tameThrow.y/TILE_SIZE};
+      const flight=reduced?120:420;
+      this.combatEffects.emit({kind:'snare',at:time,duration:flight,from,to,color:COMBAT_PALETTE.gold});
+      this.combatEffects.emit(tameThrow.outcome==='tamed'
+        ?{kind:'capture',at:time+flight,duration:900,from:to,to,color:COMBAT_PALETTE.leaf}
+        :{kind:'fizzle',at:time+flight,duration:420,from:to,to,color:COMBAT_PALETTE.ivory});
+    }
     const action=presentation?.playerAction;
     if(action&&action.id!==this.lastCombatActionId){
       this.lastCombatActionId=action.id;
@@ -3159,26 +3168,7 @@ export class Elaris3DRenderer {
     const pose = presentation?.playerPosition ?? this.state.player;
     const player = worldToThree(pose.x, pose.y);
     const reducedMotion = presentation?.prefersReducedMotion ?? false;
-    const battleSnapshot = captureBattleSnapshot(this.state);
-    const battleActive = this.battleStage.update(battleSnapshot, time, reducedMotion);
-    if (battleActive && !this.battleCameraActive) this.battleAnchor.set(player.x, 0, player.z);
-    if (battleActive !== this.battleCameraActive) {
-      this.battleCameraActive = battleActive;
-    }
-    this.battleStage.root.position.copy(this.battleAnchor);
-    this.worldRoot.visible = !battleActive;
-    this.resourceGrounding.root.visible = !battleActive;
-    this.contactShadows.mesh.visible = !battleActive;
-    this.entityRoot.visible = !battleActive;
-    this.raiderRoot.visible = !battleActive;
-    this.workerRoot.visible = !battleActive;
-    this.stormRoot.visible = !battleActive;
-    this.arrowRoot.visible = !battleActive;
-    this.combatEffects.root.visible=!battleActive;
-    this.feedbackRoot.visible = !battleActive;
-    this.protectionRoot.visible = !battleActive;
-    this.playerRoot.visible = !battleActive;
-    const activeTarget = battleActive || presentation?.placement ? null : presentation?.target ?? null;
+    const activeTarget = presentation?.placement ? null : presentation?.target ?? null;
     this.playerRoot.position.set(player.x, PLAYER_Y, player.z);
     this.updateTravelAngle(player.x, player.z, time);
     const action=presentation?.playerAction;
@@ -3213,7 +3203,7 @@ export class Elaris3DRenderer {
     if(!gathering)this.lastGatherKind=null;
     this.playerRig.setGatherTool(action?.kind==='ranged'?'bow':action?.kind==='magic'?holdingStaff?'staff':'hands'
       :holdingStaff?'staff':gatherToolForNode(action?.kind==='melee'?'tree':this.lastGatherKind));
-    if(Number.isFinite(this.previousPlayerHp)&&this.state.player.hp<this.previousPlayerHp&&!battleActive){
+    if(Number.isFinite(this.previousPlayerHp)&&this.state.player.hp<this.previousPlayerHp){
       this.playerHurtAt=time;
       const at={x:player.x,y:.85,z:player.z};
       this.combatEffects.emit({kind:'impact',at:time+70,duration:320,from:at,to:at,color:COMBAT_PALETTE.enemy});
@@ -3229,7 +3219,7 @@ export class Elaris3DRenderer {
         :gathering?{...riderFrame,progress:presentation?.gatherProgress??0}:riderFrame,
     );
 
-    const firstPerson = firstPersonView.active && !battleActive && presentation?.placement == null;
+    const firstPerson = firstPersonView.active && presentation?.placement == null;
     if (firstPerson !== this.firstPersonFrame) this.setFirstPersonFrame(firstPerson);
     // The eye is inside the rig, so the local body is hidden; its ground
     // contact shadow is drawn separately and stays.
@@ -3240,27 +3230,22 @@ export class Elaris3DRenderer {
       this.playerRing.visible = false;
     }
 
-    // In battle the camera tracks the fighter inside the arena, so backing off
-    // the enemy keeps the player framed instead of sliding to the screen edge.
     const reveal = cameraRevealCue((time - this.areaRevealStartedAt) / 1000, reducedMotion);
-    const desiredTarget = battleActive
-      ? this.battleAnchor.clone().add(this.battleStage.focus)
-      : new THREE.Vector3(player.x, 0, player.z);
-    if (!battleActive && this.landmarkBeacon && reveal.targetLead > 0) {
+    const desiredTarget = new THREE.Vector3(player.x, 0, player.z);
+    if (this.landmarkBeacon && reveal.targetLead > 0) {
       const landmarkPosition = this.landmarkBeacon.root.getWorldPosition(new THREE.Vector3());
       const towardLandmark = landmarkPosition.sub(desiredTarget).setY(0);
       if (towardLandmark.lengthSq() > 0.001) desiredTarget.add(towardLandmark.normalize().multiplyScalar(reveal.targetLead));
     }
     this.cameraTarget.lerp(desiredTarget, 1 - Math.pow(0.001, deltaSeconds));
-    const placementActive = !battleActive && presentation?.placement != null;
+    const placementActive = presentation?.placement != null;
     const overworldOffset = elarisCameraOffset(placementActive
       ? { yawDegrees: this.cameraOrientation.yawDegrees, pitchDegrees: Math.max(72, this.cameraOrientation.pitchDegrees) }
       : this.cameraOrientation);
-    const desiredCamera = this.cameraTarget.clone().add(battleActive
-      ? new THREE.Vector3(7.5, 8.5, 11)
-      : new THREE.Vector3(overworldOffset.x, overworldOffset.y + reveal.lift, overworldOffset.z));
+    const desiredCamera = this.cameraTarget.clone()
+      .add(new THREE.Vector3(overworldOffset.x, overworldOffset.y + reveal.lift, overworldOffset.z));
     this.camera.position.lerp(desiredCamera, 1 - Math.pow(0.002, deltaSeconds));
-    const desiredZoom = battleActive ? 1.85 : placementActive ? Math.min(0.88, reveal.zoom) : reveal.zoom;
+    const desiredZoom = placementActive ? Math.min(0.88, reveal.zoom) : reveal.zoom;
     if (Math.abs(this.camera.zoom - desiredZoom) > 0.0005) {
       this.camera.zoom = THREE.MathUtils.lerp(this.camera.zoom, desiredZoom, 1 - Math.pow(0.0005, deltaSeconds));
       this.camera.updateProjectionMatrix();
@@ -3281,46 +3266,41 @@ export class Elaris3DRenderer {
     }
     this.placementRangeRing.visible = placementActive;
     if (placementActive) this.placementRangeRing.position.set(player.x, 0.035, player.z);
-    const batch = battleActive ? [] : presentation?.batchPlacements ?? [];
-    this.updatePlacementGhost(battleActive || batch.length ? null : presentation?.placement ?? null);
-    this.updateBatchAndShelter(batch, battleActive ? null : presentation?.shelterGuide ?? null);
-    this.updateJourneyWaypoint(battleActive ? null : presentation?.journeyWaypoint ?? null);
-    this.updateSelectionHighlight(battleActive ? null : presentation?.selection ?? null);
+    const batch = presentation?.batchPlacements ?? [];
+    this.updatePlacementGhost(batch.length ? null : presentation?.placement ?? null);
+    this.updateBatchAndShelter(batch, presentation?.shelterGuide ?? null);
+    this.updateJourneyWaypoint(presentation?.journeyWaypoint ?? null);
+    this.updateSelectionHighlight(presentation?.selection ?? null);
     this.updateTargetStatus(activeTarget);
-    if (battleActive) this.focusRing.visible = false;
-    else this.updateFocusRing(time / 1000, activeTarget);
-    if (!battleActive) this.updateAmbientMotion(time, reducedMotion, activeTarget,deltaSeconds);
-    if (!battleActive) this.updateDoorSwings(player.x, player.z, deltaSeconds, reducedMotion);
-    const insideRoom = battleActive ? null : this.updateTownRooms(player, firstPerson,
+    this.updateFocusRing(time / 1000, activeTarget);
+    this.updateAmbientMotion(time, reducedMotion, activeTarget,deltaSeconds);
+    this.updateDoorSwings(player.x, player.z, deltaSeconds, reducedMotion);
+    const insideRoom = this.updateTownRooms(player, firstPerson,
       activeTarget?.kind === 'town-hotspot' ? activeTarget.id : null, time, deltaSeconds, reducedMotion);
-    if (!battleActive) {
-      // The raid runs alongside the world, not inside the battle stage: a
-      // danger minute is real-time and never becomes a turn-based encounter.
-      this.syncRaiders(time, deltaSeconds, reducedMotion);
-      this.syncWorkerCreatures(time, reducedMotion);
-      this.syncFollowerCreatures(time,deltaSeconds,pose,reducedMotion,presentation?.gatherAssistance);
-      this.syncArcaneStrikes(reducedMotion);
-      this.updateArrows(deltaSeconds, reducedMotion);
-      this.updateCombatEffects(presentation,time,reducedMotion);
-      this.updateAmbientMotes(time, reducedMotion);
-      this.entrance?.update(time, reducedMotion);
-      this.vegetation?.update(player.x, player.z, firstPerson ? 2 : 1);
-      this.contactShadows.update(this.state, this.workerRoot.children, pose);
-      updateStyledWater(time, reducedMotion);
-      updateTreeWind(time, reducedMotion);
-      // Nothing stands between an eye-level camera and the player.
-      if (!firstPerson) this.updateOccluders(player, deltaSeconds, insideRoom?.shell ?? null);
-      this.updateAtmosphere(time, reducedMotion);
-      if (firstPerson) this.firstPersonHands.lightFrom(this.hemisphere, this.sun, this.firstPersonCamera);
-      if (firstPerson && this.scene.fog instanceof THREE.Fog) {
-        // Pulled in so the edge of the loaded area is never visible; a denser
-        // danger fog still wins. The clear colour already equals the fog's.
-        this.scene.fog.near = Math.min(this.scene.fog.near, FIRST_PERSON_FOG_NEAR);
-        this.scene.fog.far = Math.min(this.scene.fog.far, FIRST_PERSON_FOG_FAR);
-      }
+    this.syncRaiders(time, deltaSeconds, reducedMotion);
+    this.syncWorkerCreatures(time, reducedMotion);
+    this.syncFollowerCreatures(time,deltaSeconds,pose,reducedMotion,presentation?.gatherAssistance);
+    this.syncArcaneStrikes(reducedMotion);
+    this.updateArrows(deltaSeconds, reducedMotion);
+    this.updateCombatEffects(presentation,time,reducedMotion);
+    this.updateAmbientMotes(time, reducedMotion);
+    this.entrance?.update(time, reducedMotion);
+    this.vegetation?.update(player.x, player.z, firstPerson ? 2 : 1);
+    this.contactShadows.update(this.state, this.workerRoot.children, pose);
+    updateStyledWater(time, reducedMotion);
+    updateTreeWind(time, reducedMotion);
+    // Nothing stands between an eye-level camera and the player.
+    if (!firstPerson) this.updateOccluders(player, deltaSeconds, insideRoom?.shell ?? null);
+    this.updateAtmosphere(time, reducedMotion);
+    if (firstPerson) this.firstPersonHands.lightFrom(this.hemisphere, this.sun, this.firstPersonCamera);
+    if (firstPerson && this.scene.fog instanceof THREE.Fog) {
+      // Pulled in so the edge of the loaded area is never visible; a denser
+      // danger fog still wins. The clear colour already equals the fog's.
+      this.scene.fog.near = Math.min(this.scene.fog.near, FIRST_PERSON_FOG_NEAR);
+      this.scene.fog.far = Math.min(this.scene.fog.far, FIRST_PERSON_FOG_FAR);
     }
-    this.updateDangerOverlay(time, deltaSeconds, reducedMotion, battleActive);
-    if (!battleActive) this.updatePurifierProtection(time);
+    this.updateDangerOverlay(time, deltaSeconds, reducedMotion);
+    this.updatePurifierProtection(time);
     this.updateParticles(deltaSeconds);
     this.finish.render();
   }
@@ -3569,14 +3549,13 @@ export class Elaris3DRenderer {
     time: number,
     deltaSeconds: number,
     reducedMotion: boolean,
-    battleActive: boolean,
   ): void {
     const timer = survivalSchedule(this.state);
-    const active = timer.phase === 'danger' && !battleActive;
+    const active = timer.phase === 'danger';
     if (timer.phase === 'danger') this.dangerThreat = timer.threat;
     const fadeSeconds = active ? DANGER_FOG_FADE_IN_SECONDS : DANGER_FOG_FADE_OUT_SECONDS;
     this.dangerFogStrength = THREE.MathUtils.clamp(
-      battleActive ? 0 : reducedMotion ? Number(active)
+      reducedMotion ? Number(active)
         : this.dangerFogStrength + (active ? deltaSeconds : -deltaSeconds) / fadeSeconds,
       0,
       1,
@@ -3589,7 +3568,7 @@ export class Elaris3DRenderer {
       this.playerExposed = playerExposedTo(this.state, this.dangerThreat);
     }
     const tintFade = this.playerExposed ? EXPOSURE_TINT_FADE_IN_SECONDS : EXPOSURE_TINT_FADE_OUT_SECONDS;
-    this.exposureStrength = battleActive ? 0 : reducedMotion ? Number(this.playerExposed) : THREE.MathUtils.clamp(
+    this.exposureStrength = reducedMotion ? Number(this.playerExposed) : THREE.MathUtils.clamp(
       this.exposureStrength + (this.playerExposed ? deltaSeconds : -deltaSeconds) / tintFade,
       0,
       1,

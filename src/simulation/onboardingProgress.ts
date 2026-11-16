@@ -44,12 +44,6 @@ export function recordOpeningProductionCollection(state: GameState, housingId: s
   production.collectedFiber = Math.min(production.producedFiber, production.collectedFiber + amount);
 }
 
-export function recordOpeningGuard(state: GameState, wildId: string, guardedDamage: number): void {
-  const run = state.onboarding.supplyRun;
-  if (!run || wildId !== `opening-guardian-${state.seed}` || !Number.isSafeInteger(guardedDamage) || guardedDamage <= 0) return;
-  run.guardedDamage = Math.min(9999, run.guardedDamage + guardedDamage);
-}
-
 /** Only a successful, real Garden Bed collection can finish the garden lesson. */
 export function recordOpeningGardenHarvest(state: GameState, buildingId: string, amount: number): void {
   const garden = state.onboarding.garden;

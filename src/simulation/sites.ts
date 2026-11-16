@@ -429,7 +429,6 @@ export function searchTicksFor(state: GameState, container: SiteContainer): numb
  */
 export function beginSiteSearch(state: GameState, siteId: string, containerIndex: number): CommandResult {
   if (state.pendingRespawn) return { ok: false, message: 'Not now' };
-  if (state.activeEncounter) return { ok: false, message: 'Not during an encounter' };
   if (state.activeSearch) {
     return state.activeSearch.siteId === siteId && state.activeSearch.containerIndex === containerIndex
       ? { ok: false, message: 'Already searching' }
@@ -501,7 +500,7 @@ export function advanceSiteSearch(state: GameState): SiteSearchResult | null {
   if (!search) return null;
   const site = currentAreaSite(state, search.siteId);
   const container = site?.containers[search.containerIndex];
-  if (!site || !container || state.pendingRespawn || state.activeEncounter) {
+  if (!site || !container || state.pendingRespawn) {
     state.activeSearch = null;
     return { kind: 'interrupted', message: 'Search interrupted' };
   }

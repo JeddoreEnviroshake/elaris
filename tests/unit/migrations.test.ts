@@ -355,12 +355,12 @@ describe('migrateToCurrent', () => {
     current.meta.saveVersion = 27;
     current.meta.contentVersion = 25;
     const wild = current.state.wildCreatures[0]!;
-    current.state.activeEncounter = {
+    (current.state as unknown as Record<string, unknown>)['activeEncounter'] = {
       wildCreatureId: wild.id, creatureHp: 10, creatureMaxHp: 10, round: 2, message: 'Your turn.',
       playerPos: 30, creaturePos: 70,
       companionCreatureId: null, selectedCompanionAbilityId: null, companionAbilityReadyRounds: {}, enemyIntent: 'advance',
     };
-    const legacyEncounter = current.state.activeEncounter as unknown as Record<string, unknown>;
+    const legacyEncounter = (current.state as unknown as Record<string, unknown>)['activeEncounter'] as Record<string, unknown>;
     delete legacyEncounter['playerPos']; delete legacyEncounter['creaturePos'];
     const legacyAttributes = current.state.player.attributes as unknown as Record<string, unknown>;
     delete legacyAttributes['health']; delete legacyAttributes['stamina']; delete legacyAttributes['magic'];
@@ -372,7 +372,7 @@ describe('migrateToCurrent', () => {
     // and the battle screen the encounter belonged to is being retired. The
     // v27 positional backfill still runs on the way past — it just no longer
     // has anything to survive into.
-    expect(migrated.state.activeEncounter).toBeNull();
+    expect((migrated.state as unknown as Record<string, unknown>)['activeEncounter']).toBeUndefined();
     // v75 splits the three recovery attributes apart and restates the base
     // rates per second in hundredths.
     expect(migrated.state.player.attributes).toMatchObject({

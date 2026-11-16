@@ -153,15 +153,11 @@ describe('character levels and attributes', () => {
     expect(state.player.hp).toBe(51);
   });
 
-  it('pauses all recovery in battle', () => {
+  it('recovers on the whole-second cadence', () => {
     const state = createInitialState(123);
     state.tick = 60;
     state.player.hp = 50; state.player.stamina = 50; state.player.mana = 10;
     expect(recoverPlayer(state)).toBe(true);
-    expect(state.player).toMatchObject({ hp: 50, stamina: 55, mana: 12 });
-
-    state.activeEncounter = { wildCreatureId: state.wildCreatures[0]!.id, creatureHp: 10, creatureMaxHp: 10, round: 1, message: '', playerPos: 30, creaturePos: 70, companionCreatureId: null, selectedCompanionAbilityId: null, companionAbilityReadyRounds: {}, enemyIntent: 'advance' };
-    expect(recoverPlayer(state)).toBe(false);
     expect(state.player).toMatchObject({ hp: 50, stamina: 55, mana: 12 });
   });
 

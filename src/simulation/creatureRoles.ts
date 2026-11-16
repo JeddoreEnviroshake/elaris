@@ -12,7 +12,7 @@ export const FOLLOWER_ACTION_SPEED_CAP_BPS = 10_000;
 
 /** Followers accompany the player; assistance reach is measured from player to harvested node. */
 export function activeFollowerGatherAssistance(state: GameState, node: ResourceNodeState, resource: GatherableResourceId) {
-  if (node.kind !== 'plant' || state.pendingRespawn || state.activeEncounter || state.player.traversalMode === 'boat') return null;
+  if (node.kind !== 'plant' || state.pendingRespawn || state.player.traversalMode === 'boat') return null;
   const distance = Math.hypot(node.x - state.player.x, node.y - state.player.y);
   let best: { creatureId: string; creatureName: string; amountBps: number } | null = null;
   for (const creature of [...state.ownedCreatures].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -160,7 +160,6 @@ function environmentIncludesPointWithPerimeter(environment: EnvironmentInfo, wor
 
 /** Aggressive detection scale at a world point; encounters deliberately disable it. */
 export function snarlfoxDetectionMultiplierBps(state: GameState, worldX: number, worldY: number): number {
-  if (state.activeEncounter) return 10_000;
   for (const creature of state.ownedCreatures) {
     if (creature.speciesId !== 'snarlfox' || creature.role !== 'work' || !creature.worksiteId || !creature.housingId) continue;
     const worksite = state.buildings.find((building) => building.id === creature.worksiteId);

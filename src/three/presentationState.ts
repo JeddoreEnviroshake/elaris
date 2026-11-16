@@ -28,6 +28,8 @@ export interface InteractionTargetPresentation {
   readonly label: string;
   readonly value?: number;
   readonly maxValue?: number;
+  /** Wild creatures only: the tame chance in basis points, drawn as a fill bar. */
+  readonly tameBps?: number;
 }
 
 export interface ThreePresentationState {
@@ -47,6 +49,8 @@ export interface ThreePresentationState {
   readonly gatherKind?: ResourceNodeKind | null;
   readonly gatherProgress?: number;
   readonly playerAction?:{readonly id:number;readonly arrowTracked:boolean;readonly kind:'melee'|'ranged'|'magic';readonly progress:number;readonly x:number;readonly y:number}|null;
+  /** The latest snare throw: the renderer arcs a snare to (x, y), then wraps or bursts. */
+  readonly tameThrow?:{readonly id:number;readonly outcome:'tamed'|'missed';readonly x:number;readonly y:number}|null;
   readonly gatherAssistance?: GatherAssistancePresentation | null;
   readonly prefersReducedMotion: boolean;
 }

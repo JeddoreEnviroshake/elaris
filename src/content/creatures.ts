@@ -33,6 +33,21 @@ export interface CreatureDefinition {
   /** Typed, strongest-per-group overworld bonus sources. */
   followerModifiers: readonly FollowerModifierDefinition[];
   rosterLimit: number;
+  /**
+   * How this species is tamed in the world (taming-chance-plan.md). Each lever
+   * is weighted per species so the roster plays differently without new code:
+   * a Craghopper is mostly worn down, a Glade Stag mostly approached unseen.
+   */
+  tame: {
+    /** The item an Offer spends for the large bonus. Any berry gives a small one. */
+    favourite: ResourceId;
+    /** Chance added at 0 HP, scaled linearly by missing health. */
+    hpWeightBps: number;
+    /** Most that offering alone can contribute. */
+    foodCapBps: number;
+    /** Bonus for a throw it never noticed; doubled while it eats. */
+    unnoticedBps: number;
+  };
   encounter: {
     maxHp: number;
     attackPower: number;
@@ -114,6 +129,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'tuftle',
   displayName: 'Tuftle',
   temperament: 'passive',
+  tame: { favourite: 'berry', hpWeightBps: 3_500, foodCapBps: 5_000, unnoticedBps: 1_000 },
   habitat: 'grassland',
   followRole: 'Improves nearby plant gathering',
   followEfficiencyAxes: ['yield'],
@@ -135,6 +151,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'craghopper',
   displayName: 'Craghopper',
   temperament: 'neutral',
+  tame: { favourite: 'iron-ore', hpWeightBps: 5_500, foodCapBps: 2_500, unnoticedBps: 1_000 },
   habitat: 'hills',
   followRole: 'Speeds up mining actions',
   followEfficiencyAxes: ['break'],
@@ -152,6 +169,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'glade-stag',
   displayName: 'Glade Stag',
   temperament: 'skittish',
+  tame: { favourite: 'fiber', hpWeightBps: 3_000, foodCapBps: 3_500, unnoticedBps: 2_000 },
   habitat: 'forest',
   followRole: 'Mount for faster travel',
   followEfficiencyAxes: ['travel'],
@@ -169,6 +187,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'snarlfox',
   displayName: 'Snarlfox',
   temperament: 'aggressive',
+  tame: { favourite: 'berry', hpWeightBps: 4_000, foodCapBps: 3_000, unnoticedBps: 1_000 },
   habitat: 'forest',
   followRole: 'Reduces dangerous interruptions',
   followEfficiencyAxes: ['safety'],
@@ -191,6 +210,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'masonmole',
   displayName: 'Masonmole',
   temperament: 'neutral',
+  tame: { favourite: 'stone', hpWeightBps: 3_000, foodCapBps: 5_000, unnoticedBps: 1_000 },
   habitat: 'hills',
   followRole: 'Keeps structures standing longer',
   followEfficiencyAxes: ['uptime'],
@@ -212,6 +232,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'bulwark-boar',
   displayName: 'Bulwark Boar',
   temperament: 'aggressive',
+  tame: { favourite: 'berry', hpWeightBps: 5_500, foodCapBps: 2_500, unnoticedBps: 500 },
   habitat: 'grassland',
   followRole: 'Fights back when something closes in',
   followEfficiencyAxes: ['safety'],
@@ -235,6 +256,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'quillfinch',
   displayName: 'Quillfinch',
   temperament: 'skittish',
+  tame: { favourite: 'fiber', hpWeightBps: 3_000, foodCapBps: 3_500, unnoticedBps: 2_000 },
   habitat: 'forest',
   followRole: 'Keeps defences supplied',
   followEfficiencyAxes: ['carry'],
@@ -257,6 +279,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'mistmoth',
   displayName: 'Mistmoth',
   temperament: 'passive',
+  tame: { favourite: 'fiber', hpWeightBps: 3_000, foodCapBps: 5_000, unnoticedBps: 1_500 },
   habitat: 'forest',
   followRole: 'Filters the air it settles in',
   followEfficiencyAxes: ['safety'],
@@ -279,6 +302,7 @@ export const CREATURE_DEFINITIONS: readonly CreatureDefinition[] = [{
   speciesId: 'slingtail',
   displayName: 'Slingtail',
   temperament: 'neutral',
+  tame: { favourite: 'stone', hpWeightBps: 4_000, foodCapBps: 3_000, unnoticedBps: 1_000 },
   habitat: 'hills',
   followRole: 'Harries hostiles from a distance',
   followEfficiencyAxes: ['safety'],
