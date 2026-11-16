@@ -28,7 +28,9 @@ function atCart(seed = 42) {
 }
 
 describe('nearby supply run', () => {
-  it('authors a reachable road landmark, optional log, and return route across starter seeds', () => {
+  // Seven full world generations: under a second alone, but past the default
+  // 5s when the whole suite shares a two-core CI runner.
+  it('authors a reachable road landmark, optional log, and return route across starter seeds', { timeout: 30_000 }, () => {
     for (const seed of [0, 1, 7, 42, 99, 12345, 0xffffffff]) {
       const state = readySupplyRun(seed); const site = state.onboarding.supplyRun!.site;
       expect(site, `missing cart for ${seed}`).not.toBeNull();
