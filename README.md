@@ -90,6 +90,16 @@ articulated combatants, movement, melee/ranged/magic attacks, companion support,
 damage reactions, captures, and terminal poses. The accessible battle controls
 remain the authoritative input surface.
 
+The interface is a woodland field journal with brass frames, linen inventory
+tiles, local resource icons and portraits rendered from the actual character
+models. Desktop navigation uses a side rail, with scrolling chapter tabs on
+phones and a compact landscape layout. Crafting, blueprints, quests, character
+details, conversations, shop counters, maps and combat controls share the same
+materials. Keyboard navigation, modal focus, reduced motion and higher contrast
+remain supported. Unchanged inventory cells keep focus across HUD refreshes;
+the journal uses a still world backdrop to keep input responsive. Portraits ship
+in the offline bundle without adding live 3D previews to menus.
+
 Combat effects layer teal spell threads, gold runes, weapon crescents,
 critical-hit shards, healing leaves, woven shields and bonding rings. Companion
 abilities and enemy species have distinct visual styles. Fighter movement,

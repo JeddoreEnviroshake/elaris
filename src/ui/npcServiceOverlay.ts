@@ -49,6 +49,7 @@ export class NpcServiceOverlay {
       background: 'linear-gradient(145deg, color-mix(in srgb, var(--town-surface) 94%, black), var(--town-bg))',
       border: '2px solid var(--town-accent)', boxShadow: '0 24px 80px rgba(0,0,0,.62)',
     });
+    this.panel.classList.add('elaris-surface');
     const header = div({ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '14px' });
     const identity = div({ display: 'grid', gridTemplateColumns: '60px minmax(0, 1fr)', alignItems: 'center', gap: '12px', minWidth: '0' });
     this.portrait = div({

@@ -1,6 +1,7 @@
 import type { GameState } from '../simulation/state';
 import { tamingActionPreview, tamingMoodLabel, type TamingAction } from '../simulation/taming';
 import { uiButton } from './controls';
+import {characterPortrait} from './portraits';
 import { TAMING_MOOD_DRIFT } from '../config/balance';
 
 const ACTION_LABELS: Record<TamingAction, string> = {
@@ -37,6 +38,7 @@ export class OpeningPartnershipPanel {
       padding: '20px', border: '2px solid #8eaa75', borderRadius: '10px', background: '#172c20',
       color: '#f5ecd6', font: '15px system-ui,sans-serif', lineHeight: '1.45', boxShadow: '0 12px 40px #0008',
     });
+    this.card.classList.add('elaris-surface');
     this.card.setAttribute('role', 'dialog');
     this.card.setAttribute('aria-modal', 'true');
     this.card.setAttribute('aria-labelledby', 'opening-partnership-title');
@@ -73,7 +75,8 @@ export class OpeningPartnershipPanel {
     });
     this.closeButton = uiButton('Continue later', () => this.close());
     Object.assign(this.closeButton.style, { minHeight: '44px', marginTop: '12px', width: '100%' });
-    this.card.append(this.heading, this.description, this.meters, this.feedback, this.actions, this.nameForm, this.closeButton);
+    const portrait=characterPortrait('tuftle',84);portrait.classList.add('elaris-trust-portrait');
+    this.card.append(portrait,this.heading, this.description, this.meters, this.feedback, this.actions, this.nameForm, this.closeButton);
     this.root.append(this.card);
     parent.append(this.root);
     this.root.addEventListener('pointerdown', (event) => event.stopPropagation());

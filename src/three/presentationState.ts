@@ -33,6 +33,7 @@ export interface InteractionTargetPresentation {
 }
 
 export interface ThreePresentationState {
+  readonly journalOpen?:boolean;
   readonly batchPlacements?: readonly BuildPlacementPresentation[];
   readonly shelterGuide?: { tileX: number; tileY: number } | null;
   readonly journeyWaypoint?: { tileX: number; tileY: number; label: string } | null;

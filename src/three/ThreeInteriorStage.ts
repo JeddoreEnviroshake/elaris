@@ -659,11 +659,14 @@ export class ThreeInteriorStage {
     canvas.height = 80;
     const context = canvas.getContext('2d');
     if (context) {
-      context.fillStyle = background;
+      context.fillStyle = '#183329';
+      context.beginPath();
       context.roundRect(8, 8, 368, 64, 14);
       context.fill();
-      context.fillStyle = foreground;
-      context.font = '800 30px system-ui, sans-serif';
+      context.strokeStyle=foreground;context.lineWidth=2;context.stroke();
+      context.fillStyle=background;context.fillRect(23,25,4,30);
+      context.fillStyle = '#f2e4c4';
+      context.font = '400 30px Georgia, serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.fillText(text, 192, 41);
@@ -671,7 +674,7 @@ export class ThreeInteriorStage {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
-    sprite.scale.set(2.35, 0.94, 1);
+    sprite.scale.set(2.35, 0.49, 1);
     sprite.renderOrder = 12;
     return sprite;
   }

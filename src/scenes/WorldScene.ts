@@ -500,6 +500,7 @@ export class WorldScene extends Phaser.Scene {
     const pose = this.interiorSession.pose;
     const buildingId = this.interiorSession.buildingId;
     return {
+      journalOpen:this.inventoryPanel?.open??false,
       placement: this.buildMode?.getPresentationState() ?? null,
       selection: this.buildMode?.getSelectionPresentationState() ?? null,
       batchPlacements: this.buildMode?.getBatchPresentationStates() ?? [],

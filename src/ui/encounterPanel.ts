@@ -25,6 +25,7 @@ import type { CompanionAbilityId, GameState, SpeciesId } from '../simulation/sta
 import { magicStaffPowerBonus } from '../simulation/characterProgression';
 import { div, uiButton } from './controls';
 import {BATTLE_TIMING} from '../presentation/combatTiming';
+import {characterPortrait,setCharacterPortrait} from './portraits';
 
 const STYLE_ICONS: Readonly<Record<CombatStyle, string>> = { melee: '⚔️', ranged: '🏹', magic: '✨' };
 /** Impact/counter/outro pacing in ms — "quick with punch", under a second per round. */
@@ -173,7 +174,7 @@ export class EncounterPanel {
     actions.append(this.companionRail, attackRow, movementRow, tacticRow);
 
     const creaturePlate = this.buildPlate('', '#7a5a3f');
-    this.creatureName = creaturePlate.firstElementChild as HTMLDivElement;
+    this.creatureName = creaturePlate.querySelector('.eb-fighter-name') as HTMLDivElement;
     this.bars.set('creatureHp', this.addBar(creaturePlate, 'HP', '#d9534f'));
     this.creatureTraits = div({ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px', font: '600 11px system-ui, sans-serif' });
     creaturePlate.appendChild(this.creatureTraits);
@@ -199,7 +200,9 @@ export class EncounterPanel {
     });
     plate.classList.add('elaris-panel', 'eb-plate');
     const title = div({ padding: '3px 8px', marginBottom: '7px', borderRadius: '6px', background: nameColor, font: '700 13px system-ui, sans-serif', textAlign: 'center' });
-    title.textContent = name;
+    title.classList.add('eb-plate-title');
+    const label=div({});label.className='eb-fighter-name';label.textContent=name;
+    title.append(characterPortrait(name?'player':'tuftle',38),label);
     plate.appendChild(title);
     return plate;
   }
@@ -241,6 +244,7 @@ export class EncounterPanel {
     if (guided) this.openingLesson.textContent = `${this.state.onboarding.supplyRun!.guardedDamage > 0 ? `Shell Guard prevented ${this.state.onboarding.supplyRun!.guardedDamage} damage. ` : ''}Read Intent before acting. Rest lets the creature approach. Shell Guard works when ready. Retreat is guaranteed; supplies do not require a win.`;
     this.distanceLabel.textContent = `Distance ${encounterDistance(encounter)} · Melee ≤${MELEE_RANGE} · Ranged ≤${RANGED_RANGE} · Magic ∞`;
     this.creatureName.textContent = name;
+    if(wild)setCharacterPortrait(this.creatureName.previousElementSibling as HTMLElement,wild.speciesId);
 
     const companion = encounter.companionCreatureId
       ? this.state.ownedCreatures.find((creature) => creature.id === encounter.companionCreatureId)

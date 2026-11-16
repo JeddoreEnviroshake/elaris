@@ -24,6 +24,7 @@ export class NpcServiceActions {
       background: 'rgba(255,255,255,0.09)', color: 'var(--town-accent)', fontWeight: '750',
     });
     this.actions = div({ display: 'grid', gap: '9px', marginTop: '12px' });
+    this.actions.classList.add('elaris-service-offers');this.balance.classList.add('elaris-service-balance');
     this.feedback = div({ minHeight: '22px', marginTop: '10px', fontSize: '13px', fontWeight: '650' });
     this.feedback.setAttribute('aria-live', 'polite');
     this.root.append(this.balance, this.actions, this.feedback);

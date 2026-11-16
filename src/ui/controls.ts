@@ -58,6 +58,7 @@ export function uiButton(label: string, onClick: () => void): HTMLButtonElement 
 
 /** Apply the dense, left-aligned card treatment used by the Build palette. */
 export function paletteCard(button: HTMLButtonElement): HTMLButtonElement {
+  button.classList.add('elaris-palette-card');
   Object.assign(button.style, {
     display: 'block', width: '100%', minHeight: '58px', marginTop: '10px',
     padding: '10px 12px', textAlign: 'left', lineHeight: '1.3', touchAction: 'pan-y',
@@ -73,6 +74,7 @@ export function paletteSection(label: string): HTMLDivElement {
     fontWeight: '700', letterSpacing: '0.08em', textTransform: 'uppercase',
   });
   section.textContent = label;
+  section.classList.add('elaris-section-heading');
   return section;
 }
 

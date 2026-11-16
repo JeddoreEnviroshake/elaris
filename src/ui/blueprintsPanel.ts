@@ -76,11 +76,13 @@ export class BlueprintsPanel {
       margin: '-12px 0 0', padding: '12px 0 8px',
       background: 'rgba(9,20,14,0.97)',
     });
+    header.classList.add('elaris-blueprint-header');
     this.points = div({ color: '#ffe08a', fontSize: '12px' });
     this.detail = div({
       marginTop: '8px', padding: '10px 12px', borderRadius: '9px', lineHeight: '1.35',
       background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.1)',
     });
+    this.detail.classList.add('elaris-blueprint-detail');
     this.detailTitle = document.createElement('strong');
     this.detailBody = div({ marginTop: '3px', fontSize: '12px', opacity: '0.76' });
     this.detailCost = div({ marginTop: '3px', fontSize: '12px', opacity: '0.86' });
@@ -144,6 +146,7 @@ export class BlueprintsPanel {
 
   private buildTile(entry: BlueprintEntry): HTMLButtonElement {
     const tile = uiButton('', () => this.select(entry.key));
+    tile.classList.add('elaris-blueprint-tile');
     Object.assign(tile.style, {
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       gap: '4px', aspectRatio: '1', width: '100%', minWidth: '0', minHeight: '0',
@@ -202,6 +205,7 @@ export class BlueprintsPanel {
       const tile = this.tiles.get(entry.key)!;
       const unlocked = isBlueprintUnlocked(this.state, entry);
       const selected = entry.key === this.selectedKey;
+      tile.dataset.known=String(unlocked);
 
       const icon = tile.querySelector<HTMLElement>('[data-blueprint-icon]')!;
       setUiIcon(icon, unlocked ? entry.icon : 'blueprint', 18);

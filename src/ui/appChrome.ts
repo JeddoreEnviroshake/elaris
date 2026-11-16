@@ -68,6 +68,8 @@ export class AppChrome {
       transition: 'opacity 0.2s',
     });
 
+    this.banner.classList.add('elaris-surface');
+    this.toast.classList.add('elaris-surface');
     this.root.append(this.banner, this.toast);
     parent.appendChild(this.root);
   }
@@ -150,6 +152,7 @@ export class AppChrome {
       background: '#0f1512',
       border: '1px solid rgba(255,255,255,0.15)',
     });
+    panel.classList.add('elaris-surface');
     const h = el('h2', { margin: '0 0 12px', fontSize: '18px' });
     h.textContent = 'Elaris — Diagnostics';
     panel.appendChild(h);
@@ -192,6 +195,7 @@ export class AppChrome {
           dismiss();
         }
       });
+      reset.dataset.tone='danger';
       reset.style.background = '#6b2f2f';
       row.appendChild(reset);
       panel.appendChild(row);
@@ -236,6 +240,7 @@ function button(text: string, onClick: () => void | Promise<void>): HTMLButtonEl
     cursor: 'pointer',
     pointerEvents: 'auto',
   }) as HTMLButtonElement;
+  b.classList.add('elaris-button');
   b.textContent = text;
   b.addEventListener('click', () => void onClick());
   return b;

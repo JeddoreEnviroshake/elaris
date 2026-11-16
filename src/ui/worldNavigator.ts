@@ -11,6 +11,7 @@ import { openingGardenAvailable, openingGardenTarget } from '../simulation/openi
 import { terrainAtWithBuildings } from '../simulation/landscape';
 import { ELARIS_WATER_TEMPLE } from '../content/elarisWaters';
 import { WorldMapPanel } from './worldMapPanel';
+import {createUiIcon} from './icons';
 import { deathCacheView } from '../simulation/deathCache';
 import { BEACON_COLOR, drawBeaconMarker } from './mapMarkers';
 import { regionalIdentityForArea } from '../content/regions';
@@ -142,7 +143,7 @@ export class WorldNavigator {
     this.worldMap = new WorldMapPanel(parent, state, onWaystoneTravel);
     this.worldMapButton = document.createElement('button');
     this.worldMapButton.type = 'button';
-    this.worldMapButton.textContent = 'MAP';
+    this.worldMapButton.append(createUiIcon('compass',18));
     this.worldMapButton.classList.add('elaris-button');
     this.worldMapButton.setAttribute('aria-label', 'Open large map');
     Object.assign(this.worldMapButton.style, {

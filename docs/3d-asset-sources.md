@@ -257,6 +257,9 @@ content data, with no external art dependency:
   pickaxe remain as load-failure fallbacks and the sickle remains original
 - Placed construction surfaces, walls, facilities, furnace, beds, and planters
 - Focus rings, paths, terrain patches, lighting, fog, and labels
+- The woodland journal's portrait atlas in `src/ui/assets/portraits.png`,
+  rendered from the original player and nine creature rigs by
+  `scripts/render-ui-portraits.mjs`; it contains no downloaded character art
 
 These code-native rigs are production-safe, carry no external art license, and
 establish animation behavior as well as composition, scale, and color. Authored

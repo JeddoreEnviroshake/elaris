@@ -54,6 +54,25 @@ add variety without moving saved doors or building footprints.
 - The interface uses dark forest ink, parchment text, warm leather actions,
   fine brass borders and serif headings. Preserve readable labels, keyboard
   focus, contrast preferences and the existing accessible controls.
+- Menus form a field journal: a leaf crest, serif chapter titles, brass frame,
+  pine navigation and linen inventory tiles. Core sections come before the
+  opening field guides. Desktop uses a scrolling side rail; phones use a
+  horizontal chapter strip, with a compact side rail in short landscape views.
+  Content scrolls independently inside a frame that fits the viewport.
+- Resource silhouettes are local SVGs. Player and companion portraits are
+  transparent renders of the original game rigs in one 1280×512 PNG atlas,
+  bundled with a content hash and included offline. Regenerate it with
+  `node scripts/render-ui-portraits.mjs` alongside the Vite server. Menus create
+  no WebGL contexts and do not animate thumbnails.
+- World signs and conversation nameplates use matching ink, brass and serif
+  lettering. NPC nameplates retain the texture's aspect ratio so letters stay
+  proportional and the label clears the character's face.
+- Tabs have linked panels, arrow/Home/End navigation and a single tab stop.
+  Modal focus stays inside the active item card or journal; Escape closes the
+  item card first and returns to Menu when the journal closes. Preserve item
+  cells and quest entries when their data has not changed. The last rendered
+  world image serves as the journal backdrop, leaving rendering time for input
+  and scrolling; deterministic simulation continues normally.
 - Repeat scenery through instances; stream nearby planting in nine cells.
   Limit ambient creature traces to the player's surroundings and cap their
   accumulation. Shared maps remain alive across room and region changes.

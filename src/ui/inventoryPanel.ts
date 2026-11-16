@@ -5,7 +5,7 @@ import type { GameState, ResourceId, ToolInstance } from '../simulation/state';
 import { canAffordCost, stockedCostText } from './costs';
 import { RAIL_BOTTOMS, div, railButton, uiButton, wireDisclosure } from './controls';
 import { durabilityColor, inventorySlotEntries } from './inventorySlots';
-import { setUiIcon } from './icons';
+import { createUiIcon, setUiIcon, type UiIconName } from './icons';
 
 export interface InventoryPanelActions {
   /** A tool cell was tapped; equipping stays explicit. */
@@ -35,12 +35,23 @@ export interface InventoryPanelActions {
 export type MenuTabId = 'bag' | 'craft' | 'blueprints' | 'quests' | 'creatures' | 'character' | 'shelter' | 'paddock' | 'supply-run' | 'garden';
 
 interface MenuTab {
+  label:string;
   button: HTMLButtonElement;
   content: HTMLElement;
   onActivate: (() => void) | undefined;
 }
 
-const TAB_ORDER: readonly MenuTabId[] = ['bag', 'craft', 'shelter', 'paddock', 'supply-run', 'garden', 'blueprints', 'quests', 'creatures', 'character'];
+const TAB_ORDER: readonly MenuTabId[] = ['bag', 'craft', 'blueprints', 'quests', 'creatures', 'character', 'shelter', 'paddock', 'supply-run', 'garden'];
+const TAB_ART:Record<MenuTabId,{icon:UiIconName;description:string}>={
+  bag:{icon:'bag',description:'Equipment & supplies'},craft:{icon:'craft',description:'Make something lasting'},
+  blueprints:{icon:'blueprint',description:'Your collected knowledge'},quests:{icon:'quest',description:'Stories worth following'},
+  creatures:{icon:'creature',description:'Wild hearts, shared paths'},character:{icon:'character',description:'Grow into your journey'},
+  shelter:{icon:'shelter',description:'A place to weather the fog'},paddock:{icon:'creature',description:'A home for your companions'},
+  'supply-run':{icon:'compass',description:'Beyond the town gates'},garden:{icon:'garden',description:'A little care takes root'},
+};
+const RESOURCE_ART:Partial<Record<ResourceId,UiIconName>>={wood:'wood',stone:'stone',fiber:'fiber',berry:'berry',
+  'iron-ore':'ore','iron-ingot':'ingot',arrow:'arrow','taming-snare':'snare','reinforced-snare':'snare','cloth-mask':'mask',
+  'draft-parchment':'blueprint'};
 
 /**
  * Shared gameplay menu: a Menu toggle plus a centered, tabbed panel whose Bag
@@ -60,8 +71,11 @@ export class InventoryPanel {
   private readonly tabs: HTMLDivElement;
   private readonly bagContent: HTMLDivElement;
   private readonly tabViews = new Map<MenuTabId, MenuTab>();
+  private readonly backdrop:HTMLDivElement;
+  private readonly subtitle:HTMLDivElement;
   private activeTab: MenuTabId = 'bag';
   private actionOverlay: HTMLDivElement | null = null;
+  private inventorySignature='';
 
   constructor(
     parent: HTMLElement,
@@ -69,6 +83,9 @@ export class InventoryPanel {
     private readonly actions: InventoryPanelActions,
   ) {
     this.root = div({ position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '13' });
+    this.backdrop=div({position:'absolute',inset:'0',display:'none',pointerEvents:'auto'});
+    this.backdrop.className='elaris-menu-backdrop';
+    this.backdrop.addEventListener('click',event=>{event.stopPropagation();this.close();});
 
     this.menuButton = railButton('bag', 'Menu', () => this.toggle());
     this.menuButton.style.bottom = RAIL_BOTTOMS.menu;
@@ -94,19 +111,31 @@ export class InventoryPanel {
       font: '14px system-ui, sans-serif',
       color: '#e8f0ea',
     });
-    this.panel.classList.add('elaris-panel');
+    this.panel.classList.add('elaris-panel','elaris-menu');
 
     this.panel.setAttribute('aria-label', 'Game menu');
+    this.panel.setAttribute('role','dialog');
+    this.panel.setAttribute('aria-modal','true');
+    this.panel.addEventListener('keydown',this.onKeyDown);
     wireDisclosure(this.menuButton, this.panel, 'game-menu-panel');
 
     const header = div({ display: 'flex', alignItems: 'center', gap: '10px' });
-    this.heading = document.createElement('strong');
+    header.className='elaris-menu-header';
+    const crest=createUiIcon('crest',36);crest.classList.add('elaris-journal-crest');
+    const identity=div({minWidth:'0',flex:'1'});
+    const overline=div({});overline.className='elaris-menu-overline';overline.textContent='Elaris · Field journal';
+    this.heading = document.createElement('h1');
     this.heading.textContent = 'Bag';
+    this.heading.className='elaris-menu-title';
+    this.subtitle=div({});this.subtitle.className='elaris-menu-subtitle';this.subtitle.textContent=TAB_ART.bag.description;
+    identity.append(overline,this.heading,this.subtitle);
     this.slotCount = document.createElement('span');
     Object.assign(this.slotCount.style, { flex: '1', opacity: '0.75', fontSize: '13px' });
     const close = uiButton('Close', () => this.close());
+    close.setAttribute('aria-label','Close');close.classList.add('elaris-menu-close');
+    close.replaceChildren(createUiIcon('close',20));
     Object.assign(close.style, { minHeight: '44px', background: 'rgba(30,48,37,0.94)' });
-    header.append(this.heading, this.slotCount, close);
+    header.append(crest,identity,close);
 
     this.tabs = div({
       display: 'flex',
@@ -118,6 +147,10 @@ export class InventoryPanel {
       paddingBottom: '10px',
       borderBottom: '1px solid rgba(255,255,255,0.12)',
     });
+    this.tabs.className='elaris-menu-nav';
+    this.tabs.setAttribute('role','tablist');this.tabs.setAttribute('aria-label','Journal sections');
+    this.updateNavOrientation();
+    window.addEventListener('resize',this.updateNavOrientation);
 
     this.bagContent = div({
       height: 'calc(100% - 104px)', overflowY: 'auto', overscrollBehavior: 'contain', touchAction: 'pan-y',
@@ -130,10 +163,19 @@ export class InventoryPanel {
       gap: '8px',
       marginTop: '12px',
     });
+    this.grid.className='elaris-inventory-grid';
+    const bagSummary=div({});bagSummary.className='elaris-bag-summary';
+    const bagCopy=div({});const bagTitle=document.createElement('h2');bagTitle.textContent='Ready for the road';
+    const bagHint=document.createElement('p');bagHint.textContent='Choose an item to inspect, repair or share it.';
+    bagCopy.append(bagTitle,bagHint);this.slotCount.className='elaris-bag-capacity';bagSummary.append(bagCopy,this.slotCount);
 
-    this.bagContent.append(this.grid);
-    this.panel.append(header, this.tabs, this.bagContent);
-    this.root.append(this.menuButton, this.panel);
+    this.bagContent.append(bagSummary,this.grid);
+    const footer=div({});footer.className='elaris-menu-footer';
+    const motto=document.createElement('span');motto.textContent='A world to wander. A place to belong.';
+    const hint=document.createElement('span');hint.className='elaris-menu-key-hint';hint.textContent='Arrow keys · Browse     Esc · Return';
+    footer.append(motto,hint);
+    this.panel.append(header, this.tabs, this.bagContent,footer);
+    this.root.append(this.menuButton,this.backdrop,this.panel);
     parent.appendChild(this.root);
     this.registerTab('bag', 'Bag', this.bagContent, () => this.refresh());
   }
@@ -150,20 +192,33 @@ export class InventoryPanel {
   }
 
   close(): void {
+    const wasOpen=this.open;
     this.closeItemActions();
     this.panel.style.display = 'none';
+    this.backdrop.style.display='none';
+    document.documentElement.classList.remove('elaris-journal-open');
     this.menuButton.setAttribute('aria-expanded', 'false');
+    if(wasOpen)this.menuButton.focus({preventScroll:true});
   }
 
   /** Add one of the existing gameplay panels to the shared menu popup. */
   registerTab(id: MenuTabId, label: string, content: HTMLElement, onActivate?: () => void): void {
     const button = uiButton(label, () => this.openTab(id));
+    button.dataset.menuTab=id;
+    const copy=div({});copy.className='elaris-menu-nav-copy';
+    const name=document.createElement('span');name.textContent=label;
+    const detail=document.createElement('small');detail.textContent=TAB_ART[id].description;detail.setAttribute('aria-hidden','true');
+    copy.append(name,detail);button.replaceChildren(createUiIcon(TAB_ART[id].icon,22),copy);
     Object.assign(button.style, {
       flex: '0 0 auto', minWidth: '64px', minHeight: '42px', padding: '6px 8px', fontSize: '12px',
       background: 'rgba(30,48,37,0.94)',
     });
     button.setAttribute('role', 'tab');
+    button.id=`game-menu-${id}-tab`;button.tabIndex=-1;
     content.setAttribute('role', 'tabpanel');
+    content.id ||= `game-menu-${id}-view`;
+    content.setAttribute('aria-labelledby',button.id);button.setAttribute('aria-controls',content.id);
+    content.classList.add('elaris-menu-content');content.dataset.menuView=id;
     content.style.position = 'static';
     content.style.width = 'auto';
     content.style.maxHeight = 'none';
@@ -182,7 +237,7 @@ export class InventoryPanel {
     content.style.display = 'none';
     if (content.parentElement !== this.panel) this.panel.appendChild(content);
     this.tabs.appendChild(button);
-    this.tabViews.set(id, { button, content, onActivate });
+    this.tabViews.set(id, { label,button, content, onActivate });
     for (const tabId of TAB_ORDER) {
       const tab = this.tabViews.get(tabId);
       if (tab) this.tabs.appendChild(tab.button);
@@ -199,21 +254,53 @@ export class InventoryPanel {
     const next = this.tabViews.get(id);
     if (!next) return;
     this.actions.onOpened();
+    const wasOpen=this.open;
     this.activeTab = id;
-    this.panel.style.display = 'block';
+    this.panel.style.display = 'grid';this.backdrop.style.display='block';
+    document.documentElement.classList.add('elaris-journal-open');
     this.menuButton.setAttribute('aria-expanded', 'true');
-    this.heading.textContent = id === 'bag' ? 'Bag' : next.button.textContent ?? 'Bag';
+    this.heading.textContent = next.label;
+    this.subtitle.textContent=TAB_ART[id].description;
     this.slotCount.style.display = id === 'bag' ? '' : 'none';
     for (const [tabId, tab] of this.tabViews) {
       const selected = tabId === id;
       tab.content.style.display = selected ? 'block' : 'none';
       tab.button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.button.tabIndex=selected?0:-1;
       tab.button.style.background = selected ? '#2f6b43' : 'rgba(30,48,37,0.94)';
       tab.button.style.borderColor = selected ? '#ffe08a' : 'rgba(255,255,255,0.16)';
     }
     next.button.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     next.onActivate?.();
+    if(!wasOpen)next.button.focus({preventScroll:true});
   }
+
+  private readonly updateNavOrientation=():void=>{
+    this.tabs.setAttribute('aria-orientation',window.innerWidth>700||(window.innerWidth>window.innerHeight&&window.innerHeight<=500)?'vertical':'horizontal');
+  };
+
+  private readonly onKeyDown=(event:KeyboardEvent):void=>{
+    if(!this.open)return;
+    if(event.key==='Escape'){
+      event.preventDefault();event.stopPropagation();
+      if(this.actionOverlay)this.closeItemActions();else this.close();return;
+    }
+    if(event.target instanceof HTMLElement&&event.target.closest('[role="tab"]')&&['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key)){
+      event.preventDefault();event.stopPropagation();
+      const ids=TAB_ORDER.filter(id=>this.tabViews.has(id)),index=ids.indexOf(this.activeTab);
+      const step=event.key==='ArrowDown'||event.key==='ArrowRight'?1:-1;
+      const id=ids[event.key==='Home'?0:event.key==='End'?ids.length-1:(index+step+ids.length)%ids.length]!;
+      this.openTab(id);this.tabViews.get(id)!.button.focus({preventScroll:true});return;
+    }
+    if(event.key==='Tab'){
+      const container=this.actionOverlay??this.panel;
+      const controls=Array.from(container.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]'))
+        .filter(element=>element.getClientRects().length>0&&element.tabIndex>=0);
+      const first=controls[0],last=controls.at(-1);if(!first||!last)return;
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    }
+  };
 
   /** Rebuild the grid from state; cheap at INVENTORY_SLOTS cells. */
   refresh(): void {
@@ -222,10 +309,16 @@ export class InventoryPanel {
     const capacity = effectiveBagCapacityHundredths(this.state);
     this.slotCount.textContent = `${usedInventorySlots(this.state)}/${INVENTORY_SLOTS} slots · Weight ${formatWeight(currentWeight)}/${formatWeight(capacity)}`;
     this.slotCount.style.color = isBagOverweight(this.state) ? '#ff9b7b' : '';
+    const entries=inventorySlotEntries(this.state);
+    const signature=JSON.stringify([entries,entries.map(entry=>entry.kind==='resource'?bagItemWeightHundredths(this.state,entry.resource):0)]);
+    if(signature===this.inventorySignature)return;
+    this.inventorySignature=signature;
     this.grid.textContent = '';
-    for (const entry of inventorySlotEntries(this.state)) {
+    for (const entry of entries) {
       if (entry.kind === 'resource') {
         const cell = this.cell('button') as HTMLButtonElement;
+        cell.dataset.itemKind='resource';
+        const icon=createUiIcon(RESOURCE_ART[entry.resource]??'bag',32);
         cell.setAttribute('aria-label', `${BAG_ITEM_LABELS[entry.resource]} stack, ${entry.amount}`);
         cell.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -236,11 +329,13 @@ export class InventoryPanel {
         const amount = div({ fontSize: '12px', opacity: '0.8' });
         const totalWeight = entry.amount * bagItemWeightHundredths(this.state, entry.resource);
         amount.textContent = `×${entry.amount} · Weight ${formatWeight(totalWeight)}`;
-        cell.append(name, amount);
+        name.className='elaris-slot-name';amount.className='elaris-slot-amount';
+        cell.append(icon,name, amount);
       } else if (entry.kind === 'blueprint') {
         // Unregistered, so it reads as cargo rather than as knowledge: the
         // name is plain, and the cell says what it is still waiting for.
         const cell = this.cell('button') as HTMLButtonElement;
+        cell.dataset.itemKind='blueprint';
         cell.style.borderColor = '#ffd18a';
         const name = entry.carried.blueprintId.replace(/-/g, ' ');
         cell.setAttribute('aria-label', `Blueprint: ${name}, unregistered`);
@@ -258,6 +353,7 @@ export class InventoryPanel {
       } else if (entry.kind === 'tool') {
         const cell = this.cell('button') as HTMLButtonElement;
         const { tool, equipped } = entry;
+        cell.dataset.itemKind='tool';cell.dataset.equipped=String(equipped);
         cell.style.borderColor = equipped ? '#ffe08a' : 'rgba(255,255,255,0.16)';
         // A tool cell opens the same action card a resource stack does, so it is
         // a menu button rather than the equip toggle it used to be.
@@ -271,7 +367,8 @@ export class InventoryPanel {
           this.openToolActions(tool);
         });
         const icon = div({ display: 'grid', placeItems: 'center', lineHeight: '1' });
-        setUiIcon(icon, toolDefinition(tool.definitionId).kind, 20);
+        setUiIcon(icon, toolDefinition(tool.definitionId).kind, 34);
+        const name=div({});name.className='elaris-slot-name';name.textContent=toolDefinition(tool.definitionId).displayName;
         const bar = div({
           width: '80%',
           height: '4px',
@@ -288,9 +385,10 @@ export class InventoryPanel {
           background: durabilityColor(ratio),
         });
         bar.appendChild(fill);
-        cell.append(icon, bar);
+        bar.className='elaris-slot-durability';cell.append(icon,name,bar);
       } else {
         const cell = this.cell('div');
+        cell.dataset.itemKind='empty';cell.setAttribute('aria-hidden','true');
         cell.style.opacity = '0.35';
       }
     }
@@ -298,6 +396,7 @@ export class InventoryPanel {
 
   private cell(tag: 'div' | 'button'): HTMLElement {
     const cell = document.createElement(tag);
+    cell.className='elaris-inventory-slot';
     Object.assign(cell.style, {
       display: 'flex',
       flexDirection: 'column',
@@ -323,6 +422,7 @@ export class InventoryPanel {
       position: 'absolute', inset: '0', zIndex: '4', display: 'grid', placeItems: 'center',
       padding: '18px', background: 'rgba(3,8,5,0.72)', borderRadius: '12px',
     });
+    overlay.classList.add('elaris-item-backdrop');
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-label', `${BAG_ITEM_LABELS[resource]} stack actions`);
@@ -331,6 +431,7 @@ export class InventoryPanel {
       background: '#13271a', border: '1px solid rgba(255,255,255,0.2)',
       boxShadow: '0 8px 30px rgba(0,0,0,0.55)', boxSizing: 'border-box',
     });
+    card.classList.add('elaris-item-card');
     const title = document.createElement('strong');
     title.textContent = `${BAG_ITEM_LABELS[resource]} ×${amount}`;
     const actions = div({ display: 'grid', gap: '9px', marginTop: '14px' });
@@ -340,6 +441,7 @@ export class InventoryPanel {
       this.closeItemActions();
       this.actions.onDropStack(resource, stackIndex);
     });
+    drop.dataset.tone='danger';
     drop.style.background = '#71392f';
     const cancel = uiButton('Cancel', () => this.closeItemActions());
     actions.append(split, drop, cancel);
@@ -348,7 +450,7 @@ export class InventoryPanel {
     overlay.addEventListener('click', (event) => { if (event.target === overlay) this.closeItemActions(); });
     this.panel.appendChild(overlay);
     this.actionOverlay = overlay;
-    split.focus();
+    (split.disabled?drop:split).focus();
   }
 
   /**
@@ -368,6 +470,7 @@ export class InventoryPanel {
       position: 'absolute', inset: '0', zIndex: '4', display: 'grid', placeItems: 'center',
       padding: '18px', background: 'rgba(3,8,5,0.72)', borderRadius: '12px',
     });
+    overlay.classList.add('elaris-item-backdrop');
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-label', `${definition.displayName} actions`);
@@ -376,6 +479,7 @@ export class InventoryPanel {
       background: '#13271a', border: '1px solid rgba(255,255,255,0.2)',
       boxShadow: '0 8px 30px rgba(0,0,0,0.55)', boxSizing: 'border-box',
     });
+    card.classList.add('elaris-item-card');
     const title = document.createElement('strong');
     const equipped = tool.instanceId === this.state.equippedToolId;
     title.textContent = `${definition.displayName}${equipped ? ' · equipped' : ''}`;
@@ -402,6 +506,7 @@ export class InventoryPanel {
       this.closeItemActions();
       this.actions.onDropTool(tool.instanceId);
     });
+    drop.dataset.tone='danger';
     drop.style.background = '#71392f';
     const cancel = uiButton('Cancel', () => this.closeItemActions());
     actions.append(repair, assign, drop, cancel);
@@ -424,6 +529,7 @@ export class InventoryPanel {
       position: 'absolute', inset: '0', zIndex: '4', display: 'grid', placeItems: 'center',
       padding: '18px', background: 'rgba(3,8,5,0.72)', borderRadius: '12px',
     });
+    overlay.classList.add('elaris-item-backdrop');
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-label', `Blueprint actions: ${name}`);
@@ -432,6 +538,7 @@ export class InventoryPanel {
       background: '#13271a', border: '1px solid rgba(255,255,255,0.2)',
       boxShadow: '0 8px 30px rgba(0,0,0,0.55)', boxSizing: 'border-box',
     });
+    card.classList.add('elaris-item-card');
     const title = document.createElement('strong');
     title.textContent = name;
     title.style.textTransform = 'capitalize';
@@ -453,6 +560,7 @@ export class InventoryPanel {
       this.closeItemActions();
       this.actions.onDropBlueprint?.(instanceId);
     });
+    drop.dataset.tone='danger';
     drop.style.background = '#71392f';
     const cancel = uiButton('Cancel', () => this.closeItemActions());
     actions.append(register, scrap, drop, cancel);
@@ -461,7 +569,7 @@ export class InventoryPanel {
     overlay.addEventListener('click', (event) => { if (event.target === overlay) this.closeItemActions(); });
     this.panel.appendChild(overlay);
     this.actionOverlay = overlay;
-    register.focus();
+    ([register,scrap,drop].find(button=>!button.disabled)??cancel).focus();
   }
 
   private showSplitPrompt(card: HTMLDivElement, resource: ResourceId, stackIndex: number, amount: number): void {
@@ -500,11 +608,15 @@ export class InventoryPanel {
   }
 
   private closeItemActions(): void {
+    const hadOverlay=this.actionOverlay!==null;
     this.actionOverlay?.remove();
     this.actionOverlay = null;
+    if(hadOverlay)this.tabViews.get(this.activeTab)?.button.focus({preventScroll:true});
   }
 
   destroy(): void {
+    if(this.open)document.documentElement.classList.remove('elaris-journal-open');
+    window.removeEventListener('resize',this.updateNavOrientation);
     this.root.remove();
   }
 }

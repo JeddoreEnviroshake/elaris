@@ -8,6 +8,7 @@ export class ProgressionGuide {
   private readonly summary: HTMLSpanElement;
   private readonly activeObjective: HTMLDivElement;
   private readonly list: HTMLDivElement;
+  private renderedSignature='';
 
   constructor(
     parent: HTMLElement,
@@ -40,6 +41,7 @@ export class ProgressionGuide {
       marginTop: '8px', padding: '10px 12px', borderRadius: '9px', color: '#ffe08a', lineHeight: '1.4',
       background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.1)',
     });
+    this.activeObjective.classList.add('elaris-quest-objective');
     this.activeObjective.setAttribute('aria-live', 'polite');
 
     this.list = document.createElement('div');
@@ -61,6 +63,9 @@ export class ProgressionGuide {
     const complete = quests.filter((quest) => quest.complete).length;
     const next = activeQuest(this.state);
     const unclaimedIds = new Set(pendingQuestRewards(this.state).map((quest) => quest.id));
+    const signature=JSON.stringify([quests,next?.id,[...unclaimedIds]]);
+    if(signature===this.renderedSignature)return;
+    this.renderedSignature=signature;
     this.summary.textContent = unclaimedIds.size > 0
       ? `${complete}/${quests.length} complete · ${unclaimedIds.size} reward${unclaimedIds.size === 1 ? '' : 's'} waiting`
       : `${complete}/${quests.length} complete`;
@@ -88,6 +93,7 @@ export class ProgressionGuide {
       const claimable = unclaimedIds.has(quest.id);
       const row = document.createElement('div');
       const current = quest.id === next?.id;
+      row.classList.add('elaris-quest-row');row.dataset.current=String(current);row.dataset.complete=String(quest.complete);
       Object.assign(row.style, {
         display: 'flex', gap: '10px', marginTop: '10px', padding: '10px 12px',
         border: `1px solid ${claimable ? 'rgba(255,210,63,0.55)' : current ? '#ffe08a' : 'rgba(255,255,255,0.16)'}`,

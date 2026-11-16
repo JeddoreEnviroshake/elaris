@@ -219,12 +219,14 @@ export class BuildMenu {
       if (members.length === 0) continue;
       const section = div({ marginTop: '12px', opacity: '0.65', font: '700 11px system-ui, sans-serif', textTransform: 'uppercase', letterSpacing: '0.6px' });
       section.textContent = CATEGORY_HEADINGS[category];
+      section.classList.add('elaris-section-heading');
       this.palette.appendChild(section);
       const current = { heading: section, ids: [] as BuildableId[] };
       this.sections.push(current);
       for (const def of members) {
         current.ids.push(def.id);
         const entry = uiButton(def.displayName, () => this.select(def.id));
+        entry.classList.add('elaris-palette-card');
         Object.assign(entry.style, {
           display: 'block',
           width: '100%',

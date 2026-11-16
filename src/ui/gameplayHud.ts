@@ -51,6 +51,7 @@ import { inventorySlotEntries, storageBoxSlotEntries, type SlotEntry } from './i
 import { storageContainerSlots, usedStorageBoxSlots } from '../simulation/storageBox';
 import { logisticsRouteLabel, logisticsStorageCandidates, logisticsWorkerCandidates } from '../simulation/logistics';
 import { setUiIcon } from './icons';
+import {characterPortrait} from './portraits';
 import { coinScore } from '../simulation/coins';
 import { effectiveBagCapacityHundredths, formatWeight } from '../simulation/bagWeight';
 import { clothMaskSecondsRemaining, dangerGraceTimer, exposureDamagePerSecond, formatCountdown, isPlayerEnclosed, isPlayerSheltered, raidNumberFor, survivalSchedule } from '../simulation/survivalCycle';
@@ -699,11 +700,13 @@ export class GameplayHud {
     const workerHeading = document.createElement('strong');
     workerHeading.textContent = 'Creature roster';
     this.creatureRoster = div({ marginTop: '2px' });
+    this.creatureRoster.dataset.creatureRoster='';
     this.creatureStatus = div({
       marginTop: '12px', padding: '10px 12px', borderRadius: '9px',
       background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.1)',
       fontSize: '12px', lineHeight: '1.45', opacity: '0.9',
     });
+    this.creatureStatus.dataset.creatureStatus='';
     const assignments = div({ display: 'grid', gap: '7px', marginTop: '4px' });
     for (const role of ['follow', 'work', 'rest'] as const) {
       const button = uiButton('', () => this.assignSelectedCreature(role));
@@ -729,6 +732,7 @@ export class GameplayHud {
       }
     });
     Object.assign(this.releaseCreatureButton.style, { width: '100%', minHeight: '44px', background: '#6b3131' });
+    this.releaseCreatureButton.dataset.tone='danger';
     this.creatureAbilities = div({ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '7px' });
     const withdraw = div({ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '7px', marginTop: '4px' });
     for (const resource of ['wood', 'stone', 'fiber'] as const) {
@@ -766,6 +770,9 @@ export class GameplayHud {
       marginTop: '10px', padding: '10px 12px', borderRadius: '9px', lineHeight: '1.5',
       background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.1)', opacity: '0.92',
     });
+    const characterHero=div({});characterHero.className='elaris-character-hero';characterHero.dataset.characterSummary='';
+    const characterIdentity=div({});const characterName=document.createElement('h2');characterName.textContent='Woodland Warden';
+    characterIdentity.append(characterName,this.statsSummary);characterHero.append(characterPortrait('player',90),characterIdentity);
     this.statsGrid = div({
       display: 'grid', gap: '8px', marginTop: '8px',
     });
@@ -776,12 +783,13 @@ export class GameplayHud {
     });
     this.attributeAllocationSummary.setAttribute('aria-live', 'polite');
     this.attributeApplyButton = uiButton('Apply', () => this.applyPendingAttributes());
+    this.attributeApplyButton.dataset.tone='primary';
     Object.assign(this.attributeApplyButton.style, {
       width: '100%', minHeight: '48px', marginTop: '10px', fontWeight: '800',
     });
     this.statsPanel.append(
       statsHeading,
-      this.statsSummary,
+      characterHero,
       paletteSection('Maximum stats & attributes'),
       this.statsGrid,
       this.attributeAllocationSummary,
@@ -907,6 +915,7 @@ export class GameplayHud {
       font: '14px system-ui, sans-serif',
     });
     this.facilityPanel.classList.add('elaris-panel');
+    this.facilityPanel.dataset.facilitySurface='';
     this.facilityPanel.setAttribute('role', 'dialog');
     this.facilityPanel.setAttribute('aria-label', 'Facility actions');
     this.facilityHeading = document.createElement('strong');
@@ -1266,6 +1275,9 @@ export class GameplayHud {
         + ' margin-top 260ms ease-out, padding 260ms ease-out',
     });
     root.dataset[datasetKey] = '';
+    root.dataset.vitalKind=label;
+    root.style.setProperty('--vital-dark',label==='HP'?'#577c53':label==='SP'?'#a58d47':'#558b98');
+    root.style.setProperty('--vital-light',label==='HP'?'#acd08a':label==='SP'?'#e0c77c':'#a0d3d6');
     root.setAttribute('role', 'progressbar');
     const caption = document.createElement('span');
     caption.textContent = label;
@@ -1286,6 +1298,7 @@ export class GameplayHud {
       transition: 'width 80ms linear, background-color 120ms linear',
     });
     fill.dataset[`${datasetKey}Fill`] = '';
+    fill.dataset.vitalFill='';
     track.appendChild(fill);
     const value = document.createElement('span');
     value.style.whiteSpace = 'nowrap';
@@ -2326,6 +2339,11 @@ export class GameplayHud {
         this.refreshCreatures();
       });
       paletteCard(button);
+      button.classList.add('elaris-companion-tile');
+      const identity=div({});const name=document.createElement('strong');name.textContent=rosterCreature.name;
+      const species=document.createElement('small');species.textContent=rosterDefinition.displayName;
+      const role=document.createElement('span');role.className='elaris-companion-role';role.textContent=rosterCreature.role==='follow'?'Following':rosterCreature.role==='work'?'At work':'Resting';
+      identity.append(name,species,role);button.replaceChildren(characterPortrait(rosterCreature.speciesId),identity);
       button.style.borderColor = selected ? '#ffe08a' : 'rgba(255,255,255,0.16)';
       button.style.background = selected ? 'rgba(47,107,67,0.96)' : 'rgba(30,48,37,0.94)';
       button.setAttribute('aria-label', `Select ${rosterCreature.name}, ${rosterDefinition.displayName}, currently ${rosterCreature.role}`);

@@ -1994,11 +1994,11 @@ export class Elaris3DRenderer {
       context.beginPath();
       context.roundRect(8, 12, 368, 72, 16);
       context.fill();
-      context.strokeStyle = '#6f8a61';
-      context.lineWidth = 5;
+      context.strokeStyle = '#c6af79';
+      context.lineWidth = 3;
       context.stroke();
       context.fillStyle = '#f5ecd6';
-      context.font = '800 36px Trebuchet MS, sans-serif';
+      context.font = '400 36px Georgia, serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.fillText(text, 192, 49);
@@ -2288,7 +2288,7 @@ export class Elaris3DRenderer {
       context.lineWidth = 5;
       context.stroke();
       context.fillStyle = '#fff8e8';
-      context.font = '800 32px Trebuchet MS, sans-serif';
+      context.font = '400 32px Georgia, serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       const clipped = text.length > 34 ? `${text.slice(0, 31)}…` : text;
@@ -2664,9 +2664,13 @@ export class Elaris3DRenderer {
 
   private readonly renderFrame = (time: number): void => {
     this.animationFrame = requestAnimationFrame(this.renderFrame);
+    if (!this.enabled || document.hidden) return;
+    const presentation = this.presentationProvider?.() ?? null;
+    // Keep the last world image as the journal's backdrop. Simulation continues,
+    // while menu input and scrolling do not compete with world rendering.
+    if(presentation?.journalOpen)return;
     const deltaSeconds = Math.min(0.05, Math.max(0, (time - this.lastFrameAt) / 1000));
     this.lastFrameAt = time;
-    if (!this.enabled || document.hidden) return;
     if (this.state.currentArea.key !== this.areaKey) this.rebuildWorld();
     if (time - this.lastSyncAt > 240) {
       this.lastSyncAt = time;
@@ -2674,7 +2678,6 @@ export class Elaris3DRenderer {
     }
 
     const player = worldToThree(this.state.player.x, this.state.player.y);
-    const presentation = this.presentationProvider?.() ?? null;
     const reducedMotion = presentation?.prefersReducedMotion ?? false;
     if (presentation?.interior) {
       this.renderInteriorFrame(presentation.interior, time, deltaSeconds, reducedMotion);
