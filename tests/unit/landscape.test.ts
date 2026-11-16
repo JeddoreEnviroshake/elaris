@@ -56,6 +56,24 @@ describe('authoritative landscape', () => {
     expect(terrainAt(SEED, ELARIS, 104, 67)).toBe('bridge');
   });
 
+  it('builds every west-gate bridge as a rectangle exactly the gate wide', () => {
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const area = { ...ELARIS, seed };
+      const deck = (tileX: number, tileY: number) => terrainAt(seed, area, tileX, tileY) === 'bridge';
+      const spans: string[] = [];
+      for (let tileY = 83; tileY <= 86; tileY += 1) {
+        spans.push(Array.from({ length: 22 }, (_, offset) => (deck(40 + offset, tileY) ? 'B' : '.')).join(''));
+      }
+      // Same columns on every row: both ends of each crossing are straight.
+      expect(new Set(spans).size, `seed ${seed}`).toBe(1);
+      // The moat crossing reaches the gate, and nothing spills past the posts.
+      expect(deck(61, 83), `seed ${seed}`).toBe(true);
+      for (let tileX = 40; tileX < 62; tileX += 1) {
+        expect(deck(tileX, 82) || deck(tileX, 87), `seed ${seed} x ${tileX}`).toBe(false);
+      }
+    }
+  });
+
   it('places the north-west water temple on a dry island in a large lake', () => {
     expect(terrainAt(SEED, ELARIS, 24, 24)).toBe('ground');
     expect(terrainAt(SEED, ELARIS, 34, 24)).toBe('deep-water');

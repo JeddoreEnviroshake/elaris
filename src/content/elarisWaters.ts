@@ -68,8 +68,9 @@ function waterTempleLakeAt(point: TownPerimeterPoint): Exclude<ElarisAuthoredWat
 
 function isGateCauseway(point: TownPerimeterPoint): boolean {
   const northCauseway = point.x >= 103.5 && point.x <= 105.5 && point.y >= 65.5 && point.y <= 70;
-  const westCauseway = point.x >= 57.5 && point.x <= 62 && point.y >= 82.5 && point.y <= 84.5;
-  return northCauseway || westCauseway;
+  // The west crossing is a full rectangle owned by terrainAt (see
+  // isElarisWestCrossingTile), because it also spans the procedural river.
+  return northCauseway;
 }
 
 function minimumPerimeterDistance(point: TownPerimeterPoint): number {

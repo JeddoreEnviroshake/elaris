@@ -9,6 +9,7 @@ import { ModelLibrary, type ModelPlacement } from './modelLibrary';
 import { isInsideBufferedFootprint, type EnvironmentFootprint } from './environmentComposition';
 import { addRoofUnderside } from './buildingUndersides';
 import { townBuildingShell } from '../content/interiors';
+import { ELARIS_WEST_ENTRANCE } from '../content/townDefences';
 import { settlementModules } from './quaterniusArt';
 
 // The legacy hash's last XOR returns a signed 32-bit value. Normalize locally
@@ -195,6 +196,7 @@ export class TownEntrance {
     const paving: ModelPlacement[] = [];
     const approachStones: ModelPlacement[] = [];
     const isWater = (x: number, z: number) => ['shallow-water', 'deep-water'].includes(terrainAt(this.state.seed, this.state.currentArea, x, z));
+    const isBridge = (x: number, z: number) => terrainAt(this.state.seed, this.state.currentArea, x, z) === 'bridge';
     for (let z = 72; z <= 100; z++) for (let x = 51; x <= 65; x++) {
       const kind = terrainAt(this.state.seed, this.state.currentArea, x, z);
       const h = coordinateHash(this.state.seed ^ 0x42414e4b, x, z);
@@ -203,8 +205,9 @@ export class TownEntrance {
       }
       if (kind === 'bridge') {
         deck.push({ x: x + .5, y: .117, z: z + .5 });
-        // Rails face the water, never the approach or an adjacent deck tile.
-        for (const dz of [-1, 1]) if (isWater(x, z + dz)) rails.push({ x: x + .5, y: .1, z: z + .5 + dz * .49 });
+        // Rails run the full length of both long edges, never across the
+        // approach, so each side of the crossing reads as one straight line.
+        for (const dz of [-1, 1]) if (!isBridge(x, z + dz)) rails.push({ x: x + .5, y: .1, z: z + .5 + dz * .49 });
       }
       if (isWater(x, z)) {
         if (h > .72 && this.rippleBases.length < 64) this.rippleBases.push({ x: x + .5, y: .007, z: z + .5, rotation: h });
@@ -246,16 +249,19 @@ export class TownEntrance {
   private buildGate(): void {
     const timber = new THREE.MeshStandardMaterial({ color: 0x493b2b, roughness: .95 });
     const stone = new THREE.MeshStandardMaterial({ color: 0x8e8b72, roughness: 1 });
-    // Posts sit outside the existing west-gate opening and road shoulders.
-    for (const z of [81.7, 87.3]) {
-      const base = new THREE.Mesh(new THREE.BoxGeometry(.65,.65,.65),stone); base.position.set(62.2,.3,z);
-      const post = new THREE.Mesh(new THREE.BoxGeometry(.23,3.5,.23),timber); post.position.set(62.2,1.9,z);
+    // Posts stand just outside the gate's hinges, so the frame, the gate, the
+    // bridge and the road all share one centre line and one width.
+    const { x: gateX, top, bottom } = ELARIS_WEST_ENTRANCE;
+    const postX = gateX + .2, centre = (top + bottom) / 2;
+    for (const z of [top - .15, bottom + .15]) {
+      const base = new THREE.Mesh(new THREE.BoxGeometry(.65,.65,.65),stone); base.position.set(postX,.3,z);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.23,3.5,.23),timber); post.position.set(postX,1.9,z);
       base.castShadow = post.castShadow = true; base.receiveShadow = true;
       this.root.add(base,post);
-      void this.model(this.root,'town.lantern',61.87,2.55,z,.55).catch(console.warn);
-      const glow = new THREE.PointLight(0xffc47c,.8,3,2); glow.position.set(61.9,2.6,z); this.root.add(glow);
+      void this.model(this.root,'town.lantern',postX-.33,2.55,z,.55).catch(console.warn);
+      const glow = new THREE.PointLight(0xffc47c,.8,3,2); glow.position.set(postX-.3,2.6,z); this.root.add(glow);
     }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(.27,.25,6.3),timber); beam.position.set(62.2,3.65,84.5); beam.castShadow=true;
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(.27,.25,bottom-top+.9),timber); beam.position.set(postX,3.65,centre); beam.castShadow=true;
     this.root.add(beam);
   }
 

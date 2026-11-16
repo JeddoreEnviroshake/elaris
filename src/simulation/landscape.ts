@@ -4,6 +4,7 @@ import { townPrecinctForArea } from '../content/townBuildings';
 import { isRegionalLandmarkTileClear } from '../content/regions';
 import { elarisAuthoredWaterAt, elarisUnderlyingWaterAt, isElarisWaterTempleReservedTile } from '../content/elarisWaters';
 import { isRoadTile } from '../content/roads';
+import { ELARIS_WEST_ENTRANCE } from '../content/townDefences';
 import { coordinateHash } from './biomes';
 import type { AreaDescriptor, AreaThemeId, BuildingState, Facing, TraversalMode } from './state';
 
@@ -70,8 +71,36 @@ export function terrainAt(
   return base;
 }
 
+/** Columns west of the Elaris gate that the entrance bridges may span. */
+const WEST_CROSSING_MIN_X = 40;
+
+/**
+ * The bridges into Elaris's west gate are clean rectangles: exactly the gate's
+ * width (rows 83-86, the road between the timber posts) and, per crossing, the
+ * same length on every row. A river bank that wobbles across those four rows
+ * is squared off instead, so the water (and the deck the road lays over it)
+ * ends on one straight line at both banks.
+ */
+function isElarisWestCrossingWater(worldSeed: number, area: LandscapeContext, tileX: number, tileY: number): boolean {
+  if (tileX < WEST_CROSSING_MIN_X || tileX >= ELARIS_WEST_ENTRANCE.x) return false;
+  if (tileY < ELARIS_WEST_ENTRANCE.top || tileY >= ELARIS_WEST_ENTRANCE.bottom) return false;
+  for (let row = ELARIS_WEST_ENTRANCE.top; row < ELARIS_WEST_ENTRANCE.bottom; row++) {
+    const kind = naturalTerrainAt(worldSeed, area, tileX, row);
+    if (kind === 'shallow-water' || kind === 'deep-water') return true;
+  }
+  return false;
+}
+
 /** The real terrain beneath generated roads and bridges, including saved land clearing. */
 export function terrainWithoutBridgesAt(worldSeed: number, area: LandscapeContext, tileX: number, tileY: number): TerrainKind {
+  const kind = naturalTerrainAt(worldSeed, area, tileX, tileY);
+  if (kind === 'ground' && area.x === 0 && area.y === 0
+    && !(area.landClearingTiles && clearingSet(area.landClearingTiles).has(`${tileX},${tileY}`))
+    && isElarisWestCrossingWater(worldSeed, area, tileX, tileY)) return 'shallow-water';
+  return kind;
+}
+
+function naturalTerrainAt(worldSeed: number, area: LandscapeContext, tileX: number, tileY: number): TerrainKind {
   const gx = globalTile(area.x, tileX);
   const gy = globalTile(area.y, tileY);
   const areaKey = `${area.x},${area.y}`;
@@ -209,7 +238,10 @@ function isBridgeCrossing(
   const interval = 97;
   const phase = Math.floor(coordinateHash(seed ^ 0x4252_4447, band, 0) * interval);
   const bridgeY = Math.round((gy - phase) / interval) * interval + phase;
-  const generatedBridge = Math.abs(gy - bridgeY) <= 0;
+  // Elaris's west entrance owns this stretch of river; a generated crossing
+  // beside it would bolt a ragged extra lane onto the gate bridge.
+  const nearElarisCrossing = gx >= 0 && gx < WORLD_TILES && Math.abs(gy - 85) <= 8;
+  const generatedBridge = !nearElarisCrossing && Math.abs(gy - bridgeY) <= 0;
   return (elarisBridge || generatedBridge) && Math.abs(gx + 0.5 - centerX) <= halfWidth + 1;
 }
 

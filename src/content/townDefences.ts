@@ -55,8 +55,14 @@ export function isWithinPermanentPurifierWorldPosition(worldX: number, worldY: n
     && Math.abs(tileY - PERMANENT_AIR_PURIFIER.y) <= PERMANENT_PURIFIER_RADIUS_TILES;
 }
 
-const WEST_GATE_TOP = { x: 62, y: 82.5 } as const;
-const WEST_GATE_BOTTOM = { x: 62, y: 84.5 } as const;
+/**
+ * The west entrance is one straight axis: the four-wide east road (rows 83-86),
+ * the bridge over the moat, the timber gate frame and the gate itself all share
+ * the centre line y = 85 and the same width.
+ */
+export const ELARIS_WEST_ENTRANCE = { x: 62, top: 83, bottom: 87 } as const;
+const WEST_GATE_TOP = { x: ELARIS_WEST_ENTRANCE.x, y: ELARIS_WEST_ENTRANCE.top } as const;
+const WEST_GATE_BOTTOM = { x: ELARIS_WEST_ENTRANCE.x, y: ELARIS_WEST_ENTRANCE.bottom } as const;
 const NORTH_GATE_LEFT = { x: 103.5, y: 70 } as const;
 const NORTH_GATE_RIGHT = { x: 105.5, y: 70 } as const;
 const EAST_GATE_TOP = { x: 110, y: 84 } as const;
@@ -101,10 +107,11 @@ function subdivide(start: TownPerimeterPoint, end: TownPerimeterPoint): TownPeri
   // Municipal fences use the same two-grid-space footprint as player-built
   // fences. The old one-space subdivision placed a full two-space model at
   // every point, so adjacent models occupied the same half-space. Gates have
-  // two-space openings; a final short fence is only needed
+  // openings as wide as the road they carry; a final short fence is only needed
   // where an odd-length run meets a corner or gate.
+  if (kind === 'gate') return [{ start, end, kind }];
   const run = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
-  const count = kind === 'gate' ? 1 : Math.max(1, Math.ceil(run / 2));
+  const count = Math.max(1, Math.ceil(run / 2));
   return Array.from({ length: count }, (_, index) => ({
     start: {
       x: start.x + (end.x - start.x) * Math.min(index * 2, run) / run,

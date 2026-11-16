@@ -32,7 +32,7 @@ describe('Elaris town defences', () => {
     expect(TOWN_PERIMETER_SEGMENTS.filter((segment) => segment.kind === 'gate')).toEqual([
       { start: { x: 103.5, y: 70 }, end: { x: 105.5, y: 70 }, kind: 'gate' },
       { start: { x: 110, y: 84 }, end: { x: 110, y: 86 }, kind: 'gate' },
-      { start: { x: 62, y: 84.5 }, end: { x: 62, y: 82.5 }, kind: 'gate' },
+      { start: { x: 62, y: 87 }, end: { x: 62, y: 83 }, kind: 'gate' },
     ]);
   });
 
@@ -40,8 +40,8 @@ describe('Elaris town defences', () => {
     const fences = TOWN_PERIMETER_SEGMENTS.filter((segment) => segment.kind === 'fence');
     // Previously there were 160 near-unit visual pieces, causing every
     // two-space model to overlap its neighbors. The same route now needs only
-    // 82 fence instances (plus the three gates).
-    expect(fences).toHaveLength(82);
+    // 80 fence instances (plus the three gates).
+    expect(fences).toHaveLength(80);
     for (const segment of fences) {
       const gridSpan = Math.max(
         Math.abs(segment.end.x - segment.start.x),
@@ -56,7 +56,7 @@ describe('Elaris town defences', () => {
     expect(fences.filter((segment) => Math.max(
       Math.abs(segment.end.x - segment.start.x),
       Math.abs(segment.end.y - segment.start.y),
-    ) === 2)).toHaveLength(76);
+    ) === 2)).toHaveLength(75);
   });
 
   it('blocks fence crossings while allowing both requested gates', () => {
@@ -71,6 +71,10 @@ describe('Elaris town defences', () => {
     expect(townFenceBlocksWorldMove(px(61.5), px(83.5), px(62.5), px(83.5))).toBe(false);
     expect(townFenceBlocksWorldMove(px(61), px(83), px(62), px(83))).toBe(false);
     expect(townFenceBlocksWorldMove(px(61), px(84), px(62), px(84))).toBe(false);
+    expect(townFenceBlocksWorldMove(px(61), px(86), px(62), px(86))).toBe(false);
+    // The frame's outer lanes stay fenced.
+    expect(townFenceBlocksWorldMove(px(61.5), px(82.5), px(62.5), px(82.5))).toBe(true);
+    expect(townFenceBlocksWorldMove(px(61.5), px(87.5), px(62.6), px(87.5))).toBe(true);
 
     const state = createInitialState(123);
     expect(resolveTownMovement(state, px(100.5), px(69.5), px(100.5), px(70.5)).y).toBe(px(69.5));
@@ -81,7 +85,9 @@ describe('Elaris town defences', () => {
   it('clears both panel lanes at every gate while keeping adjacent fences solid', () => {
     for (const gate of TOWN_PERIMETER_SEGMENTS.filter(segment => segment.kind === 'gate')) {
       const dx = gate.end.x - gate.start.x, dy = gate.end.y - gate.start.y;
-      expect(Math.hypot(dx, dy)).toBe(2);
+      // Each gate is as wide as the road through it: two spaces, or four on
+      // the west entrance's main road.
+      expect([2, 4]).toContain(Math.hypot(dx, dy));
       for (const fraction of [.125, .375, .625, .875]) {
         const x = gate.start.x + dx * fraction, y = gate.start.y + dy * fraction;
         const nx = dy / 4, ny = -dx / 4;

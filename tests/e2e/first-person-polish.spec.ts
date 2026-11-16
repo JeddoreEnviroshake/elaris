@@ -102,17 +102,26 @@ test('double gates fill two blocks and swing both panels apart', async ({ page }
     const renderer = (globalThis as unknown as Debug).__renderer3d;
     const path = '/node_modules/three/build/three.module.js';
     const { Box3, Vector3 } = await import(path);
-    const gates = [...renderer.townGatePivots.values(), ...[...renderer.doorPivots]
-      .filter(([id]) => id.startsWith('double-gate-')).map(([, opening]) => opening)];
-    if (gates.length !== 7) return false;
-    return gates.every(({ pivot, oppositePivot }) => {
+    // The same map also holds walk-in building doors (single panels); only
+    // the perimeter's `town-gate-*` entries are double gates.
+    const town = [...renderer.townGatePivots]
+      .filter(([id]) => String(id).startsWith('town-gate-')).map(([, opening]) => opening);
+    const placed = [...renderer.doorPivots]
+      .filter(([id]) => id.startsWith('double-gate-')).map(([, opening]) => opening);
+    if (town.length !== 3 || placed.length !== 4) return false;
+    const closedPair = ({ pivot, oppositePivot }: (typeof placed)[number]) => {
       if (!oppositePivot || pivot.rotation.y !== 0 || oppositePivot.rotation.y !== 0) return false;
       const meshes: THREE.Mesh[] = [];
       pivot.parent!.traverse(child => { if ((child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh); });
-      if (meshes.length !== 2 || meshes.some(mesh => mesh.name !== 'gate')) return false;
-      const size = new Box3().setFromObject(pivot.parent!).getSize(new Vector3());
+      return meshes.length === 2 && meshes.every(mesh => mesh.name === 'gate');
+    };
+    // Town gates are as wide as the road they carry (the west gate spans four
+    // tiles), so only placed double gates have a fixed two-block width.
+    return town.every(closedPair) && placed.every((gate) => {
+      if (!closedPair(gate)) return false;
+      const size = new Box3().setFromObject(gate.pivot.parent!).getSize(new Vector3());
       return Math.abs(Math.max(size.x, size.z) - 2) < .001
-        && Math.abs(pivot.position.x + 1) < .001 && Math.abs(oppositePivot.position.x - 1) < .001;
+        && Math.abs(gate.pivot.position.x + 1) < .001 && Math.abs(gate.oppositePivot!.position.x - 1) < .001;
     });
   })).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('double-gates-closed.png') });
