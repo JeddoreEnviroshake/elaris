@@ -723,9 +723,13 @@ export const TAME_HP_WEIGHT_BPS = 3_500;
 export const TAME_STAGGER_HP_BPS = 2_500;
 export const TAME_STAGGER_TICKS = 240;
 export const TAME_STAGGER_BONUS_BPS = 1_500;
-/** Progress one offer adds: the species' favourite, or a berry as a generic edible. */
-export const TAME_FAVOURITE_OFFER_BPS = 2_000;
-export const TAME_BERRY_OFFER_BPS = 500;
+/**
+ * Progress one offer adds: the species' favourite, or a berry as a generic
+ * edible. Offers stack — feeding several in a row, even mid-meal, keeps
+ * raising the chance up to the species' food cap.
+ */
+export const TAME_FAVOURITE_OFFER_BPS = 1_200;
+export const TAME_BERRY_OFFER_BPS = 400;
 /** Default cap on what offering alone can contribute. */
 export const TAME_FOOD_CAP_BPS = 4_000;
 export const TAME_EATING_TICKS = 300;

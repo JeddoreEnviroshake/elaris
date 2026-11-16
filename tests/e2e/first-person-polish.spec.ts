@@ -185,6 +185,11 @@ test('first-person polish opens gates ahead and gives companions space behind th
     const path = '/src/simulation/onboarding.ts';
     const { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } = await import(path);
     scene.state.player.x = 82 * 16; scene.state.player.y = 82 * 16;
+    // The foraging and crafting lessons, credited directly: this spec is about
+    // the follower, not the tutorial's first steps.
+    const done = scene.state.onboarding.completedMilestoneIds;
+    for (const id of ['pick-berries', 'craft-axe', 'craft-snare'] as const) if (!done.includes(id)) done.push(id);
+    scene.state.inventory.berry += 1; scene.state.inventory['taming-snare'] += 1;
     beginOpeningTrust(scene.state);
     offerOpeningTuftle(scene.state); throwOpeningSnare(scene.state);
     scene.state.player.x = 104.5 * 16; scene.state.player.y = 73.5 * 16;

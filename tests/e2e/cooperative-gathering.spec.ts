@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { befriendOpeningTuftle } from '../helpers/openingJourney';
 import { openApp, reloadApp } from './app';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
 import { DEFAULT_WORLD_SEED } from '../../src/config/platform';
-import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare, nameOpeningCompanion } from '../../src/simulation/onboarding';
+import { nameOpeningCompanion } from '../../src/simulation/onboarding';
 import { starterGroveAnchor } from '../../src/simulation/worldGeneration';
 
 test.setTimeout(60_000);
@@ -14,8 +15,7 @@ test('3D assisted harvest shows the partner contribution and saves shelter knowl
   await expect.poll(() => readSavedState(page)).not.toBeNull();
   const state = createInitialState(DEFAULT_WORLD_SEED);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
-  beginOpeningTrust(state);
-  offerOpeningTuftle(state); throwOpeningSnare(state);
+  befriendOpeningTuftle(state);
   nameOpeningCompanion(state, 'Moss');
   Object.assign(state.player, starterGroveAnchor(state.seed));
   state.gameBalance.objects.plant.yieldMin = 4;

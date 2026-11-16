@@ -12,6 +12,31 @@ export function completeOpeningMilestone(state: GameState, id: OpeningMilestoneI
   return true;
 }
 
+/** A berry bush paid out berries: the first foraging lesson. */
+export function recordOpeningBerryPick(state: GameState): boolean {
+  return completeOpeningMilestone(state, 'pick-berries');
+}
+
+/**
+ * The crafting lessons are read off the craft counters, so a tool or snare made
+ * by any route — the Craft menu, a workbench, before or after the berries —
+ * counts. Crafting the axe teaches the Taming Snare: the tutorial's one early
+ * recipe, granted so the player can make the snare that tames their partner.
+ */
+export function reconcileOpeningCrafts(state: GameState): boolean {
+  const chapter = state.onboarding;
+  if (chapter.status !== 'active') return false;
+  let changed = false;
+  if ((state.questProgress.crafted['wooden-axe'] ?? 0) > 0 && completeOpeningMilestone(state, 'craft-axe')) changed = true;
+  if (chapter.completedMilestoneIds.includes('craft-axe') && !state.unlockedItemIds.includes('taming-snare')
+    && !chapter.completedMilestoneIds.includes('befriend-tuftle')) {
+    learnBlueprint(state, 'taming-snare');
+    changed = true;
+  }
+  if ((state.questProgress.crafted['taming-snare'] ?? 0) > 0 && completeOpeningMilestone(state, 'craft-snare')) changed = true;
+  return changed;
+}
+
 /** Called only after real bonus fiber has been awarded by a harvest. */
 export function recordOpeningGatherAssistance(state: GameState, creatureId: string, bonusUnits: number): boolean {
   const chapter = state.onboarding;

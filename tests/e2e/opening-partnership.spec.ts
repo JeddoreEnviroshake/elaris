@@ -3,6 +3,8 @@ import type { GameState } from '../../src/simulation/state';
 import { openApp, reloadApp } from './app';
 import { releaseSaveWriter, readSavedState } from './save';
 import { openMenuTab } from './menu';
+import { createInitialState } from '../../src/simulation/state';
+import { prepareOpeningTaming } from '../helpers/openingJourney';
 
 test.setTimeout(60_000);
 
@@ -35,13 +37,46 @@ async function addToHotbar(page: Page, label: string) {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 }
 
-test('3D opening teaches berry-then-snare from the hotbar and persists the partnership', async ({ page, isMobile }, testInfo) => {
+/** A fresh world whose player has already picked berries and crafted an axe and a snare. */
+async function loadPreparedWorld(page: Page) {
   await openApp(page, 'render=3d');
   await expect(page.locator('#elaris-three-canvas')).toBeVisible();
+  await expect.poll(async () => Boolean(await saved(page))).toBe(true);
+  const fixture = createInitialState(42);
+  prepareOpeningTaming(fixture);
+  await releaseSaveWriter(page);
+  await page.evaluate(async (state) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(document.documentElement.dataset.worldDatabase ?? 'elaris:default', 1);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite'); const store = tx.objectStore('snapshots'); const request = store.get('current');
+      request.onsuccess = () => {
+        const current = request.result as { meta: Record<string, unknown> };
+        store.put({ meta: { ...current.meta, savedAt: Date.now() }, state }, 'current');
+      };
+      tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
+    });
+  }, fixture);
+  await reloadApp(page);
+  await expect(page.locator('#elaris-three-canvas')).toBeVisible();
+}
+
+test('the Tuftle waits until the player has foraged and crafted a snare', async ({ page }) => {
+  await openApp(page, 'render=3d');
+  await approachTuftle(page);
+  await page.keyboard.press('e');
+  await expect(page.getByText('Too nervous for now', { exact: false }).first()).toBeVisible();
+  expect((await saved(page))?.onboarding.completedMilestoneIds ?? []).not.toContain('meet-tuftle');
+});
+
+test('3D opening teaches berry-then-snare from the hotbar and persists the partnership', async ({ page, isMobile }, testInfo) => {
+  await loadPreparedWorld(page);
   await approachTuftle(page);
   if (isMobile) await page.getByRole('button', { name: 'Help Tuftle', exact: true }).tap();
   else await page.keyboard.press('e');
-  // No dialog: the basket hands over a berry and a snare, and the hint says what to do with them.
+  // No dialog: the hint says to put the berry and snare the player made on the hotbar.
   await expect(page.getByTestId('opening-partnership')).toBeHidden();
   await expect.poll(async () => (await saved(page))?.onboarding.completedMilestoneIds.includes('meet-tuftle')).toBe(true);
   const before = (await saved(page))!;
@@ -78,7 +113,7 @@ test('3D opening teaches berry-then-snare from the hotbar and persists the partn
   expect(state.ownedCreatures.filter((creature) => creature.speciesId === 'tuftle')).toHaveLength(1);
   expect(state.ownedCreatures.find((creature) => creature.id === state.onboarding.companionId)).toMatchObject({ name: 'Moss', role: 'follow' });
   expect(state.wildCreatures.some((creature) => creature.id === state.onboarding.starterWildCreatureId)).toBe(false);
-  // The basket paid for the lesson: one berry and one snare in, one of each spent.
+  // The lesson spends one berry and the one snare the player crafted.
   expect(state.inventory.berry).toBe(before.inventory.berry - 1);
   expect(state.inventory['taming-snare']).toBe(before.inventory['taming-snare'] - 1);
 });

@@ -288,6 +288,7 @@ export class GameplayHud {
   private battleMode = false;
   private tameTarget: WildCreatureState | null = null;
   private buildMode = false;
+  private firstPersonLayout = false;
   /** Presentation-only: the scene reads it each frame to build the move intent. */
   private sprintEnabled = false;
   /** Presentation-only: the scene reads it each frame to repeat the shot. */
@@ -1103,6 +1104,19 @@ export class GameplayHud {
     if (active) this.target.style.display = 'none';
   }
 
+  /**
+   * First person docks the target banner under the crosshair's name callout,
+   * so "Tuftle" and "Tame 47% · Fed +20" read as one stack where the eye
+   * already rests; overhead it goes back above the hotbar.
+   */
+  setFirstPersonLayout(active: boolean): void {
+    if (this.firstPersonLayout === active) return;
+    this.firstPersonLayout = active;
+    Object.assign(this.target.style, active
+      ? { top: 'calc(50% + 38px)', bottom: '', pointerEvents: 'none', zIndex: '9' }
+      : { top: '', bottom: 'calc(env(safe-area-inset-bottom) + 72px)', pointerEvents: '', zIndex: '' });
+  }
+
   private refreshThumbControls(): void {
     const hidden = this.battleMode || this.buildMode;
     this.sprintButton.style.display = hidden ? 'none' : 'block';
@@ -1315,6 +1329,8 @@ export class GameplayHud {
     targetNode: ResourceNodeState | null,
     targetDrop: GroundDropState | null = null,
     targetCreature: WildCreatureState | null = null,
+    lockedTarget: ResolvedCombatTarget | null = null,
+    tameTarget: WildCreatureState | null = null,
   ): void {
     const player = this.state.player;
     this.refreshVitalBar(
@@ -1446,7 +1462,7 @@ export class GameplayHud {
     this.progressionGuide.refresh();
     this.questCelebration.sync();
     this.blueprintCelebration.sync();
-    this.refreshTargets(targetNode, targetDrop, targetCreature);
+    this.refreshTargets(targetNode, targetDrop, targetCreature, lockedTarget, tameTarget);
     this.refreshCreatures();
     this.refreshStats();
   }

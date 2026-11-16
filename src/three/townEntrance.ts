@@ -193,7 +193,6 @@ export class TownEntrance {
     const deck: ModelPlacement[] = [];
     const rails: ModelPlacement[] = [];
     const foam: ModelPlacement[] = [];
-    const paving: ModelPlacement[] = [];
     const approachStones: ModelPlacement[] = [];
     const isWater = (x: number, z: number) => ['shallow-water', 'deep-water'].includes(terrainAt(this.state.seed, this.state.currentArea, x, z));
     const isBridge = (x: number, z: number) => terrainAt(this.state.seed, this.state.currentArea, x, z) === 'bridge';
@@ -226,12 +225,6 @@ export class TownEntrance {
     // Source floor is 2m wide and .02m high: normalize to an exact 1m tile.
     void this.batch('entrance.deck', deck, .0101);
     void this.batch('entrance.railing', rails, .4);
-    // Textured brick apron follows the existing forge access path exactly.
-    for (let z = 79; z <= 83; z++) for (let x = 73; x <= 78; x++) {
-      if (isRoadPosition('0,0',x+.5,z+.5)
-        && terrainAt(this.state.seed,this.state.currentArea,x,z)==='ground') paving.push({x:x+.5,y:.002,z:z+.5});
-    }
-    void this.batch('entrance.paving',paving,.0101);
     void this.batch('entrance.path-stone',approachStones,.06);
     if (foam.length) {
       const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(.9, .065),
@@ -294,10 +287,7 @@ export class TownEntrance {
       add('entrance.chimney',1.9,2.65,-.75,2.8);
     }
     add('entrance.vine',-width/2-.08,.3,.55,1.7,-Math.PI/2);
-    add('entrance.crate',-2.5,0,depth/2+.33,.52);
-    add('entrance.crate',-2.45,.52,depth/2+.33,.4,.25);
     add('entrance.wagon',-1.45,0,-depth/2-.7,.95,Math.PI/2);
-    add('town.blade-sign',-1.8,1.65,depth/2+.22,1,Math.PI/2);
     const doorAlong = shell.door.along - shell.tilesWide / 2;
     add('town.lantern',doorAlong+1.05,1.62,depth/2+.25,.6);
     // The foundation's top is flush with the room floor.

@@ -10,9 +10,10 @@ import { newWildCreature } from '../../src/simulation/worldGeneration';
 import { createInitialState, type GameState, type SpeciesId, type WildCreatureState } from '../../src/simulation/state';
 import { canonicalizeGameState } from '../../src/simulation/determinism';
 import { migrateToCurrent } from '../../src/persistence/migrations';
-import { CONTENT_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
+import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
+import { prepareOpeningTaming } from '../helpers/openingJourney';
 import {
-  TAME_CHANCE_MAX_BPS, TAME_CHANCE_MIN_BPS, TAME_EATING_TICKS, TAME_PITY_PER_MISS_BPS, TAME_STAGGER_TICKS,
+  TAME_CHANCE_MAX_BPS, TAME_CHANCE_MIN_BPS, TAME_PITY_PER_MISS_BPS, TAME_STAGGER_TICKS,
 } from '../../src/config/balance';
 
 /** A clean field with one creature beside the player, away from town and the opening fixture. */
@@ -37,10 +38,8 @@ describe('tame chance', () => {
 
   it('pays off when the player does the work: fed, worn down, staggered, unnoticed', () => {
     const { state, wild } = field('mistmoth');
-    state.inventory.fiber = 2;
-    expect(offerToCreature(state, wild.id).ok).toBe(true);
-    wild.eatingUntilTick = 0;
-    expect(offerToCreature(state, wild.id).ok).toBe(true);
+    state.inventory.fiber = 3;
+    for (let offer = 0; offer < 3; offer++) expect(offerToCreature(state, wild.id).ok).toBe(true);
     damageWildCreature(state, wild, wild.hp - Math.floor(wild.maxHp / 4));
     expect(tameChance(state, wild).chanceBps).toBeGreaterThanOrEqual(8_500);
   });
@@ -97,17 +96,20 @@ describe('stagger', () => {
 describe('offering food', () => {
   it('prefers the favourite, calms the creature, and caps what food alone can do', () => {
     const { state, wild } = field('masonmole');
-    state.inventory.stone = 5; state.inventory.berry = 5;
+    state.inventory.stone = 2; state.inventory.berry = 5;
     wild.aggroUntilTick = state.tick + 600;
     expect(offerToCreature(state, wild.id).message).toContain('loves it');
-    expect(state.inventory.stone).toBe(4);
+    expect(state.inventory.stone).toBe(1);
     expect(state.inventory.berry).toBe(5);
     expect(isEating(state, wild)).toBe(true);
     expect(isHeldInPlace(state, wild)).toBe(true);
     expect(wild.aggroUntilTick).toBe(0);
-    expect(offerBlockedReason(state, wild.id)).toBe('It is still eating');
-    for (let i = 0; i < 5; i++) { state.tick += TAME_EATING_TICKS; offerToCreature(state, wild.id); }
-    expect(wild.captureBonusBps).toBe(5_000);
+    // Offers stack, even mid-meal, up to the species' food cap.
+    expect(offerToCreature(state, wild.id).ok).toBe(true);
+    expect(wild.captureBonusBps).toBe(2_400);
+    state.inventory.stone = 10;
+    for (let i = 0; i < 6; i++) offerToCreature(state, wild.id);
+    expect(wild.captureBonusBps).toBe(6_000);
     expect(offerBlockedReason(state, wild.id)).toBe('It has eaten its fill');
   });
 
@@ -115,7 +117,7 @@ describe('offering food', () => {
     const { state, wild } = field('glade-stag');
     state.inventory.fiber = 0; state.inventory.berry = 1;
     offerToCreature(state, wild.id);
-    expect(wild.captureBonusBps).toBe(500);
+    expect(wild.captureBonusBps).toBe(400);
     const other = field('glade-stag');
     other.state.inventory.fiber = 1;
     other.wild.fleeUntilTick = other.state.tick + 100;
@@ -210,7 +212,7 @@ describe('v92 migration', () => {
     if (raw.state.onboarding.supplyRun) Object.assign(raw.state.onboarding.supplyRun, { guardianStarted: false, guardianDefeated: false, guardedDamage: 0 });
     raw.state.wildCreatures.push({ ...raw.state.wildCreatures[0], id: `opening-guardian-${state.seed}` });
     const migrated = migrateToCurrent(raw).save;
-    expect(migrated.meta).toMatchObject({ saveVersion: 92, contentVersion: CONTENT_VERSION });
+    expect(migrated.meta).toMatchObject({ saveVersion: SAVE_SCHEMA_VERSION, contentVersion: CONTENT_VERSION });
     expect('activeEncounter' in migrated.state).toBe(false);
     expect('trustSession' in migrated.state.onboarding).toBe(false);
     expect(migrated.state.wildCreatures).toHaveLength(1);
@@ -268,18 +270,29 @@ describe('hotbar items', () => {
     expect(useHotbarItem(state, 'berry', aim(0, 1)).message).toBe('No creature close enough to feed');
   });
 
-  it('teaches the tutorial with the same controls: berry, then snare, from the bag the basket filled', () => {
+  it('teaches the tutorial with the same controls: the berry, then the snare the player crafted', () => {
     const state = createInitialState(42);
     Object.assign(state.player, STARTER_TUFTLE_POSITION);
     state.player.x -= 16;
     const before = structuredClone(state.inventory);
+    prepareOpeningTaming(state);
     expect(beginOpeningTrust(state).ok).toBe(true);
-    expect(state.inventory.berry).toBe(before.berry + 1);
-    expect(state.inventory['taming-snare']).toBe(before['taming-snare'] + 1);
     expect(useHotbarItem(state, 'taming-snare', aim(1, 0)).ok).toBe(false);
     expect(useHotbarItem(state, 'berry', aim(1, 0))).toMatchObject({ ok: true, fed: true });
     expect(useHotbarItem(state, 'taming-snare', aim(1, 0))).toMatchObject({ ok: true, tamed: true });
     expect(state.ownedCreatures.map((creature) => creature.speciesId)).toEqual(['tuftle']);
     expect(state.inventory).toEqual(before);
+  });
+});
+
+describe('v93 migration', () => {
+  it('credits the new foraging and crafting steps to anyone already past the Tuftle', () => {
+    const met = createInitialState(42);
+    met.onboarding.completedMilestoneIds = ['meet-tuftle'];
+    const fresh = createInitialState(43);
+    const envelope = (state: GameState) => JSON.parse(JSON.stringify({ meta: { saveVersion: 92, contentVersion: 70, worldGenVersion: WORLD_GEN_VERSION, appVersion: 'test', savedAt: 1 }, state }));
+    const migrated = migrateToCurrent(envelope(met)).save.state.onboarding.completedMilestoneIds;
+    expect(migrated).toEqual(['pick-berries', 'craft-axe', 'craft-snare', 'meet-tuftle']);
+    expect(migrateToCurrent(envelope(fresh)).save.state.onboarding.completedMilestoneIds).toEqual([]);
   });
 });

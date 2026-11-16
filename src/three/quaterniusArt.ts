@@ -304,8 +304,12 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
   } else if (building.id === 'tavern') {
     add('town.banner-red',-width*.26,1.3,-depth/2-.12,1.1,Math.PI/2);
   } else if (building.id === 'armoury') {
-    add('town.blade-sign',width*.28,1.3,depth/2+.15,1,Math.PI/2);
-    add('town.banner-red',-width*.3,1.2,depth/2+.14,1.2,Math.PI/2);
+    // Elaris's shield display and facade plaque identify the armoury; field
+    // copies retain their original dressing.
+    if (building.areaKey !== '0,0') {
+      add('town.blade-sign',width*.28,1.3,depth/2+.15,1,Math.PI/2);
+      add('town.banner-red',-width*.3,1.2,depth/2+.14,1.2,Math.PI/2);
+    }
   }
   add('detail.vine',-width/2-.05,.15,depth*.12,1.4,-Math.PI/2);
   const built = ruined ? pieces.filter((piece) => !ROOF_KEYS.has(piece.key)) : pieces;
@@ -318,21 +322,7 @@ export async function buildStyledSettlement(art: QuaterniusArt, root: THREE.Grou
   for (const lining of linings) lining.traverse(child => {
     if (child instanceof THREE.Mesh && child.material instanceof THREE.Material && !materials.includes(child.material)) materials.push(child.material);
   });
-  const windows=built.filter(piece=>piece.key==='entrance.wall-window');
-  if(windows.length) {
-    const glazing=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),
-      new THREE.MeshBasicMaterial({color:building.id==='church'?0x90b8c5:building.id==='magic-shop'?0xb5a7d9:0xd9bb7a,
-        side:THREE.DoubleSide,transparent:true,opacity:.8}),windows.length);
-    glazing.name='settlement.window-glass';
-    const transform=new THREE.Object3D();
-    windows.forEach((window,i)=>{
-      const angle=window.rotation??0;
-      transform.position.set(window.x+Math.sin(angle)*.09,window.y+(window.height??2.4)*.54,window.z+Math.cos(angle)*.09);
-      transform.rotation.set(0,angle,0);transform.scale.set((window.width??1.6)*.4,(window.height??2.4)*.34,1);
-      transform.updateMatrix();glazing.setMatrixAt(i,transform.matrix);
-    });
-    root.add(glazing);materials.push(glazing.material);
-  }
+  // Window openings stay unglazed so you can see into the rooms from outside.
   if (ruined) {
     // Broken walls at two-thirds height: a ruin is open to the sky.
     root.scale.y=.62;

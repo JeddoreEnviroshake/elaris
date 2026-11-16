@@ -54,7 +54,7 @@ import {
 import { recordRegionalGather } from './regionalProgress';
 import { advanceWorkerProduction, assignCreatureHousing, availableHousing } from './workerHousing';
 import { creatureWorksiteOperationGate, activeFollowerGatherAssistance } from './creatureRoles';
-import { recordOpeningGatherAssistance } from './onboardingProgress';
+import { recordOpeningBerryPick, recordOpeningGatherAssistance } from './onboardingProgress';
 import { isCreatureAway } from './expeditions';
 import { liveSiteBlockingRect, SITE_HALF_TILES } from './sites';
 import { leveledMaxHp } from './facilityLevels';
@@ -1077,6 +1077,7 @@ function gatherNode(state: GameState, node: ResourceNodeState | null): CommandRe
   const regional = recordRegionalGather(state, drop.resource, awardedYield);
   const berries = drop.berryYield * (doubled ? 2 : 1);
   if (berries > 0 && !tryAddResource(state, 'berry', berries)) addGroundDrop(state, 'berry', berries, node.x, node.y);
+  if (berries > 0) recordOpeningBerryPick(state);
   grantXp(state, 10);
   const dropped = !tryAddResource(state, drop.resource, awardedYield);
   if (dropped) addGroundDrop(state, drop.resource, awardedYield, node.x, node.y);

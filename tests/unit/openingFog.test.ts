@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { befriendOpeningTuftle } from '../helpers/openingJourney';
 import { OPENING_CHAPTER_VERSION, createOpeningChapter, createOpeningThreat, OPENING_FOG_PREPARATION_SECONDS, OPENING_FOG_SECONDS } from '../../src/content/onboarding';
 import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
 import { TILE_SIZE, WORLD_PX } from '../../src/config/platform';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, shelterChecklist, shelterLayout } from '../../src/simulation/openingShelter';
 import { placeBuildBatch } from '../../src/simulation/batchBuilding';
@@ -26,8 +26,7 @@ function envelope(state: GameState, version = SAVE_SCHEMA_VERSION) {
 function readyShelter() {
   const state = createInitialState(42);
   state.player.x = 82 * TILE_SIZE; state.player.y = 82 * TILE_SIZE;
-  beginOpeningTrust(state);
-  offerOpeningTuftle(state); throwOpeningSnare(state);
+  befriendOpeningTuftle(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1);
   reconcileOpeningShelter(state);
   const site = state.onboarding.shelterPlan!;

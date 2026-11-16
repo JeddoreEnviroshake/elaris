@@ -1,4 +1,7 @@
-import { createInitialState } from '../../src/simulation/state';
+import { createInitialState, type GameState } from '../../src/simulation/state';
+import { completeOpeningMilestone } from '../../src/simulation/onboardingProgress';
+import { learnBlueprint } from '../../src/simulation/blueprintKnowledge';
+import { tryAddResource } from '../../src/simulation/gameplayCommands';
 import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, shelterLayout } from '../../src/simulation/openingShelter';
@@ -11,11 +14,30 @@ import { claimAllBlueprintGrants } from '../../src/simulation/blueprintGrants';
 import { recoverOpeningSupplies } from '../../src/simulation/openingSupplyRun';
 import { elarisPublicWorkbenchCenterPx } from '../../src/simulation/elarisWorkbench';
 
+/**
+ * The opening's foraging and crafting steps, done the quick way: credit the
+ * berry, axe and snare lessons and hand over one berry and one snare. Tests
+ * that start from a befriended Tuftle use this so their inventories still
+ * come out unchanged once the berry and snare are spent.
+ */
+export function prepareOpeningTaming(state: GameState): void {
+  for (const id of ['pick-berries', 'craft-axe', 'craft-snare'] as const) completeOpeningMilestone(state, id);
+  learnBlueprint(state, 'taming-snare');
+  tryAddResource(state, 'berry', 1);
+  tryAddResource(state, 'taming-snare', 1);
+}
+
+/** Prepare, then tame the roadside Tuftle exactly as a player does. */
+export function befriendOpeningTuftle(state: GameState): void {
+  prepareOpeningTaming(state);
+  beginOpeningTrust(state); offerOpeningTuftle(state); throwOpeningSnare(state);
+}
+
 /** A real prior-phase journey shared by simulation and browser acceptance checks. */
 export function readySupplyRun(seed = 42) {
   const state = createInitialState(seed);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
-  beginOpeningTrust(state); offerOpeningTuftle(state); throwOpeningSnare(state);
+  befriendOpeningTuftle(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1); reconcileOpeningShelter(state);
   const home = state.onboarding.shelterPlan!;
   state.player.x = (home.tileX + 1.5) * 16; state.player.y = (home.tileY + 3) * 16;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { befriendOpeningTuftle } from '../helpers/openingJourney';
 import { createInitialState } from '../../src/simulation/state';
-import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { starterGroveAnchor } from '../../src/simulation/worldGeneration';
 import { followerCreaturePlacements, followerRadiusTiles } from '../../src/presentation/followerCreatures';
 import { doorSwingTarget } from '../../src/three/doorPresentation';
@@ -8,8 +8,7 @@ import { doorSwingTarget } from '../../src/three/doorPresentation';
 function party() {
   const state = createInitialState(42);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
-  beginOpeningTrust(state);
-  offerOpeningTuftle(state); throwOpeningSnare(state);
+  befriendOpeningTuftle(state);
   Object.assign(state.player, starterGroveAnchor(state.seed));
   return state;
 }

@@ -1,13 +1,14 @@
 import { releaseSaveWriter } from './save';
+import { befriendOpeningTuftle } from '../helpers/openingJourney';
 import { expect, test } from '@playwright/test';
 import { openApp, waitForDebugHandles, reloadApp } from './app';
 import { openAdmin, openBuildPalette, grantBlueprints } from './menu';
 import { createInitialState } from '../../src/simulation/state';
-import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { findShelterSite } from '../../src/simulation/openingShelter';
 import { createOpeningChapter } from '../../src/content/onboarding';
 import { isResourceClearOfRoad } from '../../src/content/roads';
 import { terrainWithoutBridgesAt } from '../../src/simulation/landscape';
+import { isElarisStoneStreetTile } from '../../src/three/elarisTownArt';
 import type { GameState } from '../../src/simulation/state';
 import { storageBoxContents } from '../../src/simulation/storageBox';
 
@@ -45,12 +46,19 @@ test('3D roads stay clear and bridges cover the road only over water after a sav
     const tiles = (name: string) => { const mesh = renderer.worldRoot.getObjectByName(name); return Array.from({ length: mesh?.count ?? 0 }, (_, index) => { mesh!.getMatrixAt(index, matrix); return `${Math.floor(matrix.elements[12]!)},${Math.floor(matrix.elements[14]!)}`; }); };
     return { state: globals.__game.scene.getScene('world').state, bridges: tiles('landscape.bridge'), roads: tiles('landscape.road'), scenicBridge: !!renderer.worldRoot.getObjectByName('landmark.stream-bridge') };
   });
-  expect(result.scenicBridge).toBe(false); expect(result.roads.length).toBeGreaterThan(500); expect(result.bridges.length).toBeGreaterThan(0);
+  expect(result.scenicBridge).toBe(false); expect(result.bridges.length).toBeGreaterThan(0);
+  // Streets inside Elaris's gates are stone paving, drawn by their own batch,
+  // so they are counted beside the dirt road rather than inside it.
+  let paved = 0;
+  for (let y = 0; y < 160; y++) for (let x = 0; x < 160; x++) if (isElarisStoneStreetTile('0,0', x, y)) paved++;
+  expect(paved).toBeGreaterThan(0);
+  expect(result.roads.length + paved).toBeGreaterThan(500);
   expect(result.state.resourceNodes.every((node) => isResourceClearOfRoad('0,0', node))).toBe(true);
   expect(result.state.resourceNodes.some((node) => node.id === 'old-road-tree' || node.id === 'old-road-rock')).toBe(false);
   expect(result.state.inventory.wood).toBe(17); expect(result.state.buildings.find((building) => building.id === 'player-road-box')!.storage!.wood).toBe(12);
   for (const key of result.bridges) { const [x, y] = key.split(',').map(Number); expect(['shallow-water', 'deep-water']).toContain(terrainWithoutBridgesAt(42, result.state.currentArea, x!, y!)); }
   for (let y = 83; y <= 86; y++) for (let x = 0; x < 160; x++) {
+    if (isElarisStoneStreetTile('0,0', x, y)) continue;
     const base = terrainWithoutBridgesAt(42, result.state.currentArea, x, y);
     expect(base === 'shallow-water' || base === 'deep-water' ? result.bridges : result.roads).toContain(`${x},${y}`);
   }
@@ -78,8 +86,7 @@ test('3D world draws an owned Tuftle follower and removes it when resting', asyn
   await waitForDebugHandles(page);
   const fixture = createInitialState(42);
   fixture.player.x = 82 * 16; fixture.player.y = 82 * 16;
-  beginOpeningTrust(fixture);
-  offerOpeningTuftle(fixture); throwOpeningSnare(fixture);
+  befriendOpeningTuftle(fixture);
   await page.evaluate((creature) => {
     const game = (globalThis as unknown as { __game: { scene: { getScene: (key: string) => { state: { ownedCreatures: unknown[] } } } } }).__game;
     game.scene.getScene('world').state.ownedCreatures.push(creature);

@@ -2264,6 +2264,24 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
       },
     };
   },
+  // v92 -> v93: the opening chapter starts with foraging and crafting (pick
+  // berries, craft a Wooden Axe, craft a Taming Snare) before the Tuftle.
+  // Anyone already past the Tuftle introduction, or finished with the chapter,
+  // is credited the new steps so their progress reads as it did.
+  92: (raw) => {
+    const meta = asRecord(raw['meta']); const state = asRecord(raw['state']);
+    const chapter = asRecord(state['onboarding']);
+    const milestones = Array.isArray(chapter['completedMilestoneIds']) ? chapter['completedMilestoneIds'] as string[] : [];
+    const credit = chapter['status'] === 'complete' || milestones.includes('meet-tuftle');
+    const completedMilestoneIds = credit
+      ? [...['pick-berries', 'craft-axe', 'craft-snare'].filter((id) => !milestones.includes(id)), ...milestones]
+      : milestones;
+    return {
+      ...raw,
+      meta: { ...meta, saveVersion: 93, contentVersion: 71 },
+      state: { ...state, onboarding: { ...chapter, completedMilestoneIds } },
+    };
+  },
 };
 
 /**

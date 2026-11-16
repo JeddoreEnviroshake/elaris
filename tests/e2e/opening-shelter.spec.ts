@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
+import { befriendOpeningTuftle } from '../helpers/openingJourney';
 import { openApp, reloadApp } from './app';
 import { openMenuTab } from './menu';
 import { releaseSaveWriter, readSavedState } from './save';
 import { createInitialState, type GameState } from '../../src/simulation/state';
-import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare } from '../../src/simulation/onboarding';
 import { recordOpeningGatherAssistance } from '../../src/simulation/onboardingProgress';
 import { reconcileOpeningShelter, SHELTER_STAGE_LABELS } from '../../src/simulation/openingShelter';
 
@@ -16,8 +16,7 @@ async function loadBuilder(page: Page) {
   await expect.poll(() => readSavedState(page)).not.toBeNull();
   const state = createInitialState(42);
   state.player.x = 82 * 16; state.player.y = 82 * 16;
-  beginOpeningTrust(state);
-  offerOpeningTuftle(state); throwOpeningSnare(state);
+  befriendOpeningTuftle(state);
   recordOpeningGatherAssistance(state, state.onboarding.companionId!, 1);
   reconcileOpeningShelter(state);
   const site = state.onboarding.shelterPlan!;

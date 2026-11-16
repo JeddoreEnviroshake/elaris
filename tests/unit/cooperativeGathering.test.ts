@@ -1,10 +1,11 @@
 import { OPENING_CHAPTER_VERSION } from '../../src/content/onboarding';
+import { befriendOpeningTuftle, prepareOpeningTaming } from '../helpers/openingJourney';
 import { describe, expect, it } from 'vitest';
 import { CONTENT_VERSION, SAVE_SCHEMA_VERSION, WORLD_GEN_VERSION } from '../../src/config/versions';
 import { RESOURCE_STACK_SIZE } from '../../src/config/balance';
 import { OPENING_SHELTER_BLUEPRINTS, createOpeningChapter } from '../../src/content/onboarding';
 import { createInitialState, type GameState, type ResourceNodeState } from '../../src/simulation/state';
-import { beginOpeningTrust, offerOpeningTuftle, throwOpeningSnare, reconcileOpeningChapter } from '../../src/simulation/onboarding';
+import { beginOpeningTrust, offerOpeningTuftle, reconcileOpeningChapter } from '../../src/simulation/onboarding';
 import { activeQuest } from '../../src/simulation/progression';
 import { gatherNearest } from '../../src/simulation/gameplayCommands';
 import { inventoryCapacity } from '../../src/simulation/characterProgression';
@@ -21,8 +22,7 @@ function partnered() {
   const state = createInitialState(42);
   state.player.x = 82 * 16;
   state.player.y = 82 * 16;
-  beginOpeningTrust(state);
-  offerOpeningTuftle(state); throwOpeningSnare(state);
+  befriendOpeningTuftle(state);
   Object.assign(state.player, starterGroveAnchor(state.seed));
   state.gameBalance.objects.plant.yieldMin = 1;
   state.gameBalance.objects.plant.yieldMax = 1;
@@ -148,7 +148,7 @@ describe('cooperative fiber gathering', () => {
   it('preserves a fed opening Tuftle and keeps legacy worlds opted out', () => {
     const state = createInitialState(7);
     state.player.x = 82 * 16; state.player.y = 82 * 16;
-    beginOpeningTrust(state); offerOpeningTuftle(state);
+    prepareOpeningTaming(state); beginOpeningTrust(state); offerOpeningTuftle(state);
     state.onboarding.version = 1;
     const loaded = migrateToCurrent(save(state, 82)).save.state;
     const fixture = (wild: { id: string }) => wild.id === state.onboarding.starterWildCreatureId;

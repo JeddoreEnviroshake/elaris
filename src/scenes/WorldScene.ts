@@ -892,6 +892,7 @@ export class WorldScene extends Phaser.Scene {
     if (active !== this.wasFirstPerson) this.entityActivationDirty = true;
     this.wasFirstPerson = active;
     firstPersonView.active = active;
+    this.hud.setFirstPersonLayout(active);
     // Keyboard fallback for desktop: E is the action key, so the arrows turn.
     // The turn is applied directly from the held key, with no easing.
     if (active && !inputBlocked && this.altKeys) {
@@ -912,12 +913,9 @@ export class WorldScene extends Phaser.Scene {
       groundForward(firstPersonView.look.yawDegrees),
       this.crosshairCandidates(),
     );
+    // The HUD banner follows this through hudTargets(); writing it here as well
+    // made two writers disagree every HUD refresh, and the banner flashed.
     this.crosshairTarget = target;
-    if (target?.kind === 'resource') {
-      const node = this.resourceNodesById.get(target.id) ?? null;
-      this.hud.setContextActionOverride(null);
-      this.hud.refreshTargets(node, null, null, resolveCombatTarget(this.state, { kind: 'resource', id: target.id }, 'melee'));
-    }
     if (target && target.kind !== 'raider' && target.kind !== 'building') {
       this.presentationTarget = { kind: target.kind, id: target.id, x: target.x, y: target.y, label: target.label };
     } else if (target) {
@@ -2251,8 +2249,8 @@ export class WorldScene extends Phaser.Scene {
       }
       this.onCriticalChanged();
     }
-    const nearby = this.findNearbyTargets();
-    this.hud.refresh(nearby.node, nearby.node ? null : nearby.drop, nearby.creature);
+    const targets = this.hudTargets(this.findNearbyTargets());
+    this.hud.refresh(targets.node, targets.drop, targets.creature, targets.locked, targets.tame);
     this.buildMenu.refreshAffordability();
     this.hotbar.refresh();
     this.inventoryPanel.refresh();
@@ -2350,17 +2348,59 @@ export class WorldScene extends Phaser.Scene {
     return values;
   }
 
+  /**
+   * What the HUD's target banner and action button describe. Overhead that is
+   * the nearest thing in reach; in first person it is what sits under the
+   * crosshair, because that is what the action button will hit. Every HUD
+   * writer goes through here so the banner never alternates between answers.
+   */
+  private hudTargets(nearby: NearbyTargets): {
+    node: ResourceNodeState | null;
+    drop: GroundDropState | null;
+    creature: WildCreatureState | null;
+    locked: ResolvedCombatTarget | null;
+    tame: WildCreatureState | null;
+  } {
+    const tame = this.tameCandidate();
+    if (!firstPersonView.active) {
+      return {
+        node: nearby.node,
+        drop: nearby.node ? null : nearby.drop,
+        creature: nearby.creature,
+        locked: this.resolveStickyTarget(),
+        tame,
+      };
+    }
+    const aim = this.crosshairTarget;
+    const node = aim?.kind === 'resource' ? this.resourceNodesById.get(aim.id) ?? null : null;
+    return {
+      node,
+      drop: aim?.kind === 'drop' ? this.dropsById.get(aim.id) ?? null : null,
+      creature: aim?.kind === 'creature' ? this.creaturesById.get(aim.id) ?? null : null,
+      locked: node
+        ? resolveCombatTarget(this.state, { kind: 'resource', id: node.id }, 'melee')
+        : this.resolveStickyTarget(),
+      tame,
+    };
+  }
+
   private updateTargetIndicators(): void {
     if (this.interiorSession.mode.kind !== 'world') {
       this.presentationTarget = null;
       this.hud.setContextActionOverride(null);
       return;
     }
-    const opening = nearbyOpeningTuftle(this.state);
+    // A resource under the first-person crosshair owns the action button, so
+    // no walk-up prompt (Tuftle, a hotspot, a site) talks over it.
+    const aimingAtResource = firstPersonView.active && this.crosshairTarget?.kind === 'resource';
+    const opening = aimingAtResource ? null : nearbyOpeningTuftle(this.state);
     if (opening && !this.buildMode.placing && !this.buildMode.deleteMode) {
-      this.hud.setContextActionOverride('Help Tuftle', this.state.onboarding.completedMilestoneIds.includes('meet-tuftle')
+      const done = this.state.onboarding.completedMilestoneIds;
+      this.hud.setContextActionOverride('Help Tuftle', done.includes('meet-tuftle')
         ? 'Hotbar: Berry first, then Snare'
-        : 'A nervous Tuftle waits by the road · E / Space');
+        : done.includes('craft-snare')
+          ? 'A nervous Tuftle waits by the road · E / Space'
+          : 'Too nervous for now · bring berries and a snare');
       this.presentationTarget = { kind: 'creature', id: opening.id, x: opening.x, y: opening.y, label: 'Help Tuftle' };
       return;
     }
@@ -2373,10 +2413,14 @@ export class WorldScene extends Phaser.Scene {
     const planter = nearby.planter;
     const townHotspot = nearby.hotspot;
     const siteAction = townHotspot ? null : this.siteContextAction();
-    this.hud.setContextActionOverride(
-      townHotspot ? townHotspotLabel(townHotspot.hotspot) : siteAction?.label ?? null,
-      townHotspot ? `${townHotspot.building.displayName} · E / Space` : siteAction?.hint ?? '',
-    );
+    if (aimingAtResource) {
+      this.hud.setContextActionOverride(null);
+    } else {
+      this.hud.setContextActionOverride(
+        townHotspot ? townHotspotLabel(townHotspot.hotspot) : siteAction?.label ?? null,
+        townHotspot ? `${townHotspot.building.displayName} · E / Space` : siteAction?.hint ?? '',
+      );
+    }
     this.presentationTarget = townHotspot
       ? {
           kind: 'town-hotspot', id: `${townHotspot.building.id}:${townHotspot.hotspot.id}`,
@@ -2414,21 +2458,21 @@ export class WorldScene extends Phaser.Scene {
                 : null;
     // The lock joins the cache key: its label and in-range state change as the
     // player walks, and a stale key would freeze the action button's wording.
-    const locked = this.resolveStickyTarget();
     // The snare button appears at taming range, which is shorter than any
     // attack reach, so the lock's own in-range flag cannot stand in for it.
     // The tame candidate's whole chance joins the key: hp, food, stagger and
     // noticing all move it, and the Snare button has to show the live number.
-    const tame = this.tameCandidate();
+    const hud = this.hudTargets(nearby);
+    const { locked, tame } = hud;
     const tameKey = tame
       ? `${tame.id}:${tameChance(this.state, tame).chanceBps}:${isEating(this.state, tame)}:${Math.round(tame.x / 8)}:${Math.round(tame.y / 8)}`
       : '';
-    const key = `${townHotspot?.hotspot.id ?? ''}|${target?.id ?? ''}|${target?.hp ?? ''}|${drop?.id ?? ''}|${creature?.id ?? ''}|${facility?.id ?? ''}`
+    const key = `${townHotspot?.hotspot.id ?? ''}|${hud.node?.id ?? ''}|${hud.node?.hp ?? ''}|${hud.drop?.id ?? ''}|${hud.creature?.id ?? ''}|${facility?.id ?? ''}`
       + `|${locked?.id ?? ''}|${locked?.inRange ?? ''}|${tameKey}|${this.state.inventory['taming-snare']}|${this.state.inventory['reinforced-snare']}|${this.state.inventory.berry}`;
     if (key === this.lastTargetKey) return;
     this.lastTargetKey = key;
 
-    this.hud.refreshTargets(target, drop, creature, locked, tame);
+    this.hud.refreshTargets(hud.node, hud.drop, hud.creature, locked, tame);
   }
 
   /**

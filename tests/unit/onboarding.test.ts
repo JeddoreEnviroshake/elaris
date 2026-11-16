@@ -10,6 +10,8 @@ import { acquireWildCreature } from '../../src/simulation/creatureAcquisition';
 import { strikeCreatureMelee } from '../../src/simulation/creatureStrike';
 import { throwSnareAtCreature } from '../../src/simulation/tameChance';
 import { advanceWildCreatures } from '../../src/simulation/creatureCombat';
+import { prepareOpeningTaming } from '../helpers/openingJourney';
+import { recordOpeningBerryPick } from '../../src/simulation/onboardingProgress';
 import { terrainAt } from '../../src/simulation/landscape';
 import { isTownFootprintWorldPosition } from '../../src/content/townBuildings';
 import { setCreatureRole } from '../../src/simulation/gameplayCommands';
@@ -25,6 +27,7 @@ function approach(seed = 42) {
   return state;
 }
 function befriend(state: GameState) {
+  prepareOpeningTaming(state);
   expect(beginOpeningTrust(state).ok).toBe(true);
   offerOpeningTuftle(state);
   expect(throwOpeningSnare(state).ok).toBe(true);
@@ -47,30 +50,49 @@ describe('opening chapter and early Tuftle partnership', () => {
 
   it('puts the partnership ahead of the ordinary quest guide without removing those quests', () => {
     const state = approach();
+    expect(activeQuest(state)?.id).toBe('opening-pick-berries');
+    expect(openingQuestViews(state).map((quest) => quest.complete)).toEqual(Array(16).fill(false));
+    expect(beginOpeningTrust(state).ok).toBe(false);
+    prepareOpeningTaming(state);
     expect(activeQuest(state)?.id).toBe('opening-meet-tuftle');
-    expect(openingQuestViews(state).map((quest) => quest.complete)).toEqual(Array(13).fill(false));
     expect(beginOpeningTrust(state).ok).toBe(true);
     expect(activeQuest(state)?.id).toBe('opening-befriend-tuftle');
     befriend(state);
-    expect(openingQuestViews(state).map((quest) => quest.complete)).toEqual([true, true, ...Array(11).fill(false)]);
+    expect(openingQuestViews(state).map((quest) => quest.complete)).toEqual([true, true, true, true, true, ...Array(11).fill(false)]);
     expect(activeQuest(state)?.id).toBe('opening-gather-together');
   });
 
-  it('requires proximity and has no snare, level, or bag prerequisite', () => {
+  it('waits for the foraging and crafting lessons, then spends the berry and snare the player made', () => {
     const state = createInitialState(42);
-    expect(beginOpeningTrust(state).ok).toBe(false);
     Object.assign(state.player, STARTER_TUFTLE_POSITION);
-    state.inventory.berry = 0;
     expect(state.unlockedItemIds).not.toContain('taming-snare');
+    expect(beginOpeningTrust(state).ok).toBe(false);
+    prepareOpeningTaming(state);
+    const berries = state.inventory.berry;
     expect(beginOpeningTrust(state).ok).toBe(true);
     expect(offerOpeningTuftle(state).ok).toBe(true);
-    expect(state.inventory.berry).toBe(0);
+    expect(state.inventory.berry).toBe(berries - 1);
     expect(throwOpeningSnare(state).ok).toBe(true);
     expect(state.inventory['taming-snare']).toBe(0);
   });
 
+  it('credits each foraging and crafting lesson from the real actions', () => {
+    const state = approach();
+    state.questProgress.crafted['taming-snare'] = 1;
+    reconcileOpeningChapter(state);
+    expect(activeOpeningMilestone(state)?.id).toBe('pick-berries');
+    expect(recordOpeningBerryPick(state)).toBe(true);
+    expect(activeOpeningMilestone(state)?.id).toBe('craft-axe');
+    state.questProgress.crafted['wooden-axe'] = 1;
+    reconcileOpeningChapter(state);
+    expect(state.unlockedItemIds).toContain('taming-snare');
+    reconcileOpeningChapter(state);
+    expect(activeOpeningMilestone(state)?.id).toBe('meet-tuftle');
+  });
+
   it('resumes a fed Tuftle from a save and reaches the same deterministic outcome', () => {
     const state = approach();
+    prepareOpeningTaming(state);
     beginOpeningTrust(state);
     offerOpeningTuftle(state);
     const saved = migrateToCurrent(JSON.parse(JSON.stringify(envelope(state)))).save.state;
@@ -85,6 +107,7 @@ describe('opening chapter and early Tuftle partnership', () => {
 
   it('allows mistakes and retries without consuming any irreplaceable resources', () => {
     const state = approach();
+    prepareOpeningTaming(state);
     const inventoryBefore = structuredClone(state.inventory);
     beginOpeningTrust(state);
     expect(throwOpeningSnare(state).ok).toBe(false);
@@ -92,8 +115,8 @@ describe('opening chapter and early Tuftle partnership', () => {
     expect(offerOpeningTuftle(state).ok).toBe(false);
     expect(state.onboarding.status).toBe('active');
     expect(state.ownedCreatures).toHaveLength(0);
-    befriend(state);
-    expect(state.inventory).toEqual(inventoryBefore);
+    expect(throwOpeningSnare(state).ok).toBe(true);
+    expect(state.inventory).toEqual({ ...inventoryBefore, berry: inventoryBefore.berry - 1, 'taming-snare': inventoryBefore['taming-snare'] - 1 });
   });
 
   it('creates exactly one normal, named follower and records the reward once', () => {
@@ -135,7 +158,7 @@ describe('opening chapter and early Tuftle partnership', () => {
   it('records early milestones idempotently, independently of UI or reward collection', () => {
     const state = approach();
     expect(completeOpeningMilestone(state, 'befriend-tuftle')).toBe(true);
-    expect(activeOpeningMilestone(state)?.id).toBe('meet-tuftle');
+    expect(activeOpeningMilestone(state)?.id).toBe('pick-berries');
     expect(completeOpeningMilestone(state, 'befriend-tuftle')).toBe(false);
     expect(state.onboarding.issuedRewardIds).toEqual([]);
   });
@@ -160,6 +183,7 @@ describe('opening chapter and early Tuftle partnership', () => {
 
   it('can leave, reload, and return to the same paused introduction', () => {
     const state = approach();
+    prepareOpeningTaming(state);
     beginOpeningTrust(state);
     offerOpeningTuftle(state);
     enterWorldArea(state, 1, 0);

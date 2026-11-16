@@ -213,6 +213,16 @@ uses them ([hotbarItems.ts](src/simulation/hotbarItems.ts)):
   hotbar. The berry has to come before the snare, the first throw always holds,
   and only the naming dialog is left.
 
+**Second revision (2026-11-16):**
+- **Offers stack.** A creature eats several offers in a row, even mid-meal, up
+  to its species' food cap: favourite +12%, berry +4%, caps of 36–60%.
+- **Taming is no longer the first lesson.** The opening chapter starts with
+  three steps: pick berries from a bush, craft a Wooden Axe, then craft a
+  Taming Snare. Crafting the axe teaches the snare recipe. The Tuftle won't
+  engage until the snare step is done, and the roadside basket is gone.
+- **Saves.** Save v93 credits these steps to anyone already past the Tuftle.
+- **Plants.** Harvestable plants render at berry-bush height.
+
 **Status (2026-11-16): built, not committed.** Save v92 / content v70. Notes on
 what differs from the steps above:
 - The new wild-creature fields (`staggerUntilTick`, `staggerSpent`,

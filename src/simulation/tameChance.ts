@@ -176,7 +176,6 @@ export function offerBlockedReason(state: GameState, creatureId: string, range =
   if (!wild || wild.hp <= 0) return 'Move closer to a wild creature';
   if (isOpeningTuftle(state, wild.id)) return 'Choose Help Tuftle to earn its trust.';
   if (distanceTo(state, wild) > range) return 'Move closer to offer food';
-  if (isEating(state, wild)) return 'It is still eating';
   if (wild.fleeUntilTick > state.tick) return 'It is too spooked to eat';
   if (wild.captureBonusBps >= gameCreatureDefinition(state, wild.speciesId).tame.foodCapBps) return 'It has eaten its fill';
   if (item !== undefined) {

@@ -25,6 +25,7 @@ import type { ModelAssetKey } from './assetRegistry';
 import { ModelLibrary } from './modelLibrary';
 import { ContactShadows, SceneFinish } from './sceneFinish';
 import { TownEntrance, disposePaintedGround, entranceRoadMaterial, meadowMaterial } from './townEntrance';
+import { addElarisEntranceArt, isElarisStoneStreetTile } from './elarisTownArt';
 import { QuaterniusArt, VegetationStream, buildStyledSettlement, settlementDoor, styledWaterMaterial, updateStyledWater } from './quaterniusArt';
 import type {
   BuildPlacementPresentation,
@@ -1044,9 +1045,15 @@ export class Elaris3DRenderer {
 
   private buildTownPaths(): void {
     const tiles: Array<{ x: number; y: number }> = [];
+    const paving: Array<{ x: number; y: number; z: number }> = [];
     for (let y = 0; y < WORLD_TILES; y++) for (let x = 0; x < WORLD_TILES; x++) {
-      if (isRoadTile(this.state.currentArea.key, x, y) && terrainAt(this.state.seed, this.state.currentArea, x, y) === 'ground') tiles.push({ x, y });
+      if (!isRoadTile(this.state.currentArea.key, x, y) || terrainAt(this.state.seed, this.state.currentArea, x, y) !== 'ground') continue;
+      if (isElarisStoneStreetTile(this.state.currentArea.key, x, y)) paving.push({ x: x + .5, y: .002, z: y + .5 });
+      else tiles.push({ x, y });
     }
+    // Reuse the forge's authored uneven brick at exactly one world tile per slab.
+    // One instanced batch covers the square and every street inside the gates.
+    void this.worldArt?.batch(this.worldRoot, 'entrance.paving', paving, .0101);
     if (!tiles.length) return;
     const mask=new Uint8Array(WORLD_TILES*WORLD_TILES);
     for(const {x,y} of tiles)mask[y*WORLD_TILES+x]=255;
@@ -1473,6 +1480,7 @@ export class Elaris3DRenderer {
     label.position.set(0, building.id === 'church' ? 8 : building.id === 'magic-shop' ? 8.7 : 5.5, 0);
     group.add(label);
     this.addTownRoom(building, ruined, group, cut, label);
+    addElarisEntranceArt(group, building, ruined, this.worldArt!);
   }
 
   /** Furnish a walk-in building's room in the world, inside its own walls. */
@@ -1575,6 +1583,7 @@ export class Elaris3DRenderer {
     label.position.set(0, 3.2, -radiusZ);
     group.add(label);
     this.addTownRoom(building, ruined, group, new THREE.Plane(new THREE.Vector3(0, -1, 0), TOWN_CUT_OPEN), label);
+    addElarisEntranceArt(group, building, ruined, this.worldArt!);
   }
 
   /**
@@ -1837,7 +1846,9 @@ export class Elaris3DRenderer {
         this.addOreCrystals(root);
         break;
       case 'plant':
-        this.addModel(root, 'entrance.fern', { x: 0, y: 0, z: 0 }, node.y * 0.01, 0.58);
+        // Berry-bush height, so a harvestable plant stands well clear of the
+        // smaller decorative ferns that share this model.
+        this.addModel(root, 'entrance.fern', { x: 0, y: 0, z: 0 }, node.y * 0.01, 0.88);
         break;
       case 'berry-bush':
         this.addModel(root, 'entrance.bush', { x: 0, y: 0, z: 0 }, node.y * 0.01, 0.88);
