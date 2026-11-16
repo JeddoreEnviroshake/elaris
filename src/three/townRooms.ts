@@ -86,6 +86,9 @@ export class TownRoom {
   private embers: { points: THREE.Points; bases: THREE.Vector3[]; rise: number } | null = null;
   private readonly motionTracker = new MotionTracker();
   private playerInside = false;
+  /** Whether furniture currently casts sun shadows; null until first applied. */
+  private furnitureShadows: boolean | null = null;
+  private shadowRefreshCountdown = 0;
 
   constructor(models: ModelLibrary, readonly building: TownBuildingDefinition, readonly ruined: boolean) {
     this.shell = townBuildingShell(building);
@@ -122,6 +125,7 @@ export class TownRoom {
     const visible = near && (this.playerInside || frame.firstPerson || atDoor || this.shell.kind === 'ring');
     this.root.visible = visible;
     if (!visible) return;
+    this.syncFurnitureShadows(this.shell.kind === 'ring' || (this.playerInside && !frame.firstPerson));
     const { timeMs, reducedMotion } = frame;
     const focused = this.interior?.hotspots.find((hotspot) => hotspot.id === frame.focusedHotspotId) ?? null;
 
@@ -189,6 +193,25 @@ export class TownRoom {
   }
 
   get isPlayerInside(): boolean { return this.playerInside; }
+
+  /**
+   * Under an intact roof the furniture's sun shadows fall inside the roof's
+   * own shadow and cannot be seen, yet each caster still costs a shadow-pass
+   * draw. They cast only while the room is open to the sky: the open-air
+   * arena, or overhead with the player inside and the roof cut away. Re-applied
+   * every second as well, so furniture whose model loads later is caught.
+   */
+  private syncFurnitureShadows(open: boolean): void {
+    this.shadowRefreshCountdown -= 1;
+    if (open === this.furnitureShadows && this.shadowRefreshCountdown > 0) return;
+    this.furnitureShadows = open;
+    this.shadowRefreshCountdown = 60;
+    this.root.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      if (child.userData.roomCastsShadow === undefined) child.userData.roomCastsShadow = child.castShadow;
+      child.castShadow = open && child.userData.roomCastsShadow === true;
+    });
+  }
 
   /** The keeper's head, for the renderer's single room light. */
   lightAnchor(): THREE.Vector3 {

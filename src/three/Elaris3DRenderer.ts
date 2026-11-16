@@ -1,3 +1,4 @@
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as THREE from 'three';
 import {MotionTracker,turnTowards,playerStride} from './animationMotion';
 import {creatureStride} from './creatureAnimation';
@@ -22,7 +23,7 @@ import type {
   SpeciesId,
 } from '../simulation/state';
 import type { ModelAssetKey } from './assetRegistry';
-import { ModelLibrary } from './modelLibrary';
+import { ModelLibrary, type ModelPlacement } from './modelLibrary';
 import { ContactShadows, SceneFinish } from './sceneFinish';
 import { TownEntrance, disposePaintedGround, entranceRoadMaterial, meadowMaterial } from './townEntrance';
 import { addElarisEntranceArt, isElarisStoneStreetTile } from './elarisTownArt';
@@ -1315,6 +1316,10 @@ export class Elaris3DRenderer {
 
   /** Permanent, indestructible perimeter and clean-air fixtures for Elaris. */
   private buildTownDefences(fallen = false): void {
+    // Every full two-space fence section is one instance of a single batch:
+    // drawn one model at a time, the ~80-section perimeter cost several draw
+    // calls each and dominated the town's frame budget.
+    const fullFences: ModelPlacement[] = [];
     TOWN_PERIMETER_SEGMENTS.forEach((segment, index) => {
       // Deterministic breaches in a fallen perimeter.
       if (fallen && index % 3 === 0) return;
@@ -1323,6 +1328,10 @@ export class Elaris3DRenderer {
       const rotationY = Math.atan2(-dz, dx);
       if (segment.kind === 'fence') {
         const length = Math.hypot(dx, dz);
+        if (Math.abs(length - 2) < 1e-6) {
+          fullFences.push({ x: (segment.start.x + segment.end.x) / 2, y: 0, z: (segment.start.y + segment.end.y) / 2, rotation: rotationY });
+          return;
+        }
         void this.addModel(
           this.worldRoot,
           'entrance.railing',
@@ -1353,6 +1362,7 @@ export class Elaris3DRenderer {
         cz: (segment.start.y + segment.end.y) / 2,
       });
     });
+    void this.worldArt?.batch(this.worldRoot, 'entrance.railing', fullFences, 0.92, undefined, true);
 
     // The town's public workbench, drawn from the same model a player-built one
     // uses. It survives the fall as scenery — a bench you can walk up to and
@@ -1553,28 +1563,32 @@ export class Elaris3DRenderer {
     }
     fenceAngles.push(gateAngle - gateHalf, gateAngle + gateHalf);
     fenceAngles.sort((left, right) => left - right);
+    // Posts and rails share one material, so they merge into a single mesh:
+    // ~80 separate boxes cost two draw calls each (colour and shadow).
+    const fenceParts: THREE.BufferGeometry[] = [];
     for (let i = 0; i < fenceAngles.length; i += 1) {
       const angle = fenceAngles[i]!;
       const at = point(angle);
       const gatePost = Math.abs(Math.abs(angle - gateAngle) - gateHalf) < 1e-6;
-      const post = new THREE.Mesh(new THREE.BoxGeometry(gatePost ? .34 : .26, gatePost ? 2.3 : 1.35, gatePost ? .34 : .26), railMaterial);
-      post.position.set(at.x, gatePost ? 1.15 : 0.68, at.z);
-      post.castShadow = true;
-      void this.worldArt?.surface(post, 'entrance.deck', .2);
-      group.add(post);
+      fenceParts.push(new THREE.BoxGeometry(gatePost ? .34 : .26, gatePost ? 2.3 : 1.35, gatePost ? .34 : .26)
+        .translate(at.x, gatePost ? 1.15 : 0.68, at.z));
       const nextAngle = fenceAngles[(i + 1) % fenceAngles.length]! + (i + 1 === fenceAngles.length ? Math.PI * 2 : 0);
       const middle = (angle + nextAngle) / 2;
       if (inGate(middle)) continue;
       const next = point(nextAngle);
       const span = next.clone().sub(at);
       for (const y of [0.55, 1.05]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(span.length(), 0.1, 0.09), railMaterial);
-        rail.position.set((at.x + next.x) / 2, y, (at.z + next.z) / 2);
-        rail.rotation.y = -Math.atan2(span.z, span.x);
-        rail.castShadow = true;
-        group.add(rail);
+        fenceParts.push(new THREE.BoxGeometry(span.length(), 0.1, 0.09)
+          .rotateY(-Math.atan2(span.z, span.x))
+          .translate((at.x + next.x) / 2, y, (at.z + next.z) / 2));
       }
     }
+    const fence = new THREE.Mesh(mergeGeometries(fenceParts, false)!, railMaterial);
+    for (const part of fenceParts) part.dispose();
+    fence.name = 'town.arena-fence';
+    fence.castShadow = true;
+    void this.worldArt?.surface(fence, 'entrance.deck', .2);
+    group.add(fence);
     if (ruined) applyRuinAppearance(group);
     group.name = 'town.arena';
     group.userData.visualStyle = 'quaternius';
